@@ -19,7 +19,7 @@ class SourceType(StrEnum):
 
 
 class ShipmentInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
     address_line: str | None = None
     postal_code: str | None = None
@@ -135,4 +135,3 @@ class AIQuoteContext(BaseModel):
     forbidden_actions: list[str] = Field(
         default_factory=lambda: ["change_price", "invent_fee", "invent_market_rate"]
     )
-

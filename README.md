@@ -77,10 +77,34 @@ cp .env.example .env
 docker compose -f infra/docker-compose.yml up --build
 ```
 
+## 报价 API
+
+`POST /quotes/calculate` 只接收 shipment，不接收用户传入的 `rate_rules`。
+API 会从 PostgreSQL 查询候选 `vendor_rate_rules`，再交给 Quote Engine 计算。
+
+```json
+{
+  "address_line": "8888 Keele St",
+  "postal_code": "L4K 2N2",
+  "city": "Concord",
+  "province": "ON",
+  "origin_warehouse": "Toronto",
+  "pallet_count": 3,
+  "weight_kg": 850,
+  "requires_appointment": true,
+  "requires_liftgate": false,
+  "is_residential": false,
+  "dock_available": null
+}
+```
+
+命中时会返回 `source_type`、`confidence`、`matched_rule`、`cost_breakdown`
+和锁定价格。未命中时返回 `manual_required`，价格字段为 `null`。
+
 ## 当前状态
 
 仓库已初始化，Canada final-mile 报价资料已归档到 `reference/canada-final-mile/`，
-并已建立第一版工程骨架。
+并已建立第一版工程骨架和 SQLAlchemy 数据访问闭环。
 
 ## 资料入口
 
@@ -92,7 +116,6 @@ docker compose -f infra/docker-compose.yml up --build
 
 ## 下一步
 
-- 增加 SQLAlchemy 数据访问层，把 PostgreSQL 规则表接入 Quote Engine。
 - 增加真实导入模板和脱敏样例数据。
 - 用 `EDGE_CASES.md` 建立异常场景测试集。
 - 接入 Google Address Validation 或 Canada Post AddressComplete 前，保持人工确认兜底。

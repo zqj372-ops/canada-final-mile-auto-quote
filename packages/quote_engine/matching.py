@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from decimal import Decimal
 import re
 
 from packages.address_normalizer import extract_fsa
@@ -34,6 +35,7 @@ class ShipmentMatchContext:
     province: str | None
     origin_warehouse: str | None
     pallet_count: int
+    weight_kg: Decimal | None
 
 
 def fingerprint_address(value: str | None) -> str | None:
@@ -52,6 +54,7 @@ def build_match_context(shipment: ShipmentInput) -> ShipmentMatchContext:
         province=shipment.province,
         origin_warehouse=shipment.origin_warehouse,
         pallet_count=shipment.pallet_count,
+        weight_kg=shipment.weight_kg,
     )
 
 
@@ -80,10 +83,14 @@ def find_best_rule(shipment: ShipmentInput, rate_rules: list[RateRule]) -> Match
 def rule_matches_context(rule: RateRule, context: ShipmentMatchContext) -> bool:
     if not (rule.pallet_min <= context.pallet_count <= rule.pallet_max):
         return False
-    if rule.origin_warehouse and context.origin_warehouse:
+    if not weight_matches(rule, context):
+        return False
+    if rule.origin_warehouse:
+        if not context.origin_warehouse:
+            return False
         if rule.origin_warehouse.lower() != context.origin_warehouse.lower():
             return False
-    if rule.province and context.province and rule.province != context.province:
+    if not province_matches(rule, context):
         return False
 
     if rule.source_type == SourceType.HISTORY_EXACT_ADDRESS:
@@ -105,6 +112,26 @@ def rule_matches_context(rule: RateRule, context: ShipmentMatchContext) -> bool:
     return False
 
 
+def weight_matches(rule: RateRule, context: ShipmentMatchContext) -> bool:
+    if rule.weight_min_kg is None and rule.weight_max_kg is None:
+        return True
+    if context.weight_kg is None:
+        return False
+    if rule.weight_min_kg is not None and context.weight_kg < rule.weight_min_kg:
+        return False
+    if rule.weight_max_kg is not None and context.weight_kg > rule.weight_max_kg:
+        return False
+    return True
+
+
+def province_matches(rule: RateRule, context: ShipmentMatchContext) -> bool:
+    if not rule.province:
+        return True
+    if rule.source_type == SourceType.HISTORY_EXACT_ADDRESS and not context.province:
+        return True
+    return bool(context.province and rule.province == context.province)
+
+
 def describe_match(rule: RateRule, context: ShipmentMatchContext) -> str:
     parts = [rule.source_type.value]
     if rule.origin_warehouse or context.origin_warehouse:
@@ -117,4 +144,3 @@ def describe_match(rule: RateRule, context: ShipmentMatchContext) -> str:
         parts.append(rule.postal_code or rule.fsa or context.postal_code or context.fsa or "")
     parts.append(f"{context.pallet_count} pallets")
     return " + ".join(part for part in parts if part)
-

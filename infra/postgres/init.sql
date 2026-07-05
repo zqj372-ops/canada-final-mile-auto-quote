@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS vendor_rate_rules (
     effective_from DATE,
     effective_to DATE,
     status TEXT NOT NULL DEFAULT 'active',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_vendor_rate_rules_lookup
@@ -40,4 +41,3 @@ CREATE TABLE IF NOT EXISTS quote_audit_log (
     manual_review_required BOOLEAN NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-

@@ -86,3 +86,24 @@ def test_no_match_returns_manual_required_without_price() -> None:
     assert result.internal_cost_cad is None
     assert result.suggested_selling_price_cad is None
 
+
+def test_weight_bound_rule_requires_matching_weight() -> None:
+    request = QuoteCalculationRequest(
+        shipment=ShipmentInput(postal_code="L5T 2X3", province="ON", pallet_count=1, weight_kg=Decimal("850")),
+        rate_rules=[
+            RateRule(
+                rule_id="too-light",
+                source_type=SourceType.FSA,
+                fsa="L5T",
+                province="ON",
+                pallet_min=1,
+                pallet_max=5,
+                weight_max_kg=Decimal("100.00"),
+                base_cost_cad=Decimal("100.00"),
+            )
+        ],
+    )
+
+    result = QuoteEngine().quote(request)
+
+    assert result.source_type == SourceType.MANUAL_REQUIRED
