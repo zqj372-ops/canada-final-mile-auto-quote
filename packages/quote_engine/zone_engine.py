@@ -4,6 +4,7 @@ from typing import Protocol
 from packages.address_normalizer import extract_fsa
 from packages.quote_engine.pallet_calculator import calculate_billing_pallets
 from packages.quote_engine.pricing import money
+from packages.quote_engine.zone_config import ZonePricingConfig
 from packages.quote_engine.zone_lookup import (
     get_province_from_postal_code,
     lookup_zone_by_postal_prefix_city_province,
@@ -32,8 +33,9 @@ class ZoneDataProvider(Protocol):
 
 
 class ZoneQuoteEngine:
-    def __init__(self, provider: ZoneDataProvider):
+    def __init__(self, provider: ZoneDataProvider, pricing_config: ZonePricingConfig | None = None):
         self.provider = provider
+        self.pricing_config = pricing_config or ZonePricingConfig()
 
     def quote(self, request: ZoneQuoteRequest) -> ZoneQuoteResult:
         postal_prefix = extract_fsa(request.postal_code)
@@ -110,6 +112,7 @@ class ZoneQuoteEngine:
             requires_pallet_jack=request.requires_pallet_jack,
             requires_appointment=request.requires_appointment,
             detention_minutes=request.detention_minutes,
+            config=self.pricing_config,
         )
         risk_tags = list(zone_decision.risk_tags)
         risk_tags.extend(_request_risk_tags(request))

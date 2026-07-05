@@ -3,15 +3,8 @@ from decimal import Decimal
 from math import ceil
 
 from packages.quote_engine.pricing import money
+from packages.quote_engine.zone_config import ZonePricingConfig
 from packages.quote_engine.zone_models import AddressType
-
-
-FUEL_PERCENT = Decimal("35")
-RESIDENTIAL_FEE_USD = Decimal("50")
-LIFTGATE_FEE_USD = Decimal("50")
-PALLET_JACK_FEE_USD = Decimal("50")
-APPOINTMENT_FEE_USD = Decimal("50")
-DETENTION_HALF_HOUR_FEE_USD = Decimal("35")
 
 
 @dataclass(frozen=True)
@@ -29,23 +22,25 @@ def calculate_zone_price(
     requires_pallet_jack: bool = False,
     requires_appointment: bool = False,
     detention_minutes: int = 0,
+    config: ZonePricingConfig | None = None,
 ) -> ZonePricingResult:
-    fuel_usd = money(base_price_usd * FUEL_PERCENT / Decimal("100"))
+    pricing_config = config or ZonePricingConfig()
+    fuel_usd = money(base_price_usd * pricing_config.fuel_percent / Decimal("100"))
     accessorials: dict[str, Decimal] = {}
 
     if address_type in {AddressType.RESIDENTIAL, AddressType.PRIVATE, AddressType.RURAL_RESIDENTIAL}:
-        accessorials["residential_fee_usd"] = RESIDENTIAL_FEE_USD
+        accessorials["residential_fee_usd"] = pricing_config.residential_fee_usd
     if requires_liftgate:
-        accessorials["liftgate_fee_usd"] = LIFTGATE_FEE_USD
+        accessorials["liftgate_fee_usd"] = pricing_config.liftgate_fee_usd
     if requires_pallet_jack:
-        accessorials["pallet_jack_fee_usd"] = PALLET_JACK_FEE_USD
+        accessorials["pallet_jack_fee_usd"] = pricing_config.pallet_jack_fee_usd
     if requires_appointment:
-        accessorials["appointment_fee_usd"] = APPOINTMENT_FEE_USD
+        accessorials["appointment_fee_usd"] = pricing_config.appointment_fee_usd
 
-    billable_detention_minutes = max(0, detention_minutes - 30)
+    billable_detention_minutes = max(0, detention_minutes - pricing_config.detention_free_minutes)
     if billable_detention_minutes:
         half_hours = ceil(billable_detention_minutes / 30)
-        accessorials["detention_fee_usd"] = money(DETENTION_HALF_HOUR_FEE_USD * half_hours)
+        accessorials["detention_fee_usd"] = money(pricing_config.detention_half_hour_fee_usd * half_hours)
 
     total = money(base_price_usd + fuel_usd + sum(accessorials.values(), Decimal("0")))
     return ZonePricingResult(
@@ -53,4 +48,3 @@ def calculate_zone_price(
         accessorials={key: money(value) for key, value in accessorials.items()},
         total_price_usd=total,
     )
-

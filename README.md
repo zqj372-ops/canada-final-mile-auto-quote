@@ -108,6 +108,18 @@ docker compose -f infra/docker-compose.yml up --build
 返回包含 `source_type`、`postal_prefix`、`origin`、`zone`、`billing_pallets`、
 `base_price_usd`、`fuel_usd`、`accessorials`、`total_price_usd` 和 `matched_rule`。
 
+每次 Zone 报价都会尝试写入 `quote_audit_logs`。如果报价结果是
+`manual_required`，系统会自动创建 `manual_quote_tasks`，供运营人工确认。
+审计或人工任务写入失败不会影响报价接口返回。
+
+查询审计和人工任务：
+
+```bash
+GET /quotes/audit/{quote_id}
+GET /quotes/manual-tasks
+PATCH /quotes/manual-tasks/{task_id}
+```
+
 ### Vendor Rate Rule Quote
 
 `POST /quotes/calculate` 只接收 shipment，不接收用户传入的 `rate_rules`。
@@ -149,4 +161,5 @@ API 会从 PostgreSQL 查询候选 `vendor_rate_rules`，再交给 Quote Engine 
 
 - 增加真实导入模板和脱敏样例数据。
 - 用 `EDGE_CASES.md` 建立异常场景测试集。
+- 做极简前端报价工作台，使用审计日志和人工确认池支撑运营流程。
 - 接入 Google Address Validation 或 Canada Post AddressComplete 前，保持人工确认兜底。

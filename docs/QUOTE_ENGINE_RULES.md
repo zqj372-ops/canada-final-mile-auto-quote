@@ -63,3 +63,12 @@ Fuel and accessorials:
 - Pallet jack: `+50 USD` only when requested.
 - Appointment: `+50 USD` only when requested.
 - Detention: first 30 minutes free, then `35 USD` per started half hour.
+
+These values are defaults. Runtime values may be overridden from
+`quote_rule_config` and passed into `ZonePricingConfig`. The base price still
+must come from `zone_price_matrix`.
+
+Every Zone quote attempt should be auditable. Successful quotes and
+`manual_required` results are written to `quote_audit_logs`. `manual_required`
+results also create `manual_quote_tasks` so operations can resolve them without
+letting AI or fallback math invent a price.

@@ -66,3 +66,36 @@ into database tables before the quote engine uses them.
 
 Zone prices are USD. Missing matrix prices must return `manual_required`; the
 engine must not estimate by multiplying a pallet count by a unit price.
+
+### `quote_rule_config`
+
+| Field | Purpose |
+| --- | --- |
+| `key` | Config key such as `fuel_percent` or `liftgate_fee_usd`. |
+| `value` | String value parsed by the configuration repository. |
+| `description` | Human-readable config note. |
+
+Supported Zone pricing config keys:
+
+- `fuel_percent`
+- `residential_fee_usd`
+- `liftgate_fee_usd`
+- `pallet_jack_fee_usd`
+- `appointment_fee_usd`
+- `detention_half_hour_fee_usd`
+- `detention_free_minutes`
+
+When a key is missing or invalid, the engine uses the default `ZonePricingConfig`
+value.
+
+### `quote_audit_logs`
+
+Stores one record for every `/quotes/zone-calculate` attempt, including manual
+review outcomes. `request_json` and `result_json` preserve the exact API payload
+and deterministic quote result for replay and support.
+
+### `manual_quote_tasks`
+
+Stores workbench tasks created automatically when a Zone quote returns
+`manual_required`. Operations can assign, resolve, and annotate these records
+without changing the original deterministic quote result.

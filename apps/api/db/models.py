@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -124,6 +124,58 @@ class QuoteRuleConfig(Base):
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class QuoteAuditLog(Base):
+    __tablename__ = "quote_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    quote_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    request_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    result_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    postal_code: Mapped[str | None] = mapped_column(String(10), index=True)
+    postal_prefix: Mapped[str | None] = mapped_column(String(3), index=True)
+    city: Mapped[str | None] = mapped_column(String(100), index=True)
+    province: Mapped[str | None] = mapped_column(String(10), index=True)
+    origin: Mapped[str | None] = mapped_column(String(32), index=True)
+    zone: Mapped[int | None] = mapped_column(Integer, index=True)
+    billing_pallets: Mapped[int | None] = mapped_column(Integer)
+    base_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    total_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    manual_review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, index=True)
+    risk_tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class ManualQuoteTask(Base):
+    __tablename__ = "manual_quote_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    quote_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    risk_tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    request_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    result_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    assigned_to: Mapped[str | None] = mapped_column(String(128))
+    resolved_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    resolved_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

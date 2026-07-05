@@ -92,3 +92,50 @@ CREATE TABLE IF NOT EXISTS quote_rule_config (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS quote_audit_logs (
+    id BIGSERIAL PRIMARY KEY,
+    quote_id VARCHAR(64) NOT NULL,
+    request_json JSONB NOT NULL,
+    result_json JSONB NOT NULL,
+    source_type VARCHAR(64) NOT NULL,
+    postal_code VARCHAR(10),
+    postal_prefix VARCHAR(3),
+    city VARCHAR(100),
+    province VARCHAR(10),
+    origin VARCHAR(32),
+    zone INTEGER,
+    billing_pallets INTEGER,
+    base_price_usd NUMERIC(12, 2),
+    total_price_usd NUMERIC(12, 2),
+    manual_review_required BOOLEAN NOT NULL,
+    risk_tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_quote_audit_logs_quote_id
+    ON quote_audit_logs (quote_id);
+
+CREATE INDEX IF NOT EXISTS idx_quote_audit_logs_lookup
+    ON quote_audit_logs (source_type, postal_prefix, province, origin, zone, manual_review_required);
+
+CREATE TABLE IF NOT EXISTS manual_quote_tasks (
+    id BIGSERIAL PRIMARY KEY,
+    quote_id VARCHAR(64) NOT NULL,
+    reason TEXT NOT NULL,
+    risk_tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    request_json JSONB NOT NULL,
+    result_json JSONB NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    assigned_to VARCHAR(128),
+    resolved_price_usd NUMERIC(12, 2),
+    resolved_note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_quote_tasks_status
+    ON manual_quote_tasks (status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_manual_quote_tasks_quote_id
+    ON manual_quote_tasks (quote_id);
