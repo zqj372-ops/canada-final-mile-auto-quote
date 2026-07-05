@@ -33,6 +33,7 @@ Excel/CSV 导入
 
 ```text
 apps/api/                         FastAPI 服务
+apps/web/                         内部报价工作台
 packages/quote_engine/            确定性报价引擎
 packages/address_normalizer/       加拿大地址、邮编、FSA、省份标准化
 packages/data_importer/            Excel/CSV 导入和字段校验
@@ -70,6 +71,20 @@ pytest
 
 ```bash
 uvicorn apps.api.main:app --reload
+```
+
+启动内部报价工作台：
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+前端默认请求 `http://localhost:8000`。如需修改 API 地址：
+
+```bash
+VITE_API_BASE_URL=http://localhost:8000 npm run dev
 ```
 
 Docker Compose：

@@ -22,9 +22,13 @@ env/
 .idea/
 .vscode/
 
+# Frontend
+node_modules/
+dist/
+*.tsbuildinfo
+
 # Runtime uploads and raw private data
 data/raw/*
 !data/raw/.gitkeep
 data/samples/*
 !data/samples/.gitkeep
-
