@@ -224,6 +224,7 @@ export interface QuoteAuditLog {
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"
 ).replace(/\/$/, "");
+const API_KEY_STORAGE_KEY = "canada-final-mile-api-key";
 
 export class ApiError extends Error {
   status: number;
@@ -239,10 +240,12 @@ async function request<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
+  const apiKey = getStoredApiKey();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...(apiKey ? { "X-API-Key": apiKey } : {}),
       ...(options.headers ?? {}),
     },
   });
@@ -404,4 +407,20 @@ export function testWeComBot(botId: number): Promise<WeComTestResult> {
 
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
+}
+
+export function getStoredApiKey(): string {
+  try {
+    return window.localStorage.getItem(API_KEY_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function setStoredApiKey(apiKey: string): void {
+  window.localStorage.setItem(API_KEY_STORAGE_KEY, apiKey.trim());
+}
+
+export function clearStoredApiKey(): void {
+  window.localStorage.removeItem(API_KEY_STORAGE_KEY);
 }

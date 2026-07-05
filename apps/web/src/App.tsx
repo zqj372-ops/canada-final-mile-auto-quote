@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { getApiBaseUrl } from "./api/client";
+import { clearStoredApiKey, getApiBaseUrl, getStoredApiKey, setStoredApiKey } from "./api/client";
 import AIQuotePage from "./pages/AIQuotePage";
 import AISettingsPage from "./pages/AISettingsPage";
 import AuditPage from "./pages/AuditPage";
@@ -22,6 +22,8 @@ export default function App() {
   const [path, setPath] = useState<RoutePath>(() =>
     normalizePath(window.location.pathname),
   );
+  const [apiKeyInput, setApiKeyInput] = useState(() => getStoredApiKey());
+  const [hasApiKey, setHasApiKey] = useState(() => Boolean(getStoredApiKey()));
 
   useEffect(() => {
     function handlePopState() {
@@ -83,7 +85,43 @@ export default function App() {
             </p>
           </div>
 
-          <nav className="flex flex-wrap gap-2" aria-label="主导航">
+          <div className="flex flex-col gap-3 lg:items-end">
+            <form
+              className="flex flex-wrap items-end gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                setStoredApiKey(apiKeyInput);
+                setHasApiKey(Boolean(apiKeyInput.trim()));
+              }}
+            >
+              <label className="min-w-60">
+                <span className="field-label text-xs">X-API-Key</span>
+                <input
+                  className="field-input min-h-10 py-1 text-sm"
+                  type="password"
+                  value={apiKeyInput}
+                  onChange={(event) => setApiKeyInput(event.target.value)}
+                  placeholder={hasApiKey ? "已保存" : "输入 API Key"}
+                  autoComplete="off"
+                />
+              </label>
+              <button className="btn-primary min-h-10 px-3 py-1" type="submit">
+                保存
+              </button>
+              <button
+                className="btn-secondary min-h-10 px-3 py-1"
+                type="button"
+                onClick={() => {
+                  clearStoredApiKey();
+                  setApiKeyInput("");
+                  setHasApiKey(false);
+                }}
+              >
+                清除
+              </button>
+            </form>
+
+            <nav className="flex flex-wrap justify-end gap-2" aria-label="主导航">
             {routes.map((route) => {
               const isActive = route.path === path;
               return (
@@ -112,7 +150,8 @@ export default function App() {
                 </a>
               );
             })}
-          </nav>
+            </nav>
+          </div>
         </div>
       </header>
 

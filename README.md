@@ -154,6 +154,26 @@ PATCH /api-keys/{key_id}
 - `sales`：创建普通报价和 AI 自动报价。
 - `viewer`：只读审计和人工任务。
 
+### 生产部署
+
+生产 Compose 文件在 `infra/docker-compose.prod.yml`。推荐在服务器上使用独立
+project name，避免影响同机其他容器：
+
+```bash
+cp infra/.env.prod.example .env.prod
+# 修改 .env.prod 中的 POSTGRES_PASSWORD / DATABASE_URL / AI_CONFIG_SECRET
+docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml up -d --build
+docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml exec api \
+  python scripts/create_api_key.py --name Admin --role admin
+```
+
+生产部署默认：
+
+- Web 工作台：`WEB_PORT`，默认 `18080`。
+- API：只绑定服务器本机 `127.0.0.1:API_PORT`，默认 `18000`。
+- 前端通过 `/api` 反代访问后端，不需要浏览器直连 API 端口。
+- 生产环境应保持 `DEV_AUTH_DISABLED=false`，并在前端顶部保存 `X-API-Key`。
+
 ## 报价 API
 
 ### Zone Quote

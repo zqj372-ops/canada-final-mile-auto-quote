@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-canada_quote}
+      POSTGRES_USER: ${POSTGRES_USER:-quote_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quote_app} -d ${POSTGRES_DB:-canada_quote}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:18080}
+      AI_CONFIG_SECRET: ${AI_CONFIG_SECRET:?AI_CONFIG_SECRET is required}
+      DEV_AUTH_DISABLED: ${DEV_AUTH_DISABLED:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+      uvicorn apps.api.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "127.0.0.1:${API_PORT:-18000}:8000"
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-18080}:80"
+
+volumes:
+  postgres_data:
