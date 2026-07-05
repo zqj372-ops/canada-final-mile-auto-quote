@@ -296,7 +296,12 @@ export interface QuoteWorkbenchConfig {
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"
 ).replace(/\/$/, "");
-const API_KEY_STORAGE_KEY = "canada-final-mile-api-key";
+export type ApiKeyScope = "quote" | "admin";
+
+const API_KEY_STORAGE_KEYS: Record<ApiKeyScope, string> = {
+  quote: "canada-final-mile-quote-api-key",
+  admin: "canada-final-mile-admin-api-key",
+};
 
 export class ApiError extends Error {
   status: number;
@@ -311,8 +316,9 @@ export class ApiError extends Error {
 async function request<T>(
   path: string,
   options: RequestInit = {},
+  apiKeyScope: ApiKeyScope = "admin",
 ): Promise<T> {
-  const apiKey = getStoredApiKey();
+  const apiKey = getStoredApiKey(apiKeyScope);
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
@@ -365,16 +371,17 @@ export function calculateZoneQuote(
   return request<ZoneQuoteResult>("/quotes/zone-calculate", {
     method: "POST",
     body: JSON.stringify(payload),
-  });
+  }, "quote");
 }
 
 export function calculateAIAutoQuote(
   payload: AIAutoQuoteRequest,
+  apiKeyScope: ApiKeyScope = "admin",
 ): Promise<AIAutoQuoteResponse> {
   return request<AIAutoQuoteResponse>("/quotes/ai-auto-quote", {
     method: "POST",
     body: JSON.stringify(payload),
-  });
+  }, apiKeyScope);
 }
 
 export function listManualTasks(): Promise<ManualQuoteTask[]> {
@@ -395,8 +402,10 @@ export function getQuoteAudit(quoteId: string): Promise<QuoteAuditLog> {
   return request<QuoteAuditLog>(`/quotes/audit/${encodeURIComponent(quoteId)}`);
 }
 
-export function getQuoteWorkbenchConfig(): Promise<QuoteWorkbenchConfig> {
-  return request<QuoteWorkbenchConfig>("/quote-configs/workbench");
+export function getQuoteWorkbenchConfig(
+  apiKeyScope: ApiKeyScope = "admin",
+): Promise<QuoteWorkbenchConfig> {
+  return request<QuoteWorkbenchConfig>("/quote-configs/workbench", {}, apiKeyScope);
 }
 
 export function updateQuoteWorkbenchConfig(
@@ -449,8 +458,10 @@ export function testAIConfig(configId: number): Promise<AIConfigTestResult> {
   });
 }
 
-export function listWeComBots(): Promise<WeComBotConfigPublic[]> {
-  return request<WeComBotConfigPublic[]>("/wecom/bots");
+export function listWeComBots(
+  apiKeyScope: ApiKeyScope = "admin",
+): Promise<WeComBotConfigPublic[]> {
+  return request<WeComBotConfigPublic[]>("/wecom/bots", {}, apiKeyScope);
 }
 
 export function createWeComBot(
@@ -494,18 +505,18 @@ export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }
 
-export function getStoredApiKey(): string {
+export function getStoredApiKey(scope: ApiKeyScope = "quote"): string {
   try {
-    return window.localStorage.getItem(API_KEY_STORAGE_KEY) ?? "";
+    return window.localStorage.getItem(API_KEY_STORAGE_KEYS[scope]) ?? "";
   } catch {
     return "";
   }
 }
 
-export function setStoredApiKey(apiKey: string): void {
-  window.localStorage.setItem(API_KEY_STORAGE_KEY, apiKey.trim());
+export function setStoredApiKey(scope: ApiKeyScope, apiKey: string): void {
+  window.localStorage.setItem(API_KEY_STORAGE_KEYS[scope], apiKey.trim());
 }
 
-export function clearStoredApiKey(): void {
-  window.localStorage.removeItem(API_KEY_STORAGE_KEY);
+export function clearStoredApiKey(scope: ApiKeyScope): void {
+  window.localStorage.removeItem(API_KEY_STORAGE_KEYS[scope]);
 }

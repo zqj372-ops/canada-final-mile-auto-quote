@@ -34,8 +34,8 @@ export default function App() {
   const [path, setPath] = useState<RoutePath>(() =>
     normalizePath(window.location.pathname),
   );
-  const [apiKeyInput, setApiKeyInput] = useState(() => getStoredApiKey());
-  const [hasApiKey, setHasApiKey] = useState(() => Boolean(getStoredApiKey()));
+  const [apiKeyInput, setApiKeyInput] = useState(() => getStoredApiKey("admin"));
+  const [hasApiKey, setHasApiKey] = useState(() => Boolean(getStoredApiKey("admin")));
 
   useEffect(() => {
     function handlePopState() {
@@ -117,6 +117,9 @@ export default function App() {
             <p className="mt-1 text-sm text-slate-600">
               API: <span className="font-mono text-xs">{getApiBaseUrl()}</span>
             </p>
+            <p className="mt-1 text-xs text-slate-500">
+              后台管理使用独立 Key；前台报价 Key 请在 `/quote` 页面保存。
+            </p>
           </div>
 
           <div className="flex flex-col gap-3 lg:items-end">
@@ -124,18 +127,18 @@ export default function App() {
               className="flex flex-wrap items-end gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                setStoredApiKey(apiKeyInput);
+                setStoredApiKey("admin", apiKeyInput);
                 setHasApiKey(Boolean(apiKeyInput.trim()));
               }}
             >
               <label className="min-w-60">
-                <span className="field-label text-xs">X-API-Key</span>
+                <span className="field-label text-xs">后台 X-API-Key</span>
                 <input
                   className="field-input min-h-10 py-1 text-sm"
                   type="password"
                   value={apiKeyInput}
                   onChange={(event) => setApiKeyInput(event.target.value)}
-                  placeholder={hasApiKey ? "已保存" : "输入 API Key"}
+                  placeholder={hasApiKey ? "后台 Key 已保存" : "输入后台 API Key"}
                   autoComplete="off"
                 />
               </label>
@@ -146,7 +149,7 @@ export default function App() {
                 className="btn-secondary min-h-10 px-3 py-1"
                 type="button"
                 onClick={() => {
-                  clearStoredApiKey();
+                  clearStoredApiKey("admin");
                   setApiKeyInput("");
                   setHasApiKey(false);
                 }}

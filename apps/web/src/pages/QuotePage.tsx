@@ -43,8 +43,8 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
   const [wecomBots, setWecomBots] = useState<WeComBotConfigPublic[]>([]);
   const [notifyWecom, setNotifyWecom] = useState(false);
   const [selectedWecomBotId, setSelectedWecomBotId] = useState("");
-  const [apiKeyInput, setApiKeyInput] = useState(() => getStoredApiKey());
-  const [hasApiKey, setHasApiKey] = useState(() => Boolean(getStoredApiKey()));
+  const [apiKeyInput, setApiKeyInput] = useState(() => getStoredApiKey("quote"));
+  const [hasApiKey, setHasApiKey] = useState(() => Boolean(getStoredApiKey("quote")));
 
   useEffect(() => {
     void loadConfig();
@@ -54,7 +54,7 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
   async function loadConfig() {
     setError(null);
     try {
-      const nextConfig = await getQuoteWorkbenchConfig();
+      const nextConfig = await getQuoteWorkbenchConfig("quote");
       setConfig(nextConfig);
       setPackagingType(nextConfig.defaults.packaging_type);
       setAddressType(nextConfig.defaults.address_type);
@@ -79,7 +79,7 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
 
   async function loadWecomBots() {
     try {
-      setWecomBots(await listWeComBots());
+      setWecomBots(await listWeComBots("quote"));
     } catch {
       setWecomBots([]);
     }
@@ -194,14 +194,14 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
   }
 
   async function saveAccessKeyAndRetry() {
-    setStoredApiKey(apiKeyInput);
+    setStoredApiKey("quote", apiKeyInput);
     setHasApiKey(Boolean(apiKeyInput.trim()));
     await loadConfig();
     void loadWecomBots();
   }
 
   function clearAccessKey() {
-    clearStoredApiKey();
+    clearStoredApiKey("quote");
     setApiKeyInput("");
     setHasApiKey(false);
     setConfig(null);
@@ -228,6 +228,8 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
               void saveAccessKeyAndRetry();
             }}
             onClear={clearAccessKey}
+            title="前台访问密钥"
+            placeholder={hasApiKey ? "前台 Key 已保存" : "输入前台 API Key"}
             forceOpen
           />
           <div className="flex flex-wrap gap-3">
@@ -267,6 +269,8 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
                 void saveAccessKeyAndRetry();
               }}
               onClear={clearAccessKey}
+              title="前台访问密钥"
+              placeholder={hasApiKey ? "前台 Key 已保存" : "输入前台 API Key"}
             />
             <a className="ai-secondary-button" href={adminHref}>
               后台管理
@@ -363,6 +367,8 @@ function AccessKeyBox({
   onChange,
   onSave,
   onClear,
+  title = "访问密钥",
+  placeholder,
   forceOpen = false,
 }: {
   apiKeyInput: string;
@@ -370,6 +376,8 @@ function AccessKeyBox({
   onChange: (value: string) => void;
   onSave: () => void;
   onClear: () => void;
+  title?: string;
+  placeholder?: string;
   forceOpen?: boolean;
 }) {
   return (
@@ -378,7 +386,7 @@ function AccessKeyBox({
       open={forceOpen || undefined}
     >
       <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 px-2 font-semibold">
-        访问密钥
+        {title}
         <span className="text-xs text-cyan-100/70">{hasApiKey ? "已保存" : "未保存"}</span>
       </summary>
       <form
@@ -395,7 +403,7 @@ function AccessKeyBox({
             type="password"
             value={apiKeyInput}
             onChange={(event) => onChange(event.target.value)}
-            placeholder={hasApiKey ? "已保存" : "输入 X-API-Key"}
+            placeholder={placeholder ?? (hasApiKey ? "已保存" : "输入 X-API-Key")}
             autoComplete="off"
           />
         </label>

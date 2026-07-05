@@ -160,6 +160,13 @@ PATCH /api-keys/{key_id}
 - `sales`：创建普通报价和 AI 自动报价。
 - `viewer`：只读审计和人工任务。
 
+前台和后台应使用不同的 API Key：
+
+- `/quote` 前台报价工作台保存“前台 Key”，建议使用 `sales` 角色。
+- `/admin` 及后台配置、审计、人工任务页面保存“后台 Key”，按职责使用 `admin`、`operator`
+  或 `viewer` 角色。
+- 前端会把两类 Key 存在不同的浏览器本地存储项中，互不覆盖。
+
 报价工作台配置接口：
 
 ```bash
@@ -181,6 +188,8 @@ cp infra/.env.prod.example .env.prod
 docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml up -d --build
 docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml exec api \
   python scripts/create_api_key.py --name Admin --role admin
+docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml exec api \
+  python scripts/create_api_key.py --name SalesWorkbench --role sales
 ```
 
 生产部署默认：
@@ -188,7 +197,8 @@ docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod
 - Web 工作台：只绑定服务器本机 `127.0.0.1:WEB_PORT`，默认 `18080`。
 - API：只绑定服务器本机 `127.0.0.1:API_PORT`，默认 `18000`。
 - 前端通过 `/api` 反代访问后端，不需要浏览器直连 API 端口。
-- 生产环境应保持 `DEV_AUTH_DISABLED=false`，并在前端顶部保存 `X-API-Key`。
+- 生产环境应保持 `DEV_AUTH_DISABLED=false`；前台 `/quote` 保存 sales Key，后台
+  `/admin` 保存 admin/operator/viewer Key。
 - 如果挂在已有域名子路径下，可设置 `VITE_APP_BASE_PATH=/canada-quote/`
   和 `VITE_API_BASE_URL=/canada-quote-api` 后重建 Web 容器。
 
