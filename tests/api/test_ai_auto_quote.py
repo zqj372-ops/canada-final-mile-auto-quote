@@ -117,8 +117,8 @@ def test_ai_extraction_missing_fields_does_not_call_zone_engine(monkeypatch: pyt
     def fail_quote(*_args: object, **_kwargs: object) -> ZoneQuoteResult:
         raise AssertionError("Zone Quote Engine should not be called when required fields are missing.")
 
-    monkeypatch.setattr("apps.api.routes.quotes.extract_quote_draft", fake_extract)
-    monkeypatch.setattr("apps.api.routes.quotes.ZoneQuoteEngine.quote", fail_quote)
+    monkeypatch.setattr("apps.api.services.ai_quote_service.extract_quote_draft", fake_extract)
+    monkeypatch.setattr("apps.api.services.ai_quote_service.ZoneQuoteEngine.quote", fail_quote)
 
     response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
 
@@ -131,9 +131,9 @@ def test_ai_extraction_missing_fields_does_not_call_zone_engine(monkeypatch: pyt
 
 def test_ai_extraction_complete_calls_zone_quote_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     client = build_client()
-    monkeypatch.setattr("apps.api.routes.quotes.extract_quote_draft", lambda _message, _client: complete_extraction())
+    monkeypatch.setattr("apps.api.services.ai_quote_service.extract_quote_draft", lambda _message, _client: complete_extraction())
     monkeypatch.setattr(
-        "apps.api.routes.quotes._build_guarded_sales_note",
+        "apps.api.services.ai_quote_service._build_guarded_sales_note",
         lambda _client, quote_result: quote_result.sales_note,
     )
 
@@ -148,7 +148,7 @@ def test_ai_extraction_complete_calls_zone_quote_engine(monkeypatch: pytest.Monk
 
 def test_ai_auto_quote_manual_required_creates_manual_task(monkeypatch: pytest.MonkeyPatch) -> None:
     client = build_client(include_zone_rule=False)
-    monkeypatch.setattr("apps.api.routes.quotes.extract_quote_draft", lambda _message, _client: complete_extraction())
+    monkeypatch.setattr("apps.api.services.ai_quote_service.extract_quote_draft", lambda _message, _client: complete_extraction())
 
     response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
     tasks = client.get("/quotes/manual-tasks").json()

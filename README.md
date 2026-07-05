@@ -105,6 +105,24 @@ cp .env.example .env
 docker compose -f infra/docker-compose.yml up --build
 ```
 
+数据库迁移：
+
+```bash
+alembic upgrade head
+```
+
+开发库默认读取 `DATABASE_URL`，未设置时使用本地 Docker Compose 的 Postgres
+连接。新增或调整表结构时先修改 SQLAlchemy ORM，再生成迁移草稿：
+
+```bash
+alembic revision --autogenerate -m "describe schema change"
+alembic upgrade head
+```
+
+`infra/postgres/init.sql` 仍保留用于本地容器首次初始化和演示数据；后续新增表、
+字段、索引必须通过 `migrations/versions/` 里的 Alembic migration 管理。测试库
+使用 SQLite 内存库，并由 `Base.metadata.create_all()` 自动建表。
+
 ## 报价 API
 
 ### Zone Quote

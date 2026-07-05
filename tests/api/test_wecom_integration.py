@@ -201,7 +201,7 @@ def test_disabled_bot_does_not_send(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail_send(*_args: object, **_kwargs: object) -> WeComSendResult:
         raise AssertionError("Disabled bot should not send.")
 
-    monkeypatch.setattr("apps.api.services.wecom_notifier.WeComBotClient.send_markdown", fail_send)
+    monkeypatch.setattr("apps.api.services.notification_service.WeComBotClient.send_markdown", fail_send)
 
     response = client.post(
         "/quotes/zone-calculate",
@@ -220,7 +220,7 @@ def test_zone_calculate_success_notify_sends_quote_success(monkeypatch: pytest.M
         sent.append(content)
         return WeComSendResult(success=True, latency_ms=1, status_code=200)
 
-    monkeypatch.setattr("apps.api.services.wecom_notifier.WeComBotClient.send_markdown", fake_send)
+    monkeypatch.setattr("apps.api.services.notification_service.WeComBotClient.send_markdown", fake_send)
 
     response = client.post("/quotes/zone-calculate", json={"quote": quote_payload(), "notify_wecom": True})
 
@@ -240,7 +240,7 @@ def test_zone_calculate_manual_required_auto_sends_with_at_all(monkeypatch: pyte
         mentions.append(mentioned_list)
         return WeComSendResult(success=True, latency_ms=1, status_code=200)
 
-    monkeypatch.setattr("apps.api.services.wecom_notifier.WeComBotClient.send_text", fake_send_text)
+    monkeypatch.setattr("apps.api.services.notification_service.WeComBotClient.send_text", fake_send_text)
 
     response = client.post("/quotes/zone-calculate", json=quote_payload())
 
@@ -253,7 +253,7 @@ def test_wecom_failure_does_not_affect_quote_return(monkeypatch: pytest.MonkeyPa
     client = build_client(bot_rows=[{"purpose": "quote_success"}])
 
     monkeypatch.setattr(
-        "apps.api.services.wecom_notifier.WeComBotClient.send_markdown",
+        "apps.api.services.notification_service.WeComBotClient.send_markdown",
         lambda _self, _content: WeComSendResult(success=False, error="failed", latency_ms=1, status_code=500),
     )
 
@@ -267,10 +267,10 @@ def test_ai_auto_quote_success_notify_sends_ai_quote(monkeypatch: pytest.MonkeyP
     client = build_client(bot_rows=[{"purpose": "ai_quote"}])
     sent: list[str] = []
 
-    monkeypatch.setattr("apps.api.routes.quotes.extract_quote_draft", lambda _message, _client: complete_extraction())
-    monkeypatch.setattr("apps.api.routes.quotes._build_guarded_sales_note", lambda _client, quote_result: quote_result.sales_note)
+    monkeypatch.setattr("apps.api.services.ai_quote_service.extract_quote_draft", lambda _message, _client: complete_extraction())
+    monkeypatch.setattr("apps.api.services.ai_quote_service._build_guarded_sales_note", lambda _client, quote_result: quote_result.sales_note)
     monkeypatch.setattr(
-        "apps.api.services.wecom_notifier.WeComBotClient.send_markdown",
+        "apps.api.services.notification_service.WeComBotClient.send_markdown",
         lambda _self, content: sent.append(content) or WeComSendResult(success=True, latency_ms=1, status_code=200),
     )
 
@@ -289,9 +289,9 @@ def test_ai_auto_quote_manual_required_auto_sends_manual_required(monkeypatch: p
     client = build_client(include_zone_rule=False, bot_rows=[{"purpose": "manual_required"}])
     sent: list[str] = []
 
-    monkeypatch.setattr("apps.api.routes.quotes.extract_quote_draft", lambda _message, _client: complete_extraction())
+    monkeypatch.setattr("apps.api.services.ai_quote_service.extract_quote_draft", lambda _message, _client: complete_extraction())
     monkeypatch.setattr(
-        "apps.api.services.wecom_notifier.WeComBotClient.send_markdown",
+        "apps.api.services.notification_service.WeComBotClient.send_markdown",
         lambda _self, content: sent.append(content) or WeComSendResult(success=True, latency_ms=1, status_code=200),
     )
 
@@ -310,7 +310,7 @@ def test_manual_task_resolved_notify_sends_resolved(monkeypatch: pytest.MonkeyPa
     sent: list[str] = []
 
     monkeypatch.setattr(
-        "apps.api.services.wecom_notifier.WeComBotClient.send_markdown",
+        "apps.api.services.notification_service.WeComBotClient.send_markdown",
         lambda _self, content: sent.append(content) or WeComSendResult(success=True, latency_ms=1, status_code=200),
     )
 
