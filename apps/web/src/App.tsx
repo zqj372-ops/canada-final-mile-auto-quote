@@ -10,6 +10,7 @@ import WeComSettingsPage from "./pages/WeComSettingsPage";
 
 type RoutePath =
   | "/quote"
+  | "/admin"
   | "/ai-quote"
   | "/manual-tasks"
   | "/audit"
@@ -18,8 +19,9 @@ type RoutePath =
   | "/settings/wecom";
 const APP_BASE_PATH = normalizeBasePath(import.meta.env.VITE_APP_BASE_PATH || "/");
 
-const routes: Array<{ path: RoutePath; label: string; description: string }> = [
-  { path: "/quote", label: "AI 报价工作台", description: "粘贴识别" },
+const adminRoutes: Array<{ path: RoutePath; label: string; description: string }> = [
+  { path: "/admin", label: "后台首页", description: "总览" },
+  { path: "/quote", label: "前台报价", description: "前台" },
   { path: "/ai-quote", label: "AI 自动报价", description: "模型提取" },
   { path: "/manual-tasks", label: "人工任务", description: "复核" },
   { path: "/audit", label: "审计查询", description: "日志" },
@@ -49,6 +51,9 @@ export default function App() {
   }, [path]);
 
   const page = useMemo(() => {
+    if (path === "/admin") {
+      return <AdminHomePage navigate={navigate} />;
+    }
     if (path === "/ai-quote") {
       return <AIQuotePage />;
     }
@@ -67,7 +72,7 @@ export default function App() {
     if (path === "/settings/wecom") {
       return <WeComSettingsPage />;
     }
-    return <QuotePage />;
+    return <QuotePage adminHref={withBasePath("/admin")} />;
   }, [path]);
 
   function navigate(nextPath: RoutePath) {
@@ -76,6 +81,22 @@ export default function App() {
     }
     window.history.pushState({}, "", withBasePath(nextPath));
     setPath(nextPath);
+  }
+
+  if (path === "/quote") {
+    return (
+      <div className="app-shell">
+        <a
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-blue-800"
+          href="#main-content"
+        >
+          跳到主内容
+        </a>
+        <main id="main-content" tabIndex={-1}>
+          <QuotePage adminHref={withBasePath("/admin")} />
+        </main>
+      </div>
+    );
   }
 
   return (
@@ -134,8 +155,8 @@ export default function App() {
               </button>
             </form>
 
-            <nav className="flex flex-wrap justify-end gap-2" aria-label="主导航">
-            {routes.map((route) => {
+            <nav className="flex flex-wrap justify-end gap-2" aria-label="后台导航">
+            {adminRoutes.map((route) => {
               const isActive = route.path === path;
               return (
                 <a
@@ -180,6 +201,9 @@ function normalizePath(pathname: string): RoutePath {
   if (strippedPath === "/manual-tasks") {
     return "/manual-tasks";
   }
+  if (strippedPath === "/admin") {
+    return "/admin";
+  }
   if (strippedPath === "/ai-quote") {
     return "/ai-quote";
   }
@@ -220,4 +244,39 @@ function stripBasePath(pathname: string): string {
 
 function withBasePath(routePath: RoutePath): string {
   return `${APP_BASE_PATH}${routePath}`;
+}
+
+function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
+  const shortcuts: Array<{ path: RoutePath; title: string; body: string }> = [
+    { path: "/manual-tasks", title: "人工任务", body: "查看和处理需要人工复核的报价。" },
+    { path: "/audit", title: "审计查询", body: "按 quote_id 查看报价请求和结果。" },
+    { path: "/settings/quote", title: "报价配置", body: "可视化维护前台字段、风险阈值和报价话术。" },
+    { path: "/settings/ai", title: "AI 配置", body: "维护字段提取和话术模型配置。" },
+    { path: "/settings/wecom", title: "企业微信配置", body: "维护通知机器人和默认用途。" },
+    { path: "/quote", title: "进入前台", body: "打开销售使用的 AI 报价工作台。" },
+  ];
+
+  return (
+    <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+      <header>
+        <p className="text-sm font-medium text-blue-800">Admin</p>
+        <h1 className="mt-1 text-2xl font-semibold text-slate-950">
+          加拿大尾端报价后台
+        </h1>
+      </header>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {shortcuts.map((shortcut) => (
+          <button
+            key={shortcut.path}
+            className="panel min-h-36 p-5 text-left transition hover:border-blue-300 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-700 focus:ring-offset-2"
+            type="button"
+            onClick={() => navigate(shortcut.path)}
+          >
+            <h2 className="text-lg font-semibold text-slate-950">{shortcut.title}</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">{shortcut.body}</p>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }

@@ -36,7 +36,7 @@ export default function AiQuoteInputPanel({
   }
 
   return (
-    <section className="ai-glass-panel flex h-full flex-col p-5">
+    <section className="ai-glass-panel flex h-full min-w-0 flex-col p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-semibold uppercase text-cyan-200">

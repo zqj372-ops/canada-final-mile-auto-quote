@@ -20,7 +20,7 @@ export default function QuoteCalculationPanel({
   const currency = config.copy_template.currency_code;
 
   return (
-    <section className="ai-glass-panel p-5">
+    <section className="ai-glass-panel min-w-0 p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase text-emerald-200">

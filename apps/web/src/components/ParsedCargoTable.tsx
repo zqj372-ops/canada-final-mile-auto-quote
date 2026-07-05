@@ -2,7 +2,7 @@ import type { ParsedQuoteInput } from "../utils/quoteParser";
 
 export default function ParsedCargoTable({ parsed }: { parsed: ParsedQuoteInput }) {
   return (
-    <section className="ai-glass-panel p-5">
+    <section className="ai-glass-panel min-w-0 p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase text-violet-200">

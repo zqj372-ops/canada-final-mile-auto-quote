@@ -28,7 +28,7 @@ export default function ParsedAddressCard({
   const address = parsed.address;
 
   return (
-    <section className="ai-glass-panel p-5">
+    <section className="ai-glass-panel min-w-0 p-5">
       <h2 className="text-xl font-semibold text-white">地址信息</h2>
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
         <Metric label="目的地地址" value={address.address_line || "待确认"} wide />

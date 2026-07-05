@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   calculateZoneQuote,
+  clearStoredApiKey,
+  getStoredApiKey,
   getQuoteWorkbenchConfig,
   listWeComBots,
+  setStoredApiKey,
   type AddressType,
   type PackagingType,
   type QuoteWorkbenchConfig,
@@ -25,7 +28,7 @@ type WorkbenchStatus =
   | "quoted"
   | "manual_required";
 
-export default function QuotePage() {
+export default function QuotePage({ adminHref }: { adminHref: string }) {
   const [config, setConfig] = useState<QuoteWorkbenchConfig | null>(null);
   const [rawInput, setRawInput] = useState("");
   const [result, setResult] = useState<ZoneQuoteResult | null>(null);
@@ -40,6 +43,8 @@ export default function QuotePage() {
   const [wecomBots, setWecomBots] = useState<WeComBotConfigPublic[]>([]);
   const [notifyWecom, setNotifyWecom] = useState(false);
   const [selectedWecomBotId, setSelectedWecomBotId] = useState("");
+  const [apiKeyInput, setApiKeyInput] = useState(() => getStoredApiKey());
+  const [hasApiKey, setHasApiKey] = useState(() => Boolean(getStoredApiKey()));
 
   useEffect(() => {
     void loadConfig();
@@ -190,7 +195,7 @@ export default function QuotePage() {
 
   if (!config || !parsed) {
     return (
-      <div className="ai-quote-workbench min-h-[calc(100dvh-96px)] px-4 py-8">
+      <div className="ai-quote-workbench min-h-dvh px-4 py-8">
         <section className="ai-glass-panel mx-auto max-w-3xl p-6">
           <h1 className="text-2xl font-semibold text-white">加拿大尾端 AI 报价系统</h1>
           <p className="mt-3 text-sm leading-6 text-slate-300">
@@ -205,7 +210,7 @@ export default function QuotePage() {
   }
 
   return (
-    <div className="ai-quote-workbench min-h-[calc(100dvh-96px)] px-4 py-6 sm:px-6 lg:px-8">
+    <div className="ai-quote-workbench min-h-dvh px-4 py-6 sm:px-6 lg:px-8">
       <div className="mx-auto flex max-w-[1800px] flex-col gap-6">
         <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
@@ -219,15 +224,34 @@ export default function QuotePage() {
               {config.subtitle}
             </p>
           </div>
-          <span
-            className={`w-fit rounded-full border px-4 py-2 text-sm font-semibold ${
-              manualRequired
-                ? "border-amber-300/60 bg-amber-300/10 text-amber-100"
-                : "border-cyan-300/50 bg-cyan-300/10 text-cyan-100"
-            }`}
-          >
-            {statusLabel}
-          </span>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <AccessKeyBox
+              apiKeyInput={apiKeyInput}
+              hasApiKey={hasApiKey}
+              onChange={setApiKeyInput}
+              onSave={() => {
+                setStoredApiKey(apiKeyInput);
+                setHasApiKey(Boolean(apiKeyInput.trim()));
+              }}
+              onClear={() => {
+                clearStoredApiKey();
+                setApiKeyInput("");
+                setHasApiKey(false);
+              }}
+            />
+            <a className="ai-secondary-button" href={adminHref}>
+              后台管理
+            </a>
+            <span
+              className={`inline-flex min-h-11 w-fit items-center rounded-full border px-4 py-2 text-sm font-semibold ${
+                manualRequired
+                  ? "border-amber-300/60 bg-amber-300/10 text-amber-100"
+                  : "border-cyan-300/50 bg-cyan-300/10 text-cyan-100"
+              }`}
+            >
+              {statusLabel}
+            </span>
+          </div>
         </header>
 
         {error && (
@@ -247,8 +271,8 @@ export default function QuotePage() {
           </div>
         )}
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(320px,0.88fr)_minmax(440px,1.1fr)_minmax(360px,0.9fr)]">
-          <div className="grid gap-6">
+        <div className="grid gap-6 xl:grid-cols-[minmax(320px,560px)_minmax(0,1fr)]">
+          <div className="grid min-w-0 gap-6">
             <AiQuoteInputPanel
               config={config}
               value={rawInput}
@@ -268,37 +292,89 @@ export default function QuotePage() {
             />
           </div>
 
-          <div className="grid gap-6">
-            <ParsedCargoTable parsed={parsed} />
-            <ParsedAddressCard
-              parsed={parsed}
-              config={config}
-              packagingType={packagingType}
-              onPackagingTypeChange={(value) => setPackagingType(value as PackagingType)}
-              addressType={addressType}
-              onAddressTypeChange={(value) => setAddressType(value as AddressType)}
-              services={services}
-              onServiceChange={(key, checked) =>
-                setServices((current) => ({ ...current, [key]: checked }))
-              }
-              detentionMinutes={detentionMinutes}
-              onDetentionMinutesChange={setDetentionMinutes}
-            />
-          </div>
+          <div className="grid min-w-0 content-start gap-6">
+            <div className="grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
+              <ParsedCargoTable parsed={parsed} />
+              <QuoteCalculationPanel
+                config={config}
+                parsed={parsed}
+                result={result}
+                salesText={salesText}
+                onExport={exportQuote}
+              />
+            </div>
 
-          <div className="grid content-start gap-6">
-            <QuoteCalculationPanel
-              config={config}
-              parsed={parsed}
-              result={result}
-              salesText={salesText}
-              onExport={exportQuote}
-            />
-            <QuoteRiskPanel risks={riskMessages} manualRequired={manualRequired} />
+            <div className="grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
+              <ParsedAddressCard
+                parsed={parsed}
+                config={config}
+                packagingType={packagingType}
+                onPackagingTypeChange={(value) => setPackagingType(value as PackagingType)}
+                addressType={addressType}
+                onAddressTypeChange={(value) => setAddressType(value as AddressType)}
+                services={services}
+                onServiceChange={(key, checked) =>
+                  setServices((current) => ({ ...current, [key]: checked }))
+                }
+                detentionMinutes={detentionMinutes}
+                onDetentionMinutesChange={setDetentionMinutes}
+              />
+              <QuoteRiskPanel risks={riskMessages} manualRequired={manualRequired} />
+            </div>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function AccessKeyBox({
+  apiKeyInput,
+  hasApiKey,
+  onChange,
+  onSave,
+  onClear,
+}: {
+  apiKeyInput: string;
+  hasApiKey: boolean;
+  onChange: (value: string) => void;
+  onSave: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <details className="ai-access-key rounded-md border border-white/15 bg-white/[0.05] p-2 text-sm text-slate-100">
+      <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 px-2 font-semibold">
+        访问密钥
+        <span className="text-xs text-cyan-100/70">{hasApiKey ? "已保存" : "未保存"}</span>
+      </summary>
+      <form
+        className="mt-3 grid gap-2 sm:min-w-72"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave();
+        }}
+      >
+        <label>
+          <span className="sr-only">X-API-Key</span>
+          <input
+            className="ai-input"
+            type="password"
+            value={apiKeyInput}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder={hasApiKey ? "已保存" : "输入 X-API-Key"}
+            autoComplete="off"
+          />
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <button className="ai-primary-button min-h-10 py-1" type="submit">
+            保存
+          </button>
+          <button className="ai-secondary-button min-h-10 py-1" type="button" onClick={onClear}>
+            清除
+          </button>
+        </div>
+      </form>
+    </details>
   );
 }
 
