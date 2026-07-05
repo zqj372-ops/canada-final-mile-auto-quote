@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, Integer, Numeric, String, Text, func
+from sqlalchemy import Date, DateTime, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -48,3 +48,90 @@ class VendorRateRule(Base):
         onupdate=func.now(),
     )
 
+
+class PostalCodeCityLookup(Base):
+    __tablename__ = "postal_code_city_lookup"
+
+    postal_code: Mapped[str] = mapped_column(String(10), primary_key=True)
+    preferred_city: Mapped[str] = mapped_column(String(100), nullable=False)
+    province: Mapped[str | None] = mapped_column(String(10), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ZoneLookupRule(Base):
+    __tablename__ = "zone_lookup_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    postal_prefix: Mapped[str] = mapped_column(String(3), nullable=False, index=True)
+    city: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    province: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    origin: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    zone: Mapped[int] = mapped_column(Integer, nullable=False)
+    match_level: Mapped[str | None] = mapped_column(String(32))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ZonePriceMatrix(Base):
+    __tablename__ = "zone_price_matrix"
+    __table_args__ = (
+        UniqueConstraint("origin", "zone", "billing_pallets", name="uq_zone_price_matrix_lookup"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    origin: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    zone: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    billing_pallets: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    base_price_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    source: Mapped[str | None] = mapped_column(Text)
+    last_updated: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class QuoteRuleConfig(Base):
+    __tablename__ = "quote_rule_config"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

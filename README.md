@@ -50,6 +50,8 @@ tests/                             MVP 单元测试
 - 读取并校验供应商报价表标准字段。
 - 标准化加拿大邮编，例如 `v6v1a1 -> V6V 1A1 -> V6V`。
 - 标准化省份，例如 `Ontario -> ON`、`British Columbia -> BC`。
+- 按 Zone 查表链路报价：
+  `postal_code -> preferred city -> postal_prefix/city/province -> zone/origin -> zone_price_matrix`
 - 按固定优先级匹配报价规则：
   `history_exact_address -> postal_code -> fsa -> city -> rate_card -> distance_fallback -> manual_required`
 - 输出 `source_type`、`confidence`、`matched_rule`、`cost_breakdown`、风险标签和人工审核状态。
@@ -79,6 +81,35 @@ docker compose -f infra/docker-compose.yml up --build
 
 ## 报价 API
 
+### Zone Quote
+
+`POST /quotes/zone-calculate` 是当前 Canada final-mile MVP 的主报价入口。基础价必须来自
+`zone_price_matrix`，查不到 Zone 或价格时返回 `manual_required`，不会按每托单价或里程估算。
+
+```json
+{
+  "address_line": "8888 Keele St",
+  "postal_code": "L4K 2N2",
+  "city": "Concord",
+  "province": "ON",
+  "cbm": 4.2,
+  "weight_kg": 850,
+  "piece_count": 10,
+  "packaging_type": "carton",
+  "longest_side_cm": 100,
+  "address_type": "commercial",
+  "requires_liftgate": false,
+  "requires_pallet_jack": false,
+  "requires_appointment": true,
+  "explicit_pallet_count": null
+}
+```
+
+返回包含 `source_type`、`postal_prefix`、`origin`、`zone`、`billing_pallets`、
+`base_price_usd`、`fuel_usd`、`accessorials`、`total_price_usd` 和 `matched_rule`。
+
+### Vendor Rate Rule Quote
+
 `POST /quotes/calculate` 只接收 shipment，不接收用户传入的 `rate_rules`。
 API 会从 PostgreSQL 查询候选 `vendor_rate_rules`，再交给 Quote Engine 计算。
 
@@ -104,7 +135,7 @@ API 会从 PostgreSQL 查询候选 `vendor_rate_rules`，再交给 Quote Engine 
 ## 当前状态
 
 仓库已初始化，Canada final-mile 报价资料已归档到 `reference/canada-final-mile/`，
-并已建立第一版工程骨架和 SQLAlchemy 数据访问闭环。
+并已建立第一版工程骨架、SQLAlchemy 数据访问闭环和 Zone Quote Engine。
 
 ## 资料入口
 

@@ -41,3 +41,54 @@ CREATE TABLE IF NOT EXISTS quote_audit_log (
     manual_review_required BOOLEAN NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS postal_code_city_lookup (
+    postal_code VARCHAR(10) PRIMARY KEY,
+    preferred_city VARCHAR(100) NOT NULL,
+    province VARCHAR(10),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_postal_code_city_lookup_province
+    ON postal_code_city_lookup (province);
+
+CREATE TABLE IF NOT EXISTS zone_lookup_rules (
+    id BIGSERIAL PRIMARY KEY,
+    postal_prefix VARCHAR(3) NOT NULL,
+    city VARCHAR(100) NOT NULL,
+    province VARCHAR(10) NOT NULL,
+    origin VARCHAR(32) NOT NULL,
+    zone INTEGER NOT NULL,
+    match_level VARCHAR(32),
+    note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_zone_lookup_rules_lookup
+    ON zone_lookup_rules (postal_prefix, province, city);
+
+CREATE TABLE IF NOT EXISTS zone_price_matrix (
+    id BIGSERIAL PRIMARY KEY,
+    origin VARCHAR(32) NOT NULL,
+    zone INTEGER NOT NULL,
+    billing_pallets INTEGER NOT NULL,
+    base_price_usd NUMERIC(12, 2) NOT NULL,
+    source TEXT,
+    last_updated VARCHAR(64),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_zone_price_matrix_lookup UNIQUE (origin, zone, billing_pallets)
+);
+
+CREATE INDEX IF NOT EXISTS idx_zone_price_matrix_lookup
+    ON zone_price_matrix (origin, zone, billing_pallets);
+
+CREATE TABLE IF NOT EXISTS quote_rule_config (
+    key VARCHAR(128) PRIMARY KEY,
+    value TEXT NOT NULL,
+    description TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

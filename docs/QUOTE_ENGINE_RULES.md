@@ -40,3 +40,26 @@ When no deterministic rule matches, the engine returns `manual_required` with
 `manual_review_required=true` and no price. Downstream systems must not expose a
 price to customers in this state.
 
+## Zone Quote Engine
+
+The Canada final-mile MVP uses the Zone quote path as the primary pricing path:
+
+1. Normalize the full postal code and extract FSA.
+2. Optionally look up preferred city from `postal_code_city_lookup`.
+3. Resolve `postal_prefix + city + province` to a unique `zone_lookup_rules` row.
+4. Override stale BC origins to `calgary` and add `stale_origin_overridden`.
+5. Calculate billing pallets with the deterministic pallet rules.
+6. Look up `origin + zone + billing_pallets` in `zone_price_matrix`.
+7. Add fuel and confirmed accessorials.
+
+If any lookup is ambiguous, missing, or split-record unsafe, the engine returns
+`manual_required`.
+
+Fuel and accessorials:
+
+- Fuel is `base_price_usd * 35%`.
+- Residential/private/rural residential: `+50 USD`.
+- Liftgate: `+50 USD` only when requested.
+- Pallet jack: `+50 USD` only when requested.
+- Appointment: `+50 USD` only when requested.
+- Detention: first 30 minutes free, then `35 USD` per started half hour.
