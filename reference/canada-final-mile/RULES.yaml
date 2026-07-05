@@ -1,0 +1,129 @@
+version: "2.0"
+purpose: "Canada final-mile quote rule parameters. Use with SOP_QUICK.md."
+
+data_files:
+  postal_city_table: "canadapostalcodeslist(1).json"
+  zone_lookup_table: "Zone 邮编前缀 城市 省份 始发仓 查询表.json"
+  price_table: "Zone 票价表（查表价格）.json"
+
+quote_blockers:
+  unknown_address_type: true
+  ambiguous_google_maps_result: true
+  missing_required_data_files: true
+  missing_zone_without_defensible_anchor: true
+  invented_base_price: true
+
+pallet:
+  cbm_per_pallet: 2
+  kg_per_pallet: 500
+  standard_dimensions_cm:
+    length: 120
+    width: 120
+    height: 180
+  long_piece_threshold_cm: 120
+  long_piece_pallets_per_piece: 2
+  wooden_crate_min_pallets_per_piece: 1
+  wooden_crate_long_pallets_per_piece: 2
+
+package_modes:
+  flexible_package_deal:
+    enabled: true
+    package_keywords:
+      - "编织袋"
+      - "柔性包装"
+      - "woven bag"
+      - "flexible packaging"
+    min_pieces: 50
+    requires_stackable: true
+    quote_usd_per_container_approx: 580
+    notes: "满足条件时不按托数计费。"
+  pallet_billing:
+    package_keywords:
+      - "纸箱"
+      - "木箱"
+      - "托盘"
+      - "carton"
+      - "crate"
+      - "pallet"
+      - "unknown"
+
+origin_by_province:
+  BC: "Calgary"
+  AB: "Calgary"
+  SK: "Calgary"
+  MB: "Calgary"
+  ON: "Toronto"
+  QC: "Toronto"
+  NB: "Toronto"
+  NS: "Toronto"
+  PE: "Toronto"
+  NL: "Toronto"
+
+fees:
+  fuel_multiplier: 1.35
+  residential_fee_usd_per_shipment: 50
+  tailgate_fee_usd_per_shipment: 50
+  hand_pallet_jack_fee_usd_per_shipment: 50
+  appointment_fee_usd_per_shipment: 50
+  free_wait_minutes: 30
+  overtime_wait_fee_usd_per_half_hour: 35
+
+address_type:
+  required_before_quote: true
+  evidence_priority:
+    - "Google Maps confirmed place/address type"
+    - "customer explicit confirmation"
+    - "carrier/system screenshot with Business/Residence flag"
+    - "strong address keywords"
+  commercial_signals:
+    - "company"
+    - "warehouse"
+    - "industrial"
+    - "office"
+    - "store"
+    - "plaza"
+    - "mall"
+    - "business park"
+    - "Inc"
+    - "Ltd"
+    - "Corp"
+    - "LLC"
+  residential_signals:
+    - "house"
+    - "townhouse"
+    - "apartment"
+    - "apt"
+    - "condo"
+    - "home"
+    - "residence"
+    - "estate"
+    - "farm"
+    - "ranch"
+    - "cottage"
+    - "cabin"
+    - "chalet"
+  unknown_handling: "stop_and_confirm"
+
+postal_lookup:
+  first: "full postal code -> canadapostalcodeslist(1).json"
+  second: "FSA/postal prefix -> Zone lookup table"
+  fallback_order:
+    - "same city + same province anchor"
+    - "same province nearby known anchor"
+    - "supplier confirmation"
+  prohibited:
+    - "linear Zone +1/+2/+3 extrapolation"
+    - "using stale origin when province rule says otherwise"
+
+pricing:
+  base_price_source: "Zone 票价表（查表价格）.json"
+  formula: "total = base_price * fuel_multiplier + confirmed_accessorial_fees"
+  prohibited:
+    - "per-pallet multiplication for base price"
+    - "mileage estimate for base price"
+    - "historical benchmark price"
+    - "CAD/USD 1:1 simplification"
+
+output:
+  default_template: "formal"
+  short_template_only_when_requested: true

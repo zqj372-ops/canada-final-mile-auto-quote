@@ -10,4 +10,18 @@
 
 ## 当前状态
 
-仓库已初始化，业务规则和技术栈待补充。
+仓库已初始化，Canada final-mile 报价资料已归档到 `reference/canada-final-mile/`。
+
+## 资料入口
+
+- 资料索引：`docs/reference-index.md`
+- 实时报价 SOP：`reference/canada-final-mile/SOP_QUICK.md`
+- 规则参数：`reference/canada-final-mile/RULES.yaml`
+- 输出模板：`reference/canada-final-mile/QUOTE_TEMPLATE.md`
+- 邮编/Zone/价格查表数据：`reference/canada-final-mile/`
+
+## 下一步
+
+- 搭建报价引擎的数据读取层。
+- 实现计费托数、邮编/FSA、Zone、价格表查询和附加费计算。
+- 用 `EDGE_CASES.md` 建立异常场景测试集。
