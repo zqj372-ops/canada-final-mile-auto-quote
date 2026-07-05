@@ -193,17 +193,51 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
     URL.revokeObjectURL(url);
   }
 
+  async function saveAccessKeyAndRetry() {
+    setStoredApiKey(apiKeyInput);
+    setHasApiKey(Boolean(apiKeyInput.trim()));
+    await loadConfig();
+    void loadWecomBots();
+  }
+
+  function clearAccessKey() {
+    clearStoredApiKey();
+    setApiKeyInput("");
+    setHasApiKey(false);
+    setConfig(null);
+  }
+
   if (!config || !parsed) {
     return (
       <div className="ai-quote-workbench min-h-dvh px-4 py-8">
-        <section className="ai-glass-panel mx-auto max-w-3xl p-6">
+        <section className="ai-glass-panel mx-auto grid max-w-3xl gap-5 p-6">
           <h1 className="text-2xl font-semibold text-white">加拿大尾端 AI 报价系统</h1>
           <p className="mt-3 text-sm leading-6 text-slate-300">
             {error ? `配置加载失败：${error}` : "正在读取后台配置..."}
           </p>
-          <button className="ai-primary-button mt-5" type="button" onClick={loadConfig}>
-            重新加载配置
-          </button>
+          {error?.includes("X-API-Key") && (
+            <div className="rounded-md border border-amber-300/40 bg-amber-300/10 px-4 py-3 text-sm leading-6 text-amber-50">
+              请先输入访问密钥。保存后系统会自动重新读取后台配置。
+            </div>
+          )}
+          <AccessKeyBox
+            apiKeyInput={apiKeyInput}
+            hasApiKey={hasApiKey}
+            onChange={setApiKeyInput}
+            onSave={() => {
+              void saveAccessKeyAndRetry();
+            }}
+            onClear={clearAccessKey}
+            forceOpen
+          />
+          <div className="flex flex-wrap gap-3">
+            <button className="ai-primary-button" type="button" onClick={loadConfig}>
+              重新加载配置
+            </button>
+            <a className="ai-secondary-button" href={adminHref}>
+              后台管理
+            </a>
+          </div>
         </section>
       </div>
     );
@@ -230,14 +264,9 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
               hasApiKey={hasApiKey}
               onChange={setApiKeyInput}
               onSave={() => {
-                setStoredApiKey(apiKeyInput);
-                setHasApiKey(Boolean(apiKeyInput.trim()));
+                void saveAccessKeyAndRetry();
               }}
-              onClear={() => {
-                clearStoredApiKey();
-                setApiKeyInput("");
-                setHasApiKey(false);
-              }}
+              onClear={clearAccessKey}
             />
             <a className="ai-secondary-button" href={adminHref}>
               后台管理
@@ -334,15 +363,20 @@ function AccessKeyBox({
   onChange,
   onSave,
   onClear,
+  forceOpen = false,
 }: {
   apiKeyInput: string;
   hasApiKey: boolean;
   onChange: (value: string) => void;
   onSave: () => void;
   onClear: () => void;
+  forceOpen?: boolean;
 }) {
   return (
-    <details className="ai-access-key rounded-md border border-white/15 bg-white/[0.05] p-2 text-sm text-slate-100">
+    <details
+      className="ai-access-key rounded-md border border-white/15 bg-white/[0.05] p-2 text-sm text-slate-100"
+      open={forceOpen || undefined}
+    >
       <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 px-2 font-semibold">
         访问密钥
         <span className="text-xs text-cyan-100/70">{hasApiKey ? "已保存" : "未保存"}</span>
