@@ -12,7 +12,7 @@ from apps.api.db.session import get_db
 from apps.api.main import app
 from apps.api.security.secrets import encrypt_secret
 from packages.ai_assistant.quote_extractor import AIExtractedQuoteDraft
-from packages.wecom.bot_client import WeComSendResult
+from packages.wecom.bot_client import WeComBotClient, WeComSendResult
 
 
 FAKE_WEBHOOK = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=testabcd"
@@ -195,6 +195,29 @@ def test_wecom_test_webhook_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.json()["error"] == "boom"
 
 
+def test_wecom_client_exception_does_not_return_webhook_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    class BrokenClient:
+        def __init__(self, *_args: object, **_kwargs: object):
+            pass
+
+        def __enter__(self) -> "BrokenClient":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def post(self, url: str, *, json: dict[str, object]) -> object:
+            raise RuntimeError(f"boom {url} {json}")
+
+    monkeypatch.setattr("packages.wecom.bot_client.httpx.Client", BrokenClient)
+
+    result = WeComBotClient(FAKE_WEBHOOK).send_markdown("test")
+
+    assert result.success is False
+    assert result.error == "RuntimeError"
+    assert FAKE_WEBHOOK not in result.model_dump_json()
+
+
 def test_disabled_bot_does_not_send(monkeypatch: pytest.MonkeyPatch) -> None:
     client = build_client(bot_rows=[{"enabled": False, "purpose": "quote_success"}])
 
@@ -234,19 +257,76 @@ def test_zone_calculate_manual_required_auto_sends_with_at_all(monkeypatch: pyte
         include_zone_rule=False,
         bot_rows=[{"purpose": "manual_required", "mention_all_on_manual_required": True}],
     )
+    markdowns: list[str] = []
     mentions: list[list[str] | None] = []
+    text_messages: list[str] = []
+
+    def fake_send_markdown(_self: object, content: str) -> WeComSendResult:
+        markdowns.append(content)
+        return WeComSendResult(success=True, latency_ms=1, status_code=200)
 
     def fake_send_text(_self: object, _content: str, *, mentioned_list: list[str] | None = None, **_kwargs: object) -> WeComSendResult:
+        text_messages.append(_content)
         mentions.append(mentioned_list)
         return WeComSendResult(success=True, latency_ms=1, status_code=200)
 
+    monkeypatch.setattr("apps.api.services.notification_service.WeComBotClient.send_markdown", fake_send_markdown)
     monkeypatch.setattr("apps.api.services.notification_service.WeComBotClient.send_text", fake_send_text)
 
     response = client.post("/quotes/zone-calculate", json=quote_payload())
 
     assert response.status_code == 200
     assert response.json()["source_type"] == "manual_required"
+    assert len(markdowns) == 1
+    assert "需人工确认" in markdowns[0]
+    assert text_messages == ["@all 有新的加拿大尾程报价需人工确认，请查看上一条详情。"]
     assert mentions == [["@all"]]
+
+
+def test_manual_required_markdown_failure_still_sends_at_all_and_returns_quote(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = build_client(
+        include_zone_rule=False,
+        bot_rows=[{"purpose": "manual_required", "mention_all_on_manual_required": True}],
+    )
+    mentions: list[list[str] | None] = []
+
+    monkeypatch.setattr(
+        "apps.api.services.notification_service.WeComBotClient.send_markdown",
+        lambda _self, _content: WeComSendResult(success=False, error="failed", latency_ms=1, status_code=500),
+    )
+    monkeypatch.setattr(
+        "apps.api.services.notification_service.WeComBotClient.send_text",
+        lambda _self, _content, *, mentioned_list=None, **_kwargs: mentions.append(mentioned_list)
+        or WeComSendResult(success=True, latency_ms=1, status_code=200),
+    )
+
+    response = client.post("/quotes/zone-calculate", json=quote_payload())
+
+    assert response.status_code == 200
+    assert response.json()["source_type"] == "manual_required"
+    assert mentions == [["@all"]]
+
+
+def test_manual_required_at_all_exception_does_not_affect_quote(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = build_client(
+        include_zone_rule=False,
+        bot_rows=[{"purpose": "manual_required", "mention_all_on_manual_required": True}],
+    )
+
+    monkeypatch.setattr(
+        "apps.api.services.notification_service.WeComBotClient.send_markdown",
+        lambda _self, _content: WeComSendResult(success=True, latency_ms=1, status_code=200),
+    )
+
+    def raise_text_error(*_args: object, **_kwargs: object) -> WeComSendResult:
+        raise RuntimeError("text send failed")
+
+    monkeypatch.setattr("apps.api.services.notification_service.WeComBotClient.send_text", raise_text_error)
+
+    response = client.post("/quotes/zone-calculate", json=quote_payload())
+
+    assert response.status_code == 200
+    assert response.json()["source_type"] == "manual_required"
 
 
 def test_wecom_failure_does_not_affect_quote_return(monkeypatch: pytest.MonkeyPatch) -> None:

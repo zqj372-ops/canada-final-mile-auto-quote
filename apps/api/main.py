@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.routes.ai_configs import router as ai_configs_router
 from apps.api.routes.ai_quotes import router as ai_quotes_router
+from apps.api.routes.api_keys import router as api_keys_router
 from apps.api.routes.audit import router as audit_router
 from apps.api.routes.imports import router as imports_router
 from apps.api.routes.manual_tasks import router as manual_tasks_router
@@ -42,6 +43,7 @@ app.include_router(audit_router)
 app.include_router(imports_router)
 app.include_router(ai_configs_router)
 app.include_router(wecom_configs_router)
+app.include_router(api_keys_router)
 
 
 @app.get("/health", tags=["system"])

@@ -71,7 +71,7 @@ class WeComBotClient:
             latency_ms = int((perf_counter() - started) * 1000)
             return WeComSendResult(
                 success=False,
-                error=f"{exc.__class__.__name__}: {exc}",
+                error=exc.__class__.__name__,
                 latency_ms=latency_ms,
                 status_code=None,
             )

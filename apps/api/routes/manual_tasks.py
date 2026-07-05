@@ -1,74 +1,27 @@
-from decimal import Decimal
-
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from apps.api.db.models import ManualQuoteTask
-from apps.api.db.repositories.manual_quote_task_repository import ManualQuoteTaskRepository
+from apps.api.auth import MANUAL_TASK_READ_ROLES, MANUAL_TASK_WRITE_ROLES, require_roles
 from apps.api.db.session import get_db
-from apps.api.services.notification_service import notify_manual_task_resolved
-from apps.api.services.quote_service import try_wecom_notify
+from apps.api.services.manual_task_service import (
+    ManualQuoteTaskUpdate,
+    list_manual_quote_tasks as list_manual_quote_tasks_service,
+    update_manual_quote_task as update_manual_quote_task_service,
+)
 
 
 router = APIRouter(prefix="/quotes", tags=["manual-tasks"])
 
 
-class ManualQuoteTaskUpdate(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-
-    status: str | None = Field(default=None, min_length=1)
-    assigned_to: str | None = None
-    resolved_price_usd: Decimal | None = Field(default=None, ge=0)
-    resolved_note: str | None = None
-    notify_wecom: bool = False
-    wecom_bot_id: int | None = None
-
-
-@router.get("/manual-tasks")
+@router.get("/manual-tasks", dependencies=[Depends(require_roles(*MANUAL_TASK_READ_ROLES))])
 def list_manual_quote_tasks(db: Session = Depends(get_db)) -> list[dict[str, object]]:
-    return [_manual_task_to_dict(task) for task in ManualQuoteTaskRepository(db).list_tasks()]
+    return list_manual_quote_tasks_service(db)
 
 
-@router.patch("/manual-tasks/{task_id}")
+@router.patch("/manual-tasks/{task_id}", dependencies=[Depends(require_roles(*MANUAL_TASK_WRITE_ROLES))])
 def update_manual_quote_task(
     task_id: int,
     payload: ManualQuoteTaskUpdate,
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    update = payload.model_dump(exclude_unset=True)
-    notify_wecom = bool(update.pop("notify_wecom", False))
-    wecom_bot_id = update.pop("wecom_bot_id", None)
-    task = ManualQuoteTaskRepository(db).update(task_id, **update)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Manual quote task not found.")
-    if notify_wecom and payload.status == "resolved":
-        try_wecom_notify(
-            "manual_resolved",
-            lambda: notify_manual_task_resolved(db, task=task, bot_id=wecom_bot_id),
-            task.quote_id,
-        )
-    return _manual_task_to_dict(task)
-
-
-def _manual_task_to_dict(record: ManualQuoteTask) -> dict[str, object]:
-    return {
-        "id": record.id,
-        "quote_id": record.quote_id,
-        "reason": record.reason,
-        "risk_tags": record.risk_tags,
-        "request_json": record.request_json,
-        "result_json": record.result_json,
-        "status": record.status,
-        "assigned_to": record.assigned_to,
-        "resolved_price_usd": _decimal_to_string(record.resolved_price_usd),
-        "resolved_note": record.resolved_note,
-        "created_at": record.created_at.isoformat() if record.created_at else None,
-        "updated_at": record.updated_at.isoformat() if record.updated_at else None,
-    }
-
-
-def _decimal_to_string(value: Decimal | None) -> str | None:
-    if value is None:
-        return None
-    return f"{value:.2f}"
+    return update_manual_quote_task_service(db, task_id, payload)

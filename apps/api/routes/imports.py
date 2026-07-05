@@ -1,12 +1,13 @@
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
+from apps.api.auth import ADMIN_ROLES, require_roles
 from packages.data_importer.excel_loader import load_rate_card
 
 
-router = APIRouter(prefix="/imports", tags=["imports"])
+router = APIRouter(prefix="/imports", tags=["imports"], dependencies=[Depends(require_roles(*ADMIN_ROLES))])
 
 
 @router.post("/validate")
@@ -21,4 +22,3 @@ async def validate_import(file: UploadFile = File(...)) -> dict[str, object]:
         rows = load_rate_card(Path(temp_file.name))
 
     return {"status": "valid", "row_count": len(rows)}
-

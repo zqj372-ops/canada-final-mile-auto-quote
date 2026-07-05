@@ -181,3 +181,23 @@ CREATE INDEX IF NOT EXISTS idx_wecom_bot_configs_default
 
 CREATE INDEX IF NOT EXISTS idx_wecom_bot_configs_purpose
     ON wecom_bot_configs (purpose, enabled);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    key_hash VARCHAR(128) NOT NULL UNIQUE,
+    role VARCHAR(32) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash
+    ON api_keys (key_hash);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_role
+    ON api_keys (role);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_enabled
+    ON api_keys (enabled);

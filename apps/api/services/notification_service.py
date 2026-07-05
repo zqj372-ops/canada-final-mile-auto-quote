@@ -18,6 +18,7 @@ from packages.wecom.templates import (
 
 
 logger = logging.getLogger(__name__)
+MANUAL_REQUIRED_AT_ALL_TEXT = "@all 有新的加拿大尾程报价需人工确认，请查看上一条详情。"
 
 
 def notify_quote_success(
@@ -59,12 +60,10 @@ def notify_manual_required(
     bot = _select_bot(repository, purpose="manual_required", bot_id=bot_id)
     if bot is None:
         return None
-    return _send_with_bot(
-        repository,
-        bot,
-        markdown=markdown,
-        mention_all=bot.mention_all_on_manual_required,
-    )
+    result = _send_with_bot(repository, bot, markdown=markdown)
+    if bot.mention_all_on_manual_required:
+        _send_manual_required_at_all(repository, bot)
+    return result
 
 
 def notify_manual_task_resolved(
@@ -105,18 +104,37 @@ def _send_with_bot(
     bot: WeComBotConfig,
     *,
     markdown: str,
-    mention_all: bool = False,
 ) -> WeComSendResult:
     webhook_url = repository.decrypt_webhook_url(bot)
     client = WeComBotClient(webhook_url)
-    result = (
-        client.send_text(markdown, mentioned_list=["@all"])
-        if mention_all
-        else client.send_markdown(markdown)
-    )
+    try:
+        result = client.send_markdown(markdown)
+    except Exception as exc:
+        logger.warning(
+            "WeCom bot notification failed.",
+            extra={"bot_id": bot.id, "purpose": bot.purpose, "error": exc.__class__.__name__},
+        )
+        return WeComSendResult(success=False, error=exc.__class__.__name__, latency_ms=0, status_code=None)
     if not result.success:
         logger.warning(
             "WeCom bot notification failed.",
             extra={"bot_id": bot.id, "purpose": bot.purpose, "error": result.error},
         )
     return result
+
+
+def _send_manual_required_at_all(repository: WeComBotConfigRepository, bot: WeComBotConfig) -> None:
+    webhook_url = repository.decrypt_webhook_url(bot)
+    try:
+        result = WeComBotClient(webhook_url).send_text(MANUAL_REQUIRED_AT_ALL_TEXT, mentioned_list=["@all"])
+    except Exception as exc:
+        logger.warning(
+            "WeCom bot @all reminder failed.",
+            extra={"bot_id": bot.id, "purpose": bot.purpose, "error": exc.__class__.__name__},
+        )
+        return
+    if not result.success:
+        logger.warning(
+            "WeCom bot @all reminder failed.",
+            extra={"bot_id": bot.id, "purpose": bot.purpose, "error": result.error},
+        )

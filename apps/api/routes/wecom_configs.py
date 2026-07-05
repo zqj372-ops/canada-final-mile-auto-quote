@@ -2,13 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from apps.api.auth import ADMIN_ROLES, require_roles
 from apps.api.db.models import WeComBotConfig
 from apps.api.db.repositories.wecom_bot_config_repository import WeComBotConfigRepository
 from apps.api.db.session import get_db
 from packages.wecom.bot_client import WeComBotClient
 
 
-router = APIRouter(prefix="/wecom/bots", tags=["wecom"])
+router = APIRouter(prefix="/wecom/bots", tags=["wecom"], dependencies=[Depends(require_roles(*ADMIN_ROLES))])
 
 
 class WeComBotConfigCreate(BaseModel):

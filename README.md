@@ -122,6 +122,37 @@ alembic upgrade head
 `infra/postgres/init.sql` 仍保留用于本地容器首次初始化和演示数据；后续新增表、
 字段、索引必须通过 `migrations/versions/` 里的 Alembic migration 管理。测试库
 使用 SQLite 内存库，并由 `Base.metadata.create_all()` 自动建表。
+如果某个开发库已经由 `init.sql` 初始化到当前结构，可先执行 `alembic stamp head`
+标记版本；之后再用 `alembic upgrade head` 应用新增 migration。
+
+### API Key 权限
+
+本地开发可在 `.env` 设置：
+
+```bash
+DEV_AUTH_DISABLED=true
+```
+
+关闭后端认证。开启认证时，请把 `DEV_AUTH_DISABLED` 设为 `false`，并在请求里传：
+
+```bash
+X-API-Key: caq_xxx
+```
+
+API Key 只在创建时返回一次明文，数据库只保存 `key_hash`。管理接口：
+
+```bash
+GET /api-keys
+POST /api-keys
+PATCH /api-keys/{key_id}
+```
+
+角色权限：
+
+- `admin`：管理 AI 配置、企业微信配置、API Key 和导入校验。
+- `operator`：创建报价、查看审计、查看并处理人工任务。
+- `sales`：创建普通报价和 AI 自动报价。
+- `viewer`：只读审计和人工任务。
 
 ## 报价 API
 
@@ -225,6 +256,8 @@ POST /wecom/bots/{bot_id}/test
 - `/quotes/manual-tasks/{task_id}`：PATCH `status=resolved` 且 `notify_wecom=true`
   时推送人工报价已处理通知。
 
+如果人工确认机器人启用了 `mention_all_on_manual_required`，系统会先推送 markdown
+详情，再单独发送 `@all 有新的加拿大尾程报价需人工确认，请查看上一条详情。` 文本提醒。
 所有企业微信推送失败都只记录日志，不影响报价或人工任务接口返回。
 
 ### Vendor Rate Rule Quote

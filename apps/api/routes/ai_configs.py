@@ -4,13 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from apps.api.auth import ADMIN_ROLES, require_roles
 from apps.api.db.models import AIModelConfig as AIModelConfigRecord
 from apps.api.db.repositories.ai_model_config_repository import AIModelConfigRepository
 from apps.api.db.session import get_db
 from packages.ai_assistant.model_client import AIMessage, OpenAICompatibleClient, config_from_record
 
 
-router = APIRouter(prefix="/ai-configs", tags=["ai-configs"])
+router = APIRouter(prefix="/ai-configs", tags=["ai-configs"], dependencies=[Depends(require_roles(*ADMIN_ROLES))])
 
 
 class AIModelConfigCreate(BaseModel):
