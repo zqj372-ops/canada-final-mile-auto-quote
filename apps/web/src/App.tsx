@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { clearStoredApiKey, getApiBaseUrl, getStoredApiKey, setStoredApiKey } from "./api/client";
+import {
+  clearStoredApiKey,
+  getApiBaseUrl,
+  getBackofficeActor,
+  getStoredApiKey,
+  setStoredApiKey,
+  type CurrentActor,
+} from "./api/client";
 import AIQuotePage from "./pages/AIQuotePage";
 import AISettingsPage from "./pages/AISettingsPage";
 import AuditPage from "./pages/AuditPage";
@@ -39,6 +46,9 @@ export default function App() {
   );
   const [apiKeyInput, setApiKeyInput] = useState(() => getStoredApiKey("admin"));
   const [hasApiKey, setHasApiKey] = useState(() => Boolean(getStoredApiKey("admin")));
+  const [adminActor, setAdminActor] = useState<CurrentActor | null>(null);
+  const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
+  const [isVerifyingAdminKey, setIsVerifyingAdminKey] = useState(false);
 
   useEffect(() => {
     function handlePopState() {
@@ -52,6 +62,13 @@ export default function App() {
     const main = document.getElementById("main-content");
     main?.focus({ preventScroll: true });
   }, [path]);
+
+  useEffect(() => {
+    if (path === "/quote" || adminActor || isVerifyingAdminKey || !getStoredApiKey("admin")) {
+      return;
+    }
+    void verifyAdminKey();
+  }, [path, adminActor, isVerifyingAdminKey]);
 
   const page = useMemo(() => {
     if (path === "/admin") {
@@ -89,6 +106,46 @@ export default function App() {
     setPath(nextPath);
   }
 
+  async function verifyAdminKey(): Promise<boolean> {
+    const trimmed = apiKeyInput.trim();
+    setAdminAuthError(null);
+    if (!trimmed) {
+      clearStoredApiKey("admin");
+      setHasApiKey(false);
+      setAdminActor(null);
+      setAdminAuthError("请输入后台 API Key。");
+      return false;
+    }
+
+    setStoredApiKey("admin", trimmed);
+    setIsVerifyingAdminKey(true);
+    try {
+      const actor = await getBackofficeActor();
+      setAdminActor(actor);
+      setHasApiKey(true);
+      setAdminAuthError(null);
+      return true;
+    } catch (caught) {
+      clearStoredApiKey("admin");
+      setHasApiKey(false);
+      setAdminActor(null);
+      setAdminAuthError(
+        caught instanceof Error ? caught.message : "后台 API Key 验证失败",
+      );
+      return false;
+    } finally {
+      setIsVerifyingAdminKey(false);
+    }
+  }
+
+  function clearAdminKey() {
+    clearStoredApiKey("admin");
+    setApiKeyInput("");
+    setHasApiKey(false);
+    setAdminActor(null);
+    setAdminAuthError(null);
+  }
+
   if (path === "/quote") {
     return (
       <div className="app-shell">
@@ -100,6 +157,33 @@ export default function App() {
         </a>
         <main id="main-content" tabIndex={-1}>
           <QuotePage adminHref={withBasePath("/admin")} />
+        </main>
+      </div>
+    );
+  }
+
+  if (!adminActor) {
+    return (
+      <div className="app-shell">
+        <a
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-white focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-blue-800"
+          href="#main-content"
+        >
+          跳到主内容
+        </a>
+        <main id="main-content" tabIndex={-1}>
+          <AdminAccessGate
+            apiKeyInput={apiKeyInput}
+            error={adminAuthError}
+            hasApiKey={hasApiKey}
+            isVerifying={isVerifyingAdminKey}
+            onChange={setApiKeyInput}
+            onClear={clearAdminKey}
+            onSubmit={() => {
+              void verifyAdminKey();
+            }}
+            quoteHref={withBasePath("/quote")}
+          />
         </main>
       </div>
     );
@@ -133,8 +217,7 @@ export default function App() {
               className="flex flex-wrap items-end gap-2"
               onSubmit={(event) => {
                 event.preventDefault();
-                setStoredApiKey("admin", apiKeyInput);
-                setHasApiKey(Boolean(apiKeyInput.trim()));
+                void verifyAdminKey();
               }}
             >
               <label className="min-w-60">
@@ -149,20 +232,19 @@ export default function App() {
                 />
               </label>
               <button className="btn-primary min-h-10 px-3 py-1" type="submit">
-                保存
+                {isVerifyingAdminKey ? "验证中..." : "验证"}
               </button>
               <button
                 className="btn-secondary min-h-10 px-3 py-1"
                 type="button"
-                onClick={() => {
-                  clearStoredApiKey("admin");
-                  setApiKeyInput("");
-                  setHasApiKey(false);
-                }}
+                onClick={clearAdminKey}
               >
                 清除
               </button>
             </form>
+            <p className="text-xs text-slate-500">
+              已验证：{adminActor.name} / {adminActor.role}
+            </p>
 
             <nav className="flex flex-wrap justify-end gap-2" aria-label="后台导航">
             {adminRoutes.map((route) => {
@@ -256,6 +338,87 @@ function stripBasePath(pathname: string): string {
 
 function withBasePath(routePath: RoutePath): string {
   return `${APP_BASE_PATH}${routePath}`;
+}
+
+function AdminAccessGate({
+  apiKeyInput,
+  error,
+  hasApiKey,
+  isVerifying,
+  onChange,
+  onClear,
+  onSubmit,
+  quoteHref,
+}: {
+  apiKeyInput: string;
+  error: string | null;
+  hasApiKey: boolean;
+  isVerifying: boolean;
+  onChange: (value: string) => void;
+  onClear: () => void;
+  onSubmit: () => void;
+  quoteHref: string;
+}) {
+  return (
+    <div className="min-h-dvh bg-slate-950 px-4 py-10 text-slate-100">
+      <section className="mx-auto grid max-w-2xl gap-6 rounded-md border border-slate-700 bg-slate-900 p-6 shadow-2xl sm:p-8">
+        <div>
+          <p className="text-sm font-semibold text-blue-300">Backoffice Access</p>
+          <h1 className="mt-2 text-2xl font-semibold text-white">
+            后台管理登录
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            后台页面需要先验证后台 Key。请使用 admin、operator 或 viewer 角色的 Key；
+            前台报价 sales Key 不能进入后台。
+          </p>
+        </div>
+
+        {error && (
+          <div
+            className="rounded-md border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-100"
+            role="alert"
+          >
+            {error}
+          </div>
+        )}
+
+        <form
+          className="grid gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit();
+          }}
+        >
+          <label>
+            <span className="field-label text-slate-200">后台 X-API-Key</span>
+            <input
+              className="field-input border-slate-600 bg-slate-950 text-slate-100 placeholder:text-slate-500"
+              type="password"
+              value={apiKeyInput}
+              onChange={(event) => onChange(event.target.value)}
+              placeholder={hasApiKey ? "后台 Key 已保存，点击验证进入" : "输入后台 API Key"}
+              autoComplete="off"
+              autoFocus
+            />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <button className="btn-primary" type="submit" disabled={isVerifying}>
+              {isVerifying ? "正在验证..." : "验证并进入后台"}
+            </button>
+            <button className="btn-secondary bg-slate-800 text-slate-100" type="button" onClick={onClear}>
+              清除
+            </button>
+          </div>
+        </form>
+
+        <div className="flex flex-wrap gap-3 border-t border-slate-800 pt-5">
+          <a className="btn-secondary bg-slate-800 text-slate-100" href={quoteHref}>
+            返回前台报价
+          </a>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {

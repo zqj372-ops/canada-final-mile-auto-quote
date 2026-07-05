@@ -10,6 +10,8 @@ from apps.api.db.session import get_db
 
 
 ADMIN_ROLES = ("admin",)
+ALL_ROLES = ("admin", "operator", "sales", "viewer")
+BACKOFFICE_ROLES = ("admin", "operator", "viewer")
 QUOTE_WRITE_ROLES = ("admin", "operator", "sales")
 AI_QUOTE_WRITE_ROLES = ("admin", "sales")
 MANUAL_TASK_READ_ROLES = ("admin", "operator", "viewer")

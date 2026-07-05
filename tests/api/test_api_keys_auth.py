@@ -182,3 +182,36 @@ def test_operator_can_update_manual_task(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert response.status_code == 200
     assert response.json()["status"] == "resolved"
+
+
+def test_backoffice_auth_allows_admin_operator_viewer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    for api_key, role in [
+        (ADMIN_KEY, "admin"),
+        (OPERATOR_KEY, "operator"),
+        (VIEWER_KEY, "viewer"),
+    ]:
+        response = client.get("/auth/backoffice", headers=headers(api_key))
+        assert response.status_code == 200
+        assert response.json()["role"] == role
+
+
+def test_backoffice_auth_rejects_sales_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    response = client.get("/auth/backoffice", headers=headers(SALES_KEY))
+
+    assert response.status_code == 403
+
+
+def test_auth_me_allows_sales_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    response = client.get("/auth/me", headers=headers(SALES_KEY))
+
+    assert response.status_code == 200
+    assert response.json()["role"] == "sales"

@@ -237,7 +237,7 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
               重新加载配置
             </button>
             <a className="ai-secondary-button" href={adminHref}>
-              后台管理
+              后台登录
             </a>
           </div>
         </section>
@@ -273,7 +273,7 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
               placeholder={hasApiKey ? "前台 Key 已保存" : "输入前台 API Key"}
             />
             <a className="ai-secondary-button" href={adminHref}>
-              后台管理
+              后台登录
             </a>
             <span
               className={`inline-flex min-h-11 w-fit items-center rounded-full border px-4 py-2 text-sm font-semibold ${

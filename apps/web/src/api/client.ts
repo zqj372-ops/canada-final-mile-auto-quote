@@ -70,6 +70,12 @@ export interface ZoneQuoteResult {
   internal_note: string | null;
 }
 
+export interface CurrentActor {
+  api_key_id: number | null;
+  name: string;
+  role: string;
+}
+
 export interface AIExtractedQuoteDraft {
   address_line: string | null;
   postal_code: string | null;
@@ -461,6 +467,10 @@ export function calculateZoneQuote(
     method: "POST",
     body: JSON.stringify(payload),
   }, "quote");
+}
+
+export function getBackofficeActor(): Promise<CurrentActor> {
+  return request<CurrentActor>("/auth/backoffice", {}, "admin");
 }
 
 export function calculateAIAutoQuote(
