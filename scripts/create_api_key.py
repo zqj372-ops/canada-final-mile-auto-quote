@@ -1,4 +1,9 @@
 import argparse
+from pathlib import Path
+import sys
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from apps.api.db.repositories.api_key_repository import APIKeyRepository
 from apps.api.db.session import get_session_factory
@@ -23,3 +28,7 @@ def main() -> None:
     print(f"name={record.name}")
     print(f"role={record.role}")
     print(f"api_key={plain_key}")
+
+
+if __name__ == "__main__":
+    main()
