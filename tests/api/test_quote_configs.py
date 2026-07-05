@@ -86,3 +86,36 @@ def test_sales_can_read_but_cannot_update_workbench_config(monkeypatch: pytest.M
 
     assert read_response.status_code == 200
     assert update_response.status_code == 403
+
+
+def test_admin_can_create_search_config_without_plain_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    response = client.post(
+        "/search-configs",
+        json={
+            "name": "Tavily",
+            "provider": "tavily",
+            "base_url": "https://api.tavily.com",
+            "api_key": "tvly-secret-1234",
+            "is_default": True,
+        },
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["masked_api_key"] == "tvl****1234"
+    assert "api_key" not in body
+    assert "api_key_encrypted" not in body
+    assert "tvly-secret-1234" not in response.text
+
+
+def test_sales_cannot_manage_search_configs(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    response = client.get("/search-configs", headers={"X-API-Key": SALES_KEY})
+
+    assert response.status_code == 403

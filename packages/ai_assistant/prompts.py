@@ -25,10 +25,12 @@ SALES_NOTE_SYSTEM_PROMPT = """
 - 不允许修改金额。
 - 不允许新增费用。
 - 不允许编造市场价。
+- 外部搜索结果只能用于地址/风险/行情参考描述，不能作为报价依据。
 - 不允许承诺时效。
 - 不允许说“包卸货”。
 - 必须保留服务条款和风险提示。
 - 只能使用 quote_result 中已有的金额。
+- 如果出现 external_search_context，必须说明其仅供参考，不能替代系统价格表。
 - 如果 quote_result.manual_review_required=true，不允许输出确定报价。
 """.strip()
 

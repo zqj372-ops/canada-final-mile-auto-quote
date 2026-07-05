@@ -2,9 +2,12 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   calculateAIAutoQuote,
   listAIConfigs,
+  listSearchConfigs,
   listWeComBots,
   type AIModelConfigPublic,
   type AIAutoQuoteResponse,
+  type SearchApiConfigPublic,
+  type SearchEvidence,
   type WeComBotConfigPublic,
 } from "../api/client";
 import ResultCard from "../components/ResultCard";
@@ -14,10 +17,13 @@ export default function AIQuotePage() {
   const [message, setMessage] = useState("");
   const [configs, setConfigs] = useState<AIModelConfigPublic[]>([]);
   const [wecomBots, setWecomBots] = useState<WeComBotConfigPublic[]>([]);
+  const [searchConfigs, setSearchConfigs] = useState<SearchApiConfigPublic[]>([]);
   const [selectedConfigId, setSelectedConfigId] = useState("");
   const [selectedWecomBotId, setSelectedWecomBotId] = useState("");
+  const [selectedSearchConfigId, setSelectedSearchConfigId] = useState("");
   const [autoSubmit, setAutoSubmit] = useState(true);
   const [notifyWecom, setNotifyWecom] = useState(false);
+  const [enableSearchContext, setEnableSearchContext] = useState(false);
   const [result, setResult] = useState<AIAutoQuoteResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -26,6 +32,7 @@ export default function AIQuotePage() {
   useEffect(() => {
     void loadConfigs();
     void loadWecomBots();
+    void loadSearchConfigs();
   }, []);
 
   async function loadConfigs() {
@@ -41,6 +48,14 @@ export default function AIQuotePage() {
       setWecomBots(await listWeComBots());
     } catch {
       setWecomBots([]);
+    }
+  }
+
+  async function loadSearchConfigs() {
+    try {
+      setSearchConfigs(await listSearchConfigs());
+    } catch {
+      setSearchConfigs([]);
     }
   }
 
@@ -61,6 +76,8 @@ export default function AIQuotePage() {
         auto_submit_when_complete: autoSubmit,
         notify_wecom: notifyWecom,
         wecom_bot_id: selectedWecomBotId ? Number(selectedWecomBotId) : null,
+        enable_search_context: enableSearchContext,
+        search_config_id: selectedSearchConfigId ? Number(selectedSearchConfigId) : null,
       });
       setResult(response);
     } catch (caught) {
@@ -149,6 +166,41 @@ export default function AIQuotePage() {
                 字段完整时自动提交 Quote Engine 报价
               </span>
             </label>
+
+            <fieldset className="grid gap-3 rounded-md border border-slate-200 p-3">
+              <legend className="px-1 text-sm font-semibold text-slate-950">搜索参考</legend>
+              <label className="flex min-h-11 items-center gap-3">
+                <input
+                  className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
+                  type="checkbox"
+                  checked={enableSearchContext}
+                  onChange={(event) => setEnableSearchContext(event.target.checked)}
+                />
+                <span className="text-sm font-medium text-slate-800">
+                  引用搜索结果确认地址情况和市场行情
+                </span>
+              </label>
+              <label>
+                <span className="field-label">search_config_id</span>
+                <select
+                  className="field-input"
+                  value={selectedSearchConfigId}
+                  onChange={(event) => setSelectedSearchConfigId(event.target.value)}
+                  disabled={!enableSearchContext}
+                >
+                  <option value="">使用默认搜索配置</option>
+                  {searchConfigs.map((config) => (
+                    <option key={config.id} value={config.id}>
+                      {config.name} / {config.provider}
+                      {config.is_default ? " / 默认" : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="field-hint">
+                  搜索结果只用于风险备注和人工复核参考，不允许改变 Quote Engine 的报价金额。
+                </p>
+              </label>
+            </fieldset>
 
             <fieldset className="grid gap-3 rounded-md border border-slate-200 p-3">
               <legend className="px-1 text-sm font-semibold text-slate-950">企业微信推送</legend>
@@ -274,6 +326,19 @@ export default function AIQuotePage() {
                 </div>
               </section>
 
+              {result.search_context && (
+                <section className="panel p-5">
+                  <h2 className="section-title">搜索参考</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    {result.search_context.note}
+                  </p>
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    <SearchEvidenceBlock title="地址情况" evidence={result.search_context.address_research} />
+                    <SearchEvidenceBlock title="行情参考" evidence={result.search_context.market_research} />
+                  </div>
+                </section>
+              )}
+
               {result.quote_result && <ResultCard result={result.quote_result} />}
             </>
           ) : (
@@ -290,6 +355,66 @@ export default function AIQuotePage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function SearchEvidenceBlock({
+  title,
+  evidence,
+}: {
+  title: string;
+  evidence: SearchEvidence | null;
+}) {
+  if (!evidence) {
+    return (
+      <div className="rounded-md border border-slate-200 p-4 text-sm text-slate-600">
+        {title}：未搜索
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-md border border-slate-200 p-4">
+      <h3 className="text-sm font-semibold text-slate-950">{title}</h3>
+      <p className="mt-2 break-words font-mono text-xs leading-5 text-slate-500">
+        {evidence.query}
+      </p>
+      {evidence.error ? (
+        <p className="mt-3 rounded-md bg-red-50 p-3 text-sm text-red-900">
+          {evidence.error}
+        </p>
+      ) : (
+        <>
+          {evidence.answer && (
+            <p className="mt-3 rounded-md bg-slate-50 p-3 text-sm leading-6 text-slate-800">
+              {evidence.answer}
+            </p>
+          )}
+          <div className="mt-3 grid gap-2">
+            {evidence.results.length === 0 ? (
+              <p className="text-sm text-slate-600">未返回来源链接。</p>
+            ) : (
+              evidence.results.map((item) => (
+                <a
+                  key={item.url}
+                  className="rounded-md border border-slate-200 p-3 text-sm text-blue-800 hover:bg-blue-50"
+                  href={item.url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span className="font-semibold">{item.title}</span>
+                  {item.content && (
+                    <span className="mt-1 block line-clamp-2 text-xs leading-5 text-slate-600">
+                      {item.content}
+                    </span>
+                  )}
+                </a>
+              ))
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

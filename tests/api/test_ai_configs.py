@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 from apps.api.db.models import Base
 from apps.api.db.session import get_db
 from apps.api.main import app
+from packages.ai_assistant.model_discovery import DiscoveredModel, ModelDiscoveryResult
 
 
 def build_client() -> TestClient:
@@ -52,6 +53,46 @@ def test_create_ai_config_does_not_return_plain_api_key() -> None:
     assert "api_key_encrypted" not in body
     assert body["masked_api_key"] == "sk-****abcd"
     assert "sk-test-secret-abcd" not in response.text
+
+
+def test_provider_presets_include_openrouter_and_custom() -> None:
+    client = build_client()
+
+    response = client.get("/ai-configs/provider-presets")
+
+    assert response.status_code == 200
+    providers = {item["provider"] for item in response.json()}
+    assert "openrouter" in providers
+    assert "custom" in providers
+
+
+def test_discover_models_returns_models_without_storing_key(monkeypatch) -> None:
+    client = build_client()
+
+    def fake_discover_models(**values):
+        return ModelDiscoveryResult(
+            provider=values["provider"],
+            base_url=values["base_url"],
+            latency_ms=12,
+            models=[DiscoveredModel(id="demo-model", display_name="Demo Model")],
+        )
+
+    monkeypatch.setattr("apps.api.routes.ai_configs.discover_models", fake_discover_models)
+
+    response = client.post(
+        "/ai-configs/discover-models",
+        json={
+            "provider": "openai",
+            "base_url": "https://example.invalid/v1",
+            "api_key": "sk-discovery-only",
+        },
+    )
+    configs = client.get("/ai-configs").json()
+
+    assert response.status_code == 200
+    assert response.json()["models"][0]["id"] == "demo-model"
+    assert configs == []
+    assert "sk-discovery-only" not in response.text
 
 
 def test_set_default_ai_config_clears_previous_default() -> None:

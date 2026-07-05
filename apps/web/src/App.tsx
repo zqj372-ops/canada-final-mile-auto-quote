@@ -6,6 +6,7 @@ import AuditPage from "./pages/AuditPage";
 import ManualTasksPage from "./pages/ManualTasksPage";
 import QuotePage from "./pages/QuotePage";
 import QuoteSettingsPage from "./pages/QuoteSettingsPage";
+import SearchSettingsPage from "./pages/SearchSettingsPage";
 import WeComSettingsPage from "./pages/WeComSettingsPage";
 
 type RoutePath =
@@ -16,6 +17,7 @@ type RoutePath =
   | "/audit"
   | "/settings/quote"
   | "/settings/ai"
+  | "/settings/search"
   | "/settings/wecom";
 const APP_BASE_PATH = normalizeBasePath(import.meta.env.VITE_APP_BASE_PATH || "/");
 
@@ -27,6 +29,7 @@ const adminRoutes: Array<{ path: RoutePath; label: string; description: string }
   { path: "/audit", label: "审计查询", description: "日志" },
   { path: "/settings/quote", label: "报价配置", description: "后台" },
   { path: "/settings/ai", label: "AI 配置", description: "模型" },
+  { path: "/settings/search", label: "搜索配置", description: "Tavily" },
   { path: "/settings/wecom", label: "企业微信配置", description: "机器人" },
 ];
 
@@ -68,6 +71,9 @@ export default function App() {
     }
     if (path === "/settings/quote") {
       return <QuoteSettingsPage />;
+    }
+    if (path === "/settings/search") {
+      return <SearchSettingsPage />;
     }
     if (path === "/settings/wecom") {
       return <WeComSettingsPage />;
@@ -219,6 +225,9 @@ function normalizePath(pathname: string): RoutePath {
   if (strippedPath === "/settings/quote") {
     return "/settings/quote";
   }
+  if (strippedPath === "/settings/search") {
+    return "/settings/search";
+  }
   if (strippedPath === "/settings/wecom") {
     return "/settings/wecom";
   }
@@ -255,6 +264,7 @@ function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
     { path: "/audit", title: "审计查询", body: "按 quote_id 查看报价请求和结果。" },
     { path: "/settings/quote", title: "报价配置", body: "可视化维护前台字段、风险阈值和报价话术。" },
     { path: "/settings/ai", title: "AI 配置", body: "维护字段提取和话术模型配置。" },
+    { path: "/settings/search", title: "搜索配置", body: "维护 Tavily 等搜索 API Key，用于地址和行情参考。" },
     { path: "/settings/wecom", title: "企业微信配置", body: "维护通知机器人和默认用途。" },
     { path: "/quote", title: "进入前台", body: "打开销售使用的 AI 报价工作台。" },
   ];

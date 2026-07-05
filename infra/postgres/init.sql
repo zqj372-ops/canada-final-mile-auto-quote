@@ -182,6 +182,25 @@ CREATE INDEX IF NOT EXISTS idx_wecom_bot_configs_default
 CREATE INDEX IF NOT EXISTS idx_wecom_bot_configs_purpose
     ON wecom_bot_configs (purpose, enabled);
 
+CREATE TABLE IF NOT EXISTS search_api_configs (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    provider VARCHAR(32) NOT NULL DEFAULT 'tavily',
+    base_url TEXT,
+    api_key_encrypted TEXT NOT NULL,
+    purpose VARCHAR(32) NOT NULL DEFAULT 'general',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_search_api_configs_default
+    ON search_api_configs (is_default, enabled);
+
+CREATE INDEX IF NOT EXISTS idx_search_api_configs_purpose
+    ON search_api_configs (purpose, enabled);
+
 CREATE TABLE IF NOT EXISTS api_keys (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(128) NOT NULL,

@@ -98,6 +98,8 @@ export interface AIAutoQuoteRequest {
   auto_submit_when_complete: boolean;
   notify_wecom?: boolean;
   wecom_bot_id?: number | null;
+  enable_search_context?: boolean;
+  search_config_id?: number | null;
 }
 
 export interface AIAutoQuoteResponse {
@@ -107,6 +109,7 @@ export interface AIAutoQuoteResponse {
   internal_note: string | null;
   missing_fields: string[];
   manual_review_required: boolean;
+  search_context: QuoteSearchContext | null;
 }
 
 export interface AIModelConfigPublic {
@@ -147,6 +150,40 @@ export interface AIConfigTestResult {
   preview?: string;
 }
 
+export interface AIProviderPreset {
+  provider: string;
+  label: string;
+  base_url: string;
+  models_path: string;
+  chat_path: string;
+  api_key_hint: string;
+  recommended_models: string[];
+  notes: string | null;
+}
+
+export interface DiscoveredModel {
+  id: string;
+  display_name: string | null;
+  owned_by: string | null;
+  context_length: number | null;
+  source: string;
+}
+
+export interface ModelDiscoveryRequest {
+  provider: string;
+  base_url?: string | null;
+  api_key: string;
+  timeout_seconds?: number;
+}
+
+export interface ModelDiscoveryResult {
+  provider: string;
+  base_url: string;
+  models: DiscoveredModel[];
+  latency_ms: number | null;
+  error: string | null;
+}
+
 export interface WeComBotConfigPublic {
   id: number;
   name: string;
@@ -175,6 +212,58 @@ export interface WeComTestResult {
   error: string | null;
   latency_ms: number;
   status_code: number | null;
+}
+
+export interface SearchApiConfigPublic {
+  id: number;
+  name: string;
+  provider: string;
+  base_url: string | null;
+  masked_api_key: string | null;
+  purpose: string;
+  enabled: boolean;
+  is_default: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SearchApiConfigPayload {
+  name?: string;
+  provider?: string;
+  base_url?: string | null;
+  api_key?: string | null;
+  purpose?: string;
+  enabled?: boolean;
+  is_default?: boolean;
+}
+
+export interface SearchConfigTestResult {
+  success: boolean;
+  error: string | null;
+  latency_ms: number;
+  result_count: number;
+  preview: string | null;
+}
+
+export interface SearchResultItem {
+  title: string;
+  url: string;
+  content: string | null;
+  score: number | null;
+}
+
+export interface SearchEvidence {
+  query: string;
+  answer: string | null;
+  results: SearchResultItem[];
+  error: string | null;
+}
+
+export interface QuoteSearchContext {
+  provider: string;
+  address_research: SearchEvidence | null;
+  market_research: SearchEvidence | null;
+  note: string;
 }
 
 export interface ManualQuoteTask {
@@ -421,6 +510,19 @@ export function listAIConfigs(): Promise<AIModelConfigPublic[]> {
   return request<AIModelConfigPublic[]>("/ai-configs");
 }
 
+export function listAIProviderPresets(): Promise<AIProviderPreset[]> {
+  return request<AIProviderPreset[]>("/ai-configs/provider-presets");
+}
+
+export function discoverAIModels(
+  payload: ModelDiscoveryRequest,
+): Promise<ModelDiscoveryResult> {
+  return request<ModelDiscoveryResult>("/ai-configs/discover-models", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function createAIConfig(
   payload: Required<Pick<AIModelConfigPayload, "name" | "model_name">> & AIModelConfigPayload,
 ): Promise<AIModelConfigPublic> {
@@ -497,6 +599,47 @@ export function setDefaultWeComBot(botId: number): Promise<WeComBotConfigPublic>
 
 export function testWeComBot(botId: number): Promise<WeComTestResult> {
   return request<WeComTestResult>(`/wecom/bots/${botId}/test`, {
+    method: "POST",
+  });
+}
+
+export function listSearchConfigs(): Promise<SearchApiConfigPublic[]> {
+  return request<SearchApiConfigPublic[]>("/search-configs");
+}
+
+export function createSearchConfig(
+  payload: Required<Pick<SearchApiConfigPayload, "name" | "api_key">> & SearchApiConfigPayload,
+): Promise<SearchApiConfigPublic> {
+  return request<SearchApiConfigPublic>("/search-configs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateSearchConfig(
+  configId: number,
+  payload: SearchApiConfigPayload,
+): Promise<SearchApiConfigPublic> {
+  return request<SearchApiConfigPublic>(`/search-configs/${configId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteSearchConfig(configId: number): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/search-configs/${configId}`, {
+    method: "DELETE",
+  });
+}
+
+export function setDefaultSearchConfig(configId: number): Promise<SearchApiConfigPublic> {
+  return request<SearchApiConfigPublic>(`/search-configs/${configId}/set-default`, {
+    method: "POST",
+  });
+}
+
+export function testSearchConfig(configId: number): Promise<SearchConfigTestResult> {
+  return request<SearchConfigTestResult>(`/search-configs/${configId}/test`, {
     method: "POST",
   });
 }

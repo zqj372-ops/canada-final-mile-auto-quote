@@ -7,17 +7,10 @@ from sqlalchemy.orm import Session
 
 from apps.api.db.models import AIModelConfig
 from apps.api.security.secrets import decrypt_secret, encrypt_secret, mask_tail
+from packages.ai_assistant.provider_catalog import PROVIDER_PRESETS
 
 
-ALLOWED_PROVIDERS = {
-    "openai",
-    "deepseek",
-    "qwen",
-    "moonshot",
-    "zhipu",
-    "openrouter",
-    "custom",
-}
+ALLOWED_PROVIDERS = set(PROVIDER_PRESETS)
 ALLOWED_PURPOSES = {"field_extraction", "sales_note", "address_type", "general"}
 
 

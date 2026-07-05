@@ -11,6 +11,7 @@ from apps.api.routes.imports import router as imports_router
 from apps.api.routes.manual_tasks import router as manual_tasks_router
 from apps.api.routes.quote_configs import router as quote_configs_router
 from apps.api.routes.quotes import router as quotes_router
+from apps.api.routes.search_configs import router as search_configs_router
 from apps.api.routes.wecom_configs import router as wecom_configs_router
 
 
@@ -44,6 +45,7 @@ app.include_router(audit_router)
 app.include_router(imports_router)
 app.include_router(quote_configs_router)
 app.include_router(ai_configs_router)
+app.include_router(search_configs_router)
 app.include_router(wecom_configs_router)
 app.include_router(api_keys_router)
 

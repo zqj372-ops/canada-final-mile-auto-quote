@@ -2,12 +2,16 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   createAIConfig,
   deleteAIConfig,
+  discoverAIModels,
   listAIConfigs,
+  listAIProviderPresets,
   setDefaultAIConfig,
   testAIConfig,
   updateAIConfig,
+  type AIProviderPreset,
   type AIModelConfigPayload,
   type AIModelConfigPublic,
+  type DiscoveredModel,
 } from "../api/client";
 
 interface FormState {
@@ -22,6 +26,15 @@ interface FormState {
   timeout_seconds: string;
   purpose: string;
   enabled: boolean;
+  is_default: boolean;
+}
+
+interface ImportState {
+  provider: string;
+  base_url: string;
+  api_key: string;
+  model_name: string;
+  purpose: string;
   is_default: boolean;
 }
 
@@ -40,19 +53,34 @@ const emptyForm: FormState = {
   is_default: false,
 };
 
-const providers = ["openai", "deepseek", "qwen", "moonshot", "zhipu", "openrouter", "custom"];
+const emptyImport: ImportState = {
+  provider: "openai",
+  base_url: "https://api.openai.com/v1",
+  api_key: "",
+  model_name: "",
+  purpose: "general",
+  is_default: false,
+};
+
+const fallbackProviders = ["openai", "openrouter", "deepseek", "qwen", "moonshot", "zhipu", "custom"];
 const purposes = ["field_extraction", "sales_note", "address_type", "general"];
 
 export default function AISettingsPage() {
   const [configs, setConfigs] = useState<AIModelConfigPublic[]>([]);
+  const [providerPresets, setProviderPresets] = useState<AIProviderPreset[]>([]);
+  const [importForm, setImportForm] = useState<ImportState>(emptyImport);
+  const [discoveredModels, setDiscoveredModels] = useState<DiscoveredModel[]>([]);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDiscovering, setIsDiscovering] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   useEffect(() => {
     void loadConfigs();
+    void loadProviderPresets();
   }, []);
 
   async function loadConfigs() {
@@ -61,6 +89,93 @@ export default function AISettingsPage() {
       setConfigs(await listAIConfigs());
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "AI 配置加载失败");
+    }
+  }
+
+  async function loadProviderPresets() {
+    try {
+      const presets = await listAIProviderPresets();
+      setProviderPresets(presets);
+      const openai = presets.find((preset) => preset.provider === emptyImport.provider);
+      if (openai?.base_url) {
+        setImportForm((current) => ({ ...current, base_url: openai.base_url }));
+      }
+    } catch {
+      setProviderPresets([]);
+    }
+  }
+
+  async function handleDiscoverModels() {
+    setError(null);
+    setNotice(null);
+    setDiscoveredModels([]);
+    if (!importForm.api_key.trim()) {
+      setError("请先输入模型供应商 API Key");
+      return;
+    }
+    if (!importForm.base_url.trim()) {
+      setError("请先确认 base_url");
+      return;
+    }
+
+    setIsDiscovering(true);
+    try {
+      const response = await discoverAIModels({
+        provider: importForm.provider,
+        base_url: importForm.base_url,
+        api_key: importForm.api_key.trim(),
+        timeout_seconds: 20,
+      });
+      setDiscoveredModels(response.models);
+      if (response.models.length > 0) {
+        setImportForm((current) => ({ ...current, model_name: response.models[0].id }));
+      }
+      setNotice(
+        response.error
+          ? `模型列表返回提示：${response.error}`
+          : `已获取 ${response.models.length} 个模型${response.latency_ms ? `，耗时 ${response.latency_ms}ms` : ""}`,
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "模型列表获取失败");
+    } finally {
+      setIsDiscovering(false);
+    }
+  }
+
+  async function handleImportModel() {
+    setError(null);
+    setNotice(null);
+    if (!importForm.api_key.trim()) {
+      setError("请先输入模型供应商 API Key");
+      return;
+    }
+    if (!importForm.model_name.trim()) {
+      setError("请先选择一个模型");
+      return;
+    }
+    setIsImporting(true);
+    try {
+      await createAIConfig({
+        name: `${providerLabel(importForm.provider, providerPresets)} / ${importForm.model_name}`,
+        provider: importForm.provider,
+        base_url: optionalText(importForm.base_url),
+        api_key: importForm.api_key.trim(),
+        model_name: importForm.model_name.trim(),
+        temperature: 0,
+        max_tokens: 800,
+        timeout_seconds: 30,
+        purpose: importForm.purpose,
+        enabled: true,
+        is_default: importForm.is_default,
+      });
+      setNotice("模型配置已自动导入，可在列表中设为默认或测试连接");
+      setImportForm((current) => ({ ...current, api_key: "", model_name: "" }));
+      setDiscoveredModels([]);
+      await loadConfigs();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "模型配置导入失败");
+    } finally {
+      setIsImporting(false);
     }
   }
 
@@ -158,6 +273,25 @@ export default function AISettingsPage() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function updateImport<K extends keyof ImportState>(key: K, value: ImportState[K]) {
+    setImportForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function selectImportProvider(provider: string) {
+    const preset = providerPresets.find((item) => item.provider === provider);
+    setImportForm((current) => ({
+      ...current,
+      provider,
+      base_url: preset?.base_url ?? "",
+      model_name: "",
+    }));
+    setDiscoveredModels([]);
+  }
+
+  const providerOptions = providerPresets.length
+    ? providerPresets.map((preset) => preset.provider)
+    : fallbackProviders;
+
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
       <header>
@@ -185,6 +319,103 @@ export default function AISettingsPage() {
       )}
 
       <div className="grid gap-6 xl:grid-cols-[0.78fr_1.22fr]">
+        <div className="grid content-start gap-6">
+        <section className="panel p-5">
+          <div>
+            <h2 className="section-title">自动导入模型</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              选择供应商后只输入 API Key，系统自动读取模型列表；选中后保存为可用模型配置。
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-4">
+            <label>
+              <span className="field-label">模型供应商</span>
+              <select
+                className="field-input"
+                value={importForm.provider}
+                onChange={(event) => selectImportProvider(event.target.value)}
+              >
+                {providerOptions.map((provider) => (
+                  <option key={provider} value={provider}>
+                    {providerLabel(provider, providerPresets)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <TextField
+              label="base_url"
+              value={importForm.base_url}
+              onChange={(value) => updateImport("base_url", value)}
+              placeholder="https://api.openai.com/v1"
+            />
+            <label>
+              <span className="field-label">API Key</span>
+              <input
+                className="field-input"
+                type="password"
+                value={importForm.api_key}
+                onChange={(event) => updateImport("api_key", event.target.value)}
+                placeholder={providerHint(importForm.provider, providerPresets)}
+                autoComplete="new-password"
+              />
+            </label>
+            <button
+              className="btn-secondary"
+              type="button"
+              onClick={() => void handleDiscoverModels()}
+              disabled={isDiscovering}
+            >
+              {isDiscovering ? "正在获取模型..." : "获取模型列表"}
+            </button>
+
+            <label>
+              <span className="field-label">选择模型</span>
+              <select
+                className="field-input"
+                value={importForm.model_name}
+                onChange={(event) => updateImport("model_name", event.target.value)}
+                disabled={discoveredModels.length === 0}
+              >
+                <option value="">先获取模型列表</option>
+                {discoveredModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.display_name || model.id}
+                    {model.source === "recommended" ? " / 推荐" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className="field-label">用途</span>
+              <select
+                className="field-input"
+                value={importForm.purpose}
+                onChange={(event) => updateImport("purpose", event.target.value)}
+              >
+                {purposes.map((purpose) => (
+                  <option key={purpose} value={purpose}>
+                    {purpose}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <CheckboxField
+              label="保存后设为默认模型"
+              checked={importForm.is_default}
+              onChange={(value) => updateImport("is_default", value)}
+            />
+            <button
+              className="btn-primary"
+              type="button"
+              onClick={() => void handleImportModel()}
+              disabled={isImporting || !importForm.model_name}
+            >
+              {isImporting ? "正在导入..." : "导入并使用"}
+            </button>
+          </div>
+        </section>
+
         <section className="panel p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -207,9 +438,9 @@ export default function AISettingsPage() {
                 value={form.provider}
                 onChange={(event) => update("provider", event.target.value)}
               >
-                {providers.map((provider) => (
+                {providerOptions.map((provider) => (
                   <option key={provider} value={provider}>
-                    {provider}
+                    {providerLabel(provider, providerPresets)}
                   </option>
                 ))}
               </select>
@@ -265,6 +496,7 @@ export default function AISettingsPage() {
             </button>
           </form>
         </section>
+        </div>
 
         <section className="panel p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -449,6 +681,14 @@ function buildPayload(form: FormState): AIModelConfigPayload {
     payload.api_key = form.api_key.trim();
   }
   return payload;
+}
+
+function providerLabel(provider: string, presets: AIProviderPreset[]): string {
+  return presets.find((preset) => preset.provider === provider)?.label ?? provider;
+}
+
+function providerHint(provider: string, presets: AIProviderPreset[]): string {
+  return presets.find((preset) => preset.provider === provider)?.api_key_hint ?? "输入 API Key";
 }
 
 function optionalText(value: string): string | null {

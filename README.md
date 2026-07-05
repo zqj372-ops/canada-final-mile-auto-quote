@@ -96,7 +96,8 @@ VITE_API_BASE_URL=http://localhost:8000 npm run dev
 - `/manual-tasks`：处理 `manual_required` 人工确认任务。
 - `/audit`：按 `quote_id` 查询报价审计记录。
 - `/settings/quote`：维护 `/quote` 工作台后台配置，包括示例、字段选项、风险阈值和复制话术。
-- `/settings/ai`：维护 OpenAI-compatible 模型配置。
+- `/settings/ai`：维护 OpenAI-compatible 模型配置，支持输入 API Key 自动获取模型列表并导入。
+- `/settings/search`：维护 Tavily 等搜索 API Key，用于 AI 自动报价时查询地址和行情参考。
 - `/settings/wecom`：维护企业微信群机器人 Webhook 配置。
 
 `/quote` 是中文 AI 报价工作台：销售粘贴尺寸、重量、地址和邮编，页面只做字段识别
@@ -251,6 +252,7 @@ PATCH /quotes/manual-tasks/{task_id}
 客户原始消息
 -> AI 提取结构化字段
 -> 后端校验字段完整性
+-> 可选 Tavily 搜索地址情况 / 市场行情参考
 -> Zone Quote Engine 确定性报价
 -> 写 audit / manual task
 -> AI 只基于锁定 quote_result 润色销售话术
@@ -264,6 +266,8 @@ AI 配置接口：
 
 ```bash
 GET /ai-configs
+GET /ai-configs/provider-presets
+POST /ai-configs/discover-models
 POST /ai-configs
 GET /ai-configs/{config_id}
 PATCH /ai-configs/{config_id}
@@ -275,6 +279,21 @@ POST /ai-configs/{config_id}/test
 `api_key` 存入 `ai_model_configs.api_key_encrypted`，接口只返回
 `masked_api_key`，不会返回明文密钥。开发环境可通过 `AI_CONFIG_SECRET`
 设置本地加密 secret；生产环境建议替换为 KMS 或更强的密钥管理。
+
+搜索配置接口：
+
+```bash
+GET /search-configs
+POST /search-configs
+PATCH /search-configs/{config_id}
+DELETE /search-configs/{config_id}
+POST /search-configs/{config_id}/set-default
+POST /search-configs/{config_id}/test
+```
+
+搜索 API Key 存入 `search_api_configs.api_key_encrypted`，接口只返回
+`masked_api_key`。搜索结果只能进入 AI 的参考上下文，用于描述地址风险、偏远性或市场行情背景；
+不能替代 `zone_price_matrix`，不能新增费用，也不能改变 Quote Engine 返回的金额。
 
 ### WeCom Bot Notify
 

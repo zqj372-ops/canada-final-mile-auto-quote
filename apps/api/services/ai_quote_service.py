@@ -12,6 +12,7 @@ from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfi
 from apps.api.db.repositories.zone_repository import ZoneRepository
 from apps.api.services.notification_service import notify_ai_missing_fields, notify_ai_quote_success
 from apps.api.services.quote_service import record_zone_quote_side_effects, try_wecom_notify
+from apps.api.services.search_context_service import QuoteSearchContext, build_quote_search_context
 from packages.ai_assistant.model_client import AIMessage, OpenAICompatibleClient, config_from_record
 from packages.ai_assistant.output_guard import validate_zone_ai_output
 from packages.ai_assistant.prompts import SALES_NOTE_SYSTEM_PROMPT
@@ -37,6 +38,8 @@ class AIAutoQuoteRequest(BaseModel):
     auto_submit_when_complete: bool = True
     notify_wecom: bool = False
     wecom_bot_id: int | None = None
+    enable_search_context: bool = False
+    search_config_id: int | None = None
 
 
 class AIAutoQuoteResponse(BaseModel):
@@ -46,6 +49,7 @@ class AIAutoQuoteResponse(BaseModel):
     internal_note: str | None = None
     missing_fields: list[str] = Field(default_factory=list)
     manual_review_required: bool
+    search_context: QuoteSearchContext | None = None
 
 
 def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQuoteResponse:
@@ -62,6 +66,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
 
     missing_fields = sorted(set(extraction.missing_fields) | missing_required_fields(extraction))
     extraction.missing_fields = missing_fields
+    search_context = _optional_search_context(db, extraction, payload)
     if missing_fields:
         customer_reply = build_follow_up_question(missing_fields)
         if payload.notify_wecom:
@@ -82,6 +87,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
             internal_note="Missing required fields. Zone Quote Engine was not called.",
             missing_fields=missing_fields,
             manual_review_required=True,
+            search_context=search_context,
         )
 
     if not payload.auto_submit_when_complete:
@@ -92,6 +98,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
             internal_note="auto_submit_when_complete=false. Zone Quote Engine was not called.",
             missing_fields=[],
             manual_review_required=False,
+            search_context=search_context,
         )
 
     zone_request = _zone_request_from_extraction(extraction)
@@ -107,9 +114,14 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
             internal_note=f"Manual review required: {quote_result.matched_rule}",
             missing_fields=[],
             manual_review_required=True,
+            search_context=search_context,
         )
 
-    customer_reply = _build_guarded_sales_note(ai_client, quote_result)
+    customer_reply = (
+        _build_guarded_sales_note(ai_client, quote_result, search_context=search_context)
+        if search_context
+        else _build_guarded_sales_note(ai_client, quote_result)
+    )
     quote_result.sales_note = customer_reply
     response = AIAutoQuoteResponse(
         extraction=extraction,
@@ -118,6 +130,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
         internal_note="AI sales note was generated from locked quote_result only.",
         missing_fields=[],
         manual_review_required=False,
+        search_context=search_context,
     )
     if payload.notify_wecom:
         try_wecom_notify(
@@ -141,6 +154,20 @@ def _select_ai_config(repository: AIModelConfigRepository, config_id: int | None
     if record is None:
         raise HTTPException(status_code=400, detail="No default AI model config is available.")
     return record
+
+
+def _optional_search_context(
+    db: Session,
+    extraction: AIExtractedQuoteDraft,
+    payload: AIAutoQuoteRequest,
+) -> QuoteSearchContext | None:
+    if not payload.enable_search_context:
+        return None
+    try:
+        return build_quote_search_context(db, extraction, search_config_id=payload.search_config_id)
+    except Exception as exc:
+        logger.warning("Search context failed.", extra={"error": str(exc)})
+        return QuoteSearchContext(provider="unknown", note=f"Search context failed: {exc.__class__.__name__}")
 
 
 def _zone_request_from_extraction(extraction: AIExtractedQuoteDraft) -> ZoneQuoteRequest:
@@ -167,7 +194,12 @@ def _zone_request_from_extraction(extraction: AIExtractedQuoteDraft) -> ZoneQuot
         raise HTTPException(status_code=422, detail=f"Extracted quote fields failed validation: {exc}") from exc
 
 
-def _build_guarded_sales_note(ai_client: OpenAICompatibleClient, quote_result: ZoneQuoteResult) -> str:
+def _build_guarded_sales_note(
+    ai_client: OpenAICompatibleClient,
+    quote_result: ZoneQuoteResult,
+    *,
+    search_context: QuoteSearchContext | None = None,
+) -> str:
     fallback = quote_result.sales_note or "Quote result is locked by the deterministic quote engine."
     response = ai_client.complete(
         [
@@ -178,8 +210,14 @@ def _build_guarded_sales_note(ai_client: OpenAICompatibleClient, quote_result: Z
                     {
                         "price_locked": True,
                         "quote_result": quote_result.model_dump(mode="json"),
-                        "allowed_actions": ["explain", "summarize", "warn_risk"],
-                        "forbidden_actions": ["change_price", "invent_fee", "invent_market_rate"],
+                        "external_search_context": search_context.model_dump(mode="json") if search_context else None,
+                        "allowed_actions": ["explain", "summarize", "warn_risk", "mention_reference_only_search_context"],
+                        "forbidden_actions": [
+                            "change_price",
+                            "invent_fee",
+                            "invent_market_rate",
+                            "use_search_result_as_quote_price",
+                        ],
                     },
                     ensure_ascii=False,
                 ),

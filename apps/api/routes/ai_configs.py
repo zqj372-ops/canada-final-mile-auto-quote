@@ -8,7 +8,9 @@ from apps.api.auth import ADMIN_ROLES, require_roles
 from apps.api.db.models import AIModelConfig as AIModelConfigRecord
 from apps.api.db.repositories.ai_model_config_repository import AIModelConfigRepository
 from apps.api.db.session import get_db
+from packages.ai_assistant.model_discovery import ModelDiscoveryResult, discover_models
 from packages.ai_assistant.model_client import AIMessage, OpenAICompatibleClient, config_from_record
+from packages.ai_assistant.provider_catalog import AIProviderPreset, list_provider_presets
 
 
 router = APIRouter(prefix="/ai-configs", tags=["ai-configs"], dependencies=[Depends(require_roles(*ADMIN_ROLES))])
@@ -44,6 +46,30 @@ class AIModelConfigUpdate(BaseModel):
     is_default: bool | None = None
     enabled: bool | None = None
     purpose: str | None = None
+
+
+class ModelDiscoveryRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    provider: str = Field(default="openai")
+    base_url: str | None = None
+    api_key: str = Field(min_length=1)
+    timeout_seconds: int = Field(default=20, ge=1, le=60)
+
+
+@router.get("/provider-presets", response_model=list[AIProviderPreset])
+def list_ai_provider_presets() -> list[AIProviderPreset]:
+    return list_provider_presets()
+
+
+@router.post("/discover-models", response_model=ModelDiscoveryResult)
+def discover_ai_models(payload: ModelDiscoveryRequest) -> ModelDiscoveryResult:
+    return discover_models(
+        provider=payload.provider,
+        api_key=payload.api_key,
+        base_url=payload.base_url,
+        timeout_seconds=payload.timeout_seconds,
+    )
 
 
 @router.get("")
