@@ -1,6 +1,7 @@
 # Canada Final Mile Auto Quote
 
-用于加拿大尾端卡车派送自动报价的项目仓库。
+用于加拿大尾端卡车派送自动报价的项目仓库。第一版目标是先把结构化导入、
+FSA 匹配、确定性报价、AI 输出保护做稳，避免任何模型编造价格。
 
 ## 项目目标
 
@@ -8,9 +9,78 @@
 - 支持区域/邮编分区、托盘数量、附加服务、燃油费、住宅派送、预约派送等费用规则。
 - 预留报价 API、规则配置、报价记录和人工审核流程。
 
+## 核心边界
+
+- AI 不直接报价。
+- AI 不读取完整 Excel 或完整报价表。
+- AI 不允许编造市场价、附加费或距离费。
+- 报价必须由确定性 Quote Engine 计算。
+- AI 只能基于 `quote_result` 解释报价、生成销售备注、提示风险。
+- 未命中价格库时返回 `manual_required`，不输出客户报价金额。
+
+报价链路：
+
+```text
+Excel/CSV 导入
+-> 数据标准化
+-> PostgreSQL 结构化价格库
+-> SQL/规则引擎匹配
+-> 确定性计算
+-> AI 解释与输出校验
+```
+
+## 工程结构
+
+```text
+apps/api/                         FastAPI 服务
+packages/quote_engine/            确定性报价引擎
+packages/address_normalizer/       加拿大地址、邮编、FSA、省份标准化
+packages/data_importer/            Excel/CSV 导入和字段校验
+packages/ai_assistant/             AI 小上下文构造和输出金额校验
+packages/shared/                   共享常量
+data/                              原始数据、模板和脱敏样例占位
+docs/                              产品、规则、数据结构和 AI 防幻觉文档
+infra/                             Docker Compose 和 Postgres 初始化表
+reference/canada-final-mile/       已归档的业务资料和查表数据
+tests/                             MVP 单元测试
+```
+
+## MVP 功能
+
+- 读取并校验供应商报价表标准字段。
+- 标准化加拿大邮编，例如 `v6v1a1 -> V6V 1A1 -> V6V`。
+- 标准化省份，例如 `Ontario -> ON`、`British Columbia -> BC`。
+- 按固定优先级匹配报价规则：
+  `history_exact_address -> postal_code -> fsa -> city -> rate_card -> distance_fallback -> manual_required`
+- 输出 `source_type`、`confidence`、`matched_rule`、`cost_breakdown`、风险标签和人工审核状态。
+- AI 输出后校验金额，发现不在 `quote_result` 里的金额会拦截。
+
+## 本地开发
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[test]"
+pytest
+```
+
+启动 API：
+
+```bash
+uvicorn apps.api.main:app --reload
+```
+
+Docker Compose：
+
+```bash
+cp .env.example .env
+docker compose -f infra/docker-compose.yml up --build
+```
+
 ## 当前状态
 
-仓库已初始化，Canada final-mile 报价资料已归档到 `reference/canada-final-mile/`。
+仓库已初始化，Canada final-mile 报价资料已归档到 `reference/canada-final-mile/`，
+并已建立第一版工程骨架。
 
 ## 资料入口
 
@@ -22,6 +92,7 @@
 
 ## 下一步
 
-- 搭建报价引擎的数据读取层。
-- 实现计费托数、邮编/FSA、Zone、价格表查询和附加费计算。
+- 增加 SQLAlchemy 数据访问层，把 PostgreSQL 规则表接入 Quote Engine。
+- 增加真实导入模板和脱敏样例数据。
 - 用 `EDGE_CASES.md` 建立异常场景测试集。
+- 接入 Google Address Validation 或 Canada Post AddressComplete 前，保持人工确认兜底。

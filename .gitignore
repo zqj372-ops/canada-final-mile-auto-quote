@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local environment
+.env
+*.local
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
+
+# Runtime uploads and raw private data
+data/raw/*
+!data/raw/.gitkeep
+data/samples/*
+!data/samples/.gitkeep
+
