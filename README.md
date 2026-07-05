@@ -57,6 +57,8 @@ tests/                             MVP 单元测试
   `history_exact_address -> postal_code -> fsa -> city -> rate_card -> distance_fallback -> manual_required`
 - 输出 `source_type`、`confidence`、`matched_rule`、`cost_breakdown`、风险标签和人工审核状态。
 - AI 输出后校验金额，发现不在 `quote_result` 里的金额会拦截。
+- 大模型可参与客户原始话术理解、字段提取和销售话术润色，但不能自由算价；
+  `total_price_usd`、Zone、计费托数、燃油和附加费必须来自后端 Quote Engine。
 
 ## 本地开发
 
@@ -86,6 +88,14 @@ npm run dev
 ```bash
 VITE_API_BASE_URL=http://localhost:8000 npm run dev
 ```
+
+工作台页面：
+
+- `/quote`：普通 Zone 报价输入。
+- `/ai-quote`：粘贴客户原始消息，由 AI 提取字段，再由 Zone Quote Engine 报价。
+- `/manual-tasks`：处理 `manual_required` 人工确认任务。
+- `/audit`：按 `quote_id` 查询报价审计记录。
+- `/settings/ai`：维护 OpenAI-compatible 模型配置。
 
 Docker Compose：
 
@@ -134,6 +144,39 @@ GET /quotes/audit/{quote_id}
 GET /quotes/manual-tasks
 PATCH /quotes/manual-tasks/{task_id}
 ```
+
+### AI Auto Quote
+
+`POST /quotes/ai-auto-quote` 接收客户原始消息。流程是：
+
+```text
+客户原始消息
+-> AI 提取结构化字段
+-> 后端校验字段完整性
+-> Zone Quote Engine 确定性报价
+-> 写 audit / manual task
+-> AI 只基于锁定 quote_result 润色销售话术
+```
+
+如果缺少 `postal_code`、`cbm`、`weight_kg`、`piece_count`、`packaging_type`
+或 `address_type`，接口不会调用 Zone Quote Engine，只返回 `missing_fields`
+和追问客户的话术。
+
+AI 配置接口：
+
+```bash
+GET /ai-configs
+POST /ai-configs
+GET /ai-configs/{config_id}
+PATCH /ai-configs/{config_id}
+DELETE /ai-configs/{config_id}
+POST /ai-configs/{config_id}/set-default
+POST /ai-configs/{config_id}/test
+```
+
+`api_key` 存入 `ai_model_configs.api_key_encrypted`，接口只返回
+`masked_api_key`，不会返回明文密钥。开发环境可通过 `AI_CONFIG_SECRET`
+设置本地加密 secret；生产环境建议替换为 KMS 或更强的密钥管理。
 
 ### Vendor Rate Rule Quote
 

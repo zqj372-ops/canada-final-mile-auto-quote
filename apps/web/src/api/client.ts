@@ -64,6 +64,81 @@ export interface ZoneQuoteResult {
   internal_note: string | null;
 }
 
+export interface AIExtractedQuoteDraft {
+  address_line: string | null;
+  postal_code: string | null;
+  city: string | null;
+  province: string | null;
+  cbm: MoneyValue;
+  weight_kg: MoneyValue;
+  piece_count: number | null;
+  packaging_type: string | null;
+  longest_side_cm: MoneyValue;
+  explicit_pallet_count: number | null;
+  is_stackable: boolean | null;
+  address_type: string | null;
+  requires_liftgate: boolean;
+  requires_pallet_jack: boolean;
+  requires_appointment: boolean;
+  detention_minutes: number;
+  missing_fields: string[];
+  confidence: number;
+  extraction_notes: string | null;
+}
+
+export interface AIAutoQuoteRequest {
+  customer_message: string;
+  ai_config_id?: number | null;
+  auto_submit_when_complete: boolean;
+}
+
+export interface AIAutoQuoteResponse {
+  extraction: AIExtractedQuoteDraft;
+  quote_result: ZoneQuoteResult | null;
+  customer_reply: string | null;
+  internal_note: string | null;
+  missing_fields: string[];
+  manual_review_required: boolean;
+}
+
+export interface AIModelConfigPublic {
+  id: number;
+  name: string;
+  provider: string;
+  base_url: string | null;
+  masked_api_key: string | null;
+  model_name: string;
+  temperature: number;
+  max_tokens: number;
+  timeout_seconds: number;
+  is_default: boolean;
+  enabled: boolean;
+  purpose: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AIModelConfigPayload {
+  name?: string;
+  provider?: string;
+  base_url?: string | null;
+  api_key?: string | null;
+  model_name?: string;
+  temperature?: number;
+  max_tokens?: number;
+  timeout_seconds?: number;
+  is_default?: boolean;
+  enabled?: boolean;
+  purpose?: string;
+}
+
+export interface AIConfigTestResult {
+  success: boolean;
+  error: string | null;
+  latency_ms: number;
+  preview?: string;
+}
+
 export interface ManualQuoteTask {
   id: number;
   quote_id: string;
@@ -178,6 +253,15 @@ export function calculateZoneQuote(
   });
 }
 
+export function calculateAIAutoQuote(
+  payload: AIAutoQuoteRequest,
+): Promise<AIAutoQuoteResponse> {
+  return request<AIAutoQuoteResponse>("/quotes/ai-auto-quote", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function listManualTasks(): Promise<ManualQuoteTask[]> {
   return request<ManualQuoteTask[]>("/quotes/manual-tasks");
 }
@@ -194,6 +278,47 @@ export function updateManualTask(
 
 export function getQuoteAudit(quoteId: string): Promise<QuoteAuditLog> {
   return request<QuoteAuditLog>(`/quotes/audit/${encodeURIComponent(quoteId)}`);
+}
+
+export function listAIConfigs(): Promise<AIModelConfigPublic[]> {
+  return request<AIModelConfigPublic[]>("/ai-configs");
+}
+
+export function createAIConfig(
+  payload: Required<Pick<AIModelConfigPayload, "name" | "model_name">> & AIModelConfigPayload,
+): Promise<AIModelConfigPublic> {
+  return request<AIModelConfigPublic>("/ai-configs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateAIConfig(
+  configId: number,
+  payload: AIModelConfigPayload,
+): Promise<AIModelConfigPublic> {
+  return request<AIModelConfigPublic>(`/ai-configs/${configId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteAIConfig(configId: number): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/ai-configs/${configId}`, {
+    method: "DELETE",
+  });
+}
+
+export function setDefaultAIConfig(configId: number): Promise<AIModelConfigPublic> {
+  return request<AIModelConfigPublic>(`/ai-configs/${configId}/set-default`, {
+    method: "POST",
+  });
+}
+
+export function testAIConfig(configId: number): Promise<AIConfigTestResult> {
+  return request<AIConfigTestResult>(`/ai-configs/${configId}/test`, {
+    method: "POST",
+  });
 }
 
 export function getApiBaseUrl(): string {

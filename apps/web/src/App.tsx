@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { getApiBaseUrl } from "./api/client";
+import AIQuotePage from "./pages/AIQuotePage";
+import AISettingsPage from "./pages/AISettingsPage";
 import AuditPage from "./pages/AuditPage";
 import ManualTasksPage from "./pages/ManualTasksPage";
 import QuotePage from "./pages/QuotePage";
 
-type RoutePath = "/quote" | "/manual-tasks" | "/audit";
+type RoutePath = "/quote" | "/ai-quote" | "/manual-tasks" | "/audit" | "/settings/ai";
 
 const routes: Array<{ path: RoutePath; label: string; description: string }> = [
-  { path: "/quote", label: "报价", description: "Zone 计算" },
-  { path: "/manual-tasks", label: "人工池", description: "Manual review" },
-  { path: "/audit", label: "审计", description: "Quote log" },
+  { path: "/quote", label: "普通报价", description: "Zone" },
+  { path: "/ai-quote", label: "AI 自动报价", description: "Extract" },
+  { path: "/manual-tasks", label: "人工任务", description: "Review" },
+  { path: "/audit", label: "审计查询", description: "Log" },
+  { path: "/settings/ai", label: "AI 配置", description: "Models" },
 ];
 
 export default function App() {
@@ -31,11 +35,17 @@ export default function App() {
   }, [path]);
 
   const page = useMemo(() => {
+    if (path === "/ai-quote") {
+      return <AIQuotePage />;
+    }
     if (path === "/manual-tasks") {
       return <ManualTasksPage />;
     }
     if (path === "/audit") {
       return <AuditPage />;
+    }
+    if (path === "/settings/ai") {
+      return <AISettingsPage />;
     }
     return <QuotePage />;
   }, [path]);
@@ -112,8 +122,14 @@ function normalizePath(pathname: string): RoutePath {
   if (pathname === "/manual-tasks") {
     return "/manual-tasks";
   }
+  if (pathname === "/ai-quote") {
+    return "/ai-quote";
+  }
   if (pathname === "/audit") {
     return "/audit";
+  }
+  if (pathname === "/settings/ai") {
+    return "/settings/ai";
   }
   return "/quote";
 }

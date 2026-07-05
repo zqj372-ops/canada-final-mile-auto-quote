@@ -1,7 +1,8 @@
 from decimal import Decimal
 
-from packages.ai_assistant import build_ai_context, validate_ai_output
+from packages.ai_assistant import build_ai_context, validate_ai_output, validate_zone_ai_output
 from packages.quote_engine.models import QuoteResult, SourceType
+from packages.quote_engine.zone_models import ZoneQuoteResult, ZoneQuoteSourceType
 
 
 def test_guard_allows_locked_quote_amounts() -> None:
@@ -44,3 +45,36 @@ def test_guard_blocks_new_money_amounts() -> None:
     assert guard.allowed is False
     assert "not in quote_result" in (guard.reason or "")
 
+
+def test_zone_guard_blocks_unauthorized_sales_note_amount() -> None:
+    result = ZoneQuoteResult(
+        source_type=ZoneQuoteSourceType.ZONE_MATRIX,
+        confidence=90,
+        base_price_usd=Decimal("120.00"),
+        fuel_usd=Decimal("42.00"),
+        accessorials={"appointment_fee_usd": Decimal("50.00")},
+        total_price_usd=Decimal("212.00"),
+        risk_tags=[],
+        manual_review_required=False,
+        matched_rule="zone_matrix + test",
+    )
+
+    guard = validate_zone_ai_output(result, "Customer quote is $999.00 USD.")
+
+    assert guard.allowed is False
+    assert "not in quote_result" in (guard.reason or "")
+
+
+def test_zone_guard_blocks_manual_required_definite_amount() -> None:
+    result = ZoneQuoteResult(
+        source_type=ZoneQuoteSourceType.MANUAL_REQUIRED,
+        confidence=0,
+        risk_tags=["zone_not_found"],
+        manual_review_required=True,
+        matched_rule="No zone matched.",
+    )
+
+    guard = validate_zone_ai_output(result, "报价为 $212.00 USD")
+
+    assert guard.allowed is False
+    assert "manual review" in (guard.reason or "")

@@ -139,3 +139,26 @@ CREATE INDEX IF NOT EXISTS idx_manual_quote_tasks_status
 
 CREATE INDEX IF NOT EXISTS idx_manual_quote_tasks_quote_id
     ON manual_quote_tasks (quote_id);
+
+CREATE TABLE IF NOT EXISTS ai_model_configs (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    provider VARCHAR(32) NOT NULL DEFAULT 'openai',
+    base_url TEXT,
+    api_key_encrypted TEXT,
+    model_name VARCHAR(128) NOT NULL,
+    temperature DOUBLE PRECISION NOT NULL DEFAULT 0,
+    max_tokens INTEGER NOT NULL DEFAULT 800,
+    timeout_seconds INTEGER NOT NULL DEFAULT 30,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    purpose VARCHAR(32) NOT NULL DEFAULT 'general',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_model_configs_default
+    ON ai_model_configs (is_default, enabled);
+
+CREATE INDEX IF NOT EXISTS idx_ai_model_configs_purpose
+    ON ai_model_configs (purpose, enabled);

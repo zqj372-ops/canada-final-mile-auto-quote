@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from apps.api.routes.ai_configs import router as ai_configs_router
 from apps.api.routes.imports import router as imports_router
 from apps.api.routes.quotes import router as quotes_router
 
@@ -32,6 +33,7 @@ app.add_middleware(
 
 app.include_router(quotes_router)
 app.include_router(imports_router)
+app.include_router(ai_configs_router)
 
 
 @app.get("/health", tags=["system"])
