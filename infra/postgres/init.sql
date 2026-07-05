@@ -162,3 +162,22 @@ CREATE INDEX IF NOT EXISTS idx_ai_model_configs_default
 
 CREATE INDEX IF NOT EXISTS idx_ai_model_configs_purpose
     ON ai_model_configs (purpose, enabled);
+
+CREATE TABLE IF NOT EXISTS wecom_bot_configs (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    webhook_url_encrypted TEXT NOT NULL,
+    bot_type VARCHAR(32) NOT NULL DEFAULT 'group_webhook',
+    purpose VARCHAR(32) NOT NULL DEFAULT 'general',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    mention_all_on_manual_required BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_wecom_bot_configs_default
+    ON wecom_bot_configs (is_default, enabled);
+
+CREATE INDEX IF NOT EXISTS idx_wecom_bot_configs_purpose
+    ON wecom_bot_configs (purpose, enabled);

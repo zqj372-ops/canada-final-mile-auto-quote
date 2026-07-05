@@ -1,8 +1,10 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import {
   calculateZoneQuote,
+  listWeComBots,
   type AddressType,
   type PackagingType,
+  type WeComBotConfigPublic,
   type ZoneQuoteRequest,
   type ZoneQuoteResult,
 } from "../api/client";
@@ -69,6 +71,21 @@ export default function QuotePage() {
   const [result, setResult] = useState<ZoneQuoteResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [wecomBots, setWecomBots] = useState<WeComBotConfigPublic[]>([]);
+  const [notifyWecom, setNotifyWecom] = useState(false);
+  const [selectedWecomBotId, setSelectedWecomBotId] = useState("");
+
+  useEffect(() => {
+    void loadWecomBots();
+  }, []);
+
+  async function loadWecomBots() {
+    try {
+      setWecomBots(await listWeComBots());
+    } catch {
+      setWecomBots([]);
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -77,7 +94,15 @@ export default function QuotePage() {
     try {
       const payload = buildPayload(form);
       setIsSubmitting(true);
-      const quoteResult = await calculateZoneQuote(payload);
+      const quoteResult = await calculateZoneQuote(
+        notifyWecom
+          ? {
+              quote: payload,
+              notify_wecom: true,
+              wecom_bot_id: selectedWecomBotId ? Number(selectedWecomBotId) : null,
+            }
+          : payload,
+      );
       setResult(quoteResult);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "报价请求失败");
@@ -290,6 +315,37 @@ export default function QuotePage() {
               命中失败会进入 manual_required，不会在前端估价。
             </p>
           </div>
+
+          <fieldset className="mt-6 border-t border-slate-200 pt-5">
+            <legend className="text-sm font-semibold text-slate-950">企业微信推送</legend>
+            <div className="mt-3 grid gap-3">
+              <CheckboxField
+                label="成功报价后推送企业微信"
+                checked={notifyWecom}
+                onChange={setNotifyWecom}
+              />
+              <label>
+                <span className="field-label">wecom_bot_id</span>
+                <select
+                  className="field-input"
+                  value={selectedWecomBotId}
+                  onChange={(event) => setSelectedWecomBotId(event.target.value)}
+                  disabled={!notifyWecom}
+                >
+                  <option value="">使用 quote_success/default 机器人</option>
+                  {wecomBots.map((bot) => (
+                    <option key={bot.id} value={bot.id}>
+                      {bot.name} / {bot.purpose}
+                      {bot.is_default ? " / 默认" : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="field-hint">
+                  manual_required 会自动进入人工确认池，并尝试推送人工确认通知。
+                </p>
+              </label>
+            </div>
+          </fieldset>
         </section>
 
         <div>

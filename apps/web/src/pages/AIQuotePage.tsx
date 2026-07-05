@@ -2,8 +2,10 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   calculateAIAutoQuote,
   listAIConfigs,
+  listWeComBots,
   type AIModelConfigPublic,
   type AIAutoQuoteResponse,
+  type WeComBotConfigPublic,
 } from "../api/client";
 import ResultCard from "../components/ResultCard";
 import RiskTags from "../components/RiskTags";
@@ -11,8 +13,11 @@ import RiskTags from "../components/RiskTags";
 export default function AIQuotePage() {
   const [message, setMessage] = useState("");
   const [configs, setConfigs] = useState<AIModelConfigPublic[]>([]);
+  const [wecomBots, setWecomBots] = useState<WeComBotConfigPublic[]>([]);
   const [selectedConfigId, setSelectedConfigId] = useState("");
+  const [selectedWecomBotId, setSelectedWecomBotId] = useState("");
   const [autoSubmit, setAutoSubmit] = useState(true);
+  const [notifyWecom, setNotifyWecom] = useState(false);
   const [result, setResult] = useState<AIAutoQuoteResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -20,6 +25,7 @@ export default function AIQuotePage() {
 
   useEffect(() => {
     void loadConfigs();
+    void loadWecomBots();
   }, []);
 
   async function loadConfigs() {
@@ -27,6 +33,14 @@ export default function AIQuotePage() {
       setConfigs(await listAIConfigs());
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "AI 配置加载失败");
+    }
+  }
+
+  async function loadWecomBots() {
+    try {
+      setWecomBots(await listWeComBots());
+    } catch {
+      setWecomBots([]);
     }
   }
 
@@ -45,6 +59,8 @@ export default function AIQuotePage() {
         customer_message: message.trim(),
         ai_config_id: selectedConfigId ? Number(selectedConfigId) : null,
         auto_submit_when_complete: autoSubmit,
+        notify_wecom: notifyWecom,
+        wecom_bot_id: selectedWecomBotId ? Number(selectedWecomBotId) : null,
       });
       setResult(response);
     } catch (caught) {
@@ -133,6 +149,41 @@ export default function AIQuotePage() {
                 字段完整时自动提交 Quote Engine 报价
               </span>
             </label>
+
+            <fieldset className="grid gap-3 rounded-md border border-slate-200 p-3">
+              <legend className="px-1 text-sm font-semibold text-slate-950">企业微信推送</legend>
+              <label className="flex min-h-11 items-center gap-3">
+                <input
+                  className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
+                  type="checkbox"
+                  checked={notifyWecom}
+                  onChange={(event) => setNotifyWecom(event.target.checked)}
+                />
+                <span className="text-sm font-medium text-slate-800">
+                  成功报价后推送企业微信
+                </span>
+              </label>
+              <label>
+                <span className="field-label">wecom_bot_id</span>
+                <select
+                  className="field-input"
+                  value={selectedWecomBotId}
+                  onChange={(event) => setSelectedWecomBotId(event.target.value)}
+                  disabled={!notifyWecom}
+                >
+                  <option value="">使用 ai_quote/default 机器人</option>
+                  {wecomBots.map((bot) => (
+                    <option key={bot.id} value={bot.id}>
+                      {bot.name} / {bot.purpose}
+                      {bot.is_default ? " / 默认" : ""}
+                    </option>
+                  ))}
+                </select>
+                <p className="field-hint">
+                  字段缺失时仅在勾选后推送追问提示；manual_required 会自动通知人工确认群。
+                </p>
+              </label>
+            </fieldset>
 
             <button className="btn-primary" type="submit" disabled={isLoading}>
               {isLoading ? "处理中..." : "AI 自动提取并报价"}

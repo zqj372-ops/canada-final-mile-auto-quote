@@ -96,6 +96,7 @@ VITE_API_BASE_URL=http://localhost:8000 npm run dev
 - `/manual-tasks`：处理 `manual_required` 人工确认任务。
 - `/audit`：按 `quote_id` 查询报价审计记录。
 - `/settings/ai`：维护 OpenAI-compatible 模型配置。
+- `/settings/wecom`：维护企业微信群机器人 Webhook 配置。
 
 Docker Compose：
 
@@ -177,6 +178,36 @@ POST /ai-configs/{config_id}/test
 `api_key` 存入 `ai_model_configs.api_key_encrypted`，接口只返回
 `masked_api_key`，不会返回明文密钥。开发环境可通过 `AI_CONFIG_SECRET`
 设置本地加密 secret；生产环境建议替换为 KMS 或更强的密钥管理。
+
+### WeCom Bot Notify
+
+企业微信机器人只负责通知和推送，不参与报价、不绕过 Quote Engine。
+Webhook URL 存入 `wecom_bot_configs.webhook_url_encrypted`，接口只返回
+`masked_webhook_url`，不会返回明文 URL。
+
+配置接口：
+
+```bash
+GET /wecom/bots
+POST /wecom/bots
+GET /wecom/bots/{bot_id}
+PATCH /wecom/bots/{bot_id}
+DELETE /wecom/bots/{bot_id}
+POST /wecom/bots/{bot_id}/set-default
+POST /wecom/bots/{bot_id}/test
+```
+
+推送接入点：
+
+- `/quotes/zone-calculate`：支持 wrapper body `{ "quote": {...}, "notify_wecom": true }`。
+  普通成功报价仅在 `notify_wecom=true` 时推送；`manual_required=true` 会自动尝试推送人工确认通知。
+- `/quotes/ai-auto-quote`：支持 `notify_wecom` 和 `wecom_bot_id`。
+  成功报价可推送 AI 自动报价通知；字段缺失时仅在勾选后推送追问提示；`manual_required=true`
+  会自动尝试推送人工确认通知。
+- `/quotes/manual-tasks/{task_id}`：PATCH `status=resolved` 且 `notify_wecom=true`
+  时推送人工报价已处理通知。
+
+所有企业微信推送失败都只记录日志，不影响报价或人工任务接口返回。
 
 ### Vendor Rate Rule Quote
 

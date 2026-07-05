@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  listWeComBots,
   listManualTasks,
   updateManualTask,
   type ManualQuoteTask,
   type ManualQuoteTaskUpdate,
+  type WeComBotConfigPublic,
 } from "../api/client";
 import RiskTags from "../components/RiskTags";
 
@@ -24,9 +26,13 @@ export default function ManualTasksPage() {
   const [savingTaskId, setSavingTaskId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [wecomBots, setWecomBots] = useState<WeComBotConfigPublic[]>([]);
+  const [notifyWecom, setNotifyWecom] = useState(false);
+  const [selectedWecomBotId, setSelectedWecomBotId] = useState("");
 
   useEffect(() => {
     void loadTasks();
+    void loadWecomBots();
   }, []);
 
   const visibleTasks = useMemo(() => {
@@ -52,6 +58,14 @@ export default function ManualTasksPage() {
     }
   }
 
+  async function loadWecomBots() {
+    try {
+      setWecomBots(await listWeComBots());
+    } catch {
+      setWecomBots([]);
+    }
+  }
+
   async function saveTask(task: ManualQuoteTask) {
     const draft = drafts[task.id] ?? draftFromTask(task);
 
@@ -65,6 +79,8 @@ export default function ManualTasksPage() {
         assigned_to: optionalText(draft.assigned_to),
         resolved_price_usd: optionalNumber(draft.resolved_price_usd),
         resolved_note: optionalText(draft.resolved_note),
+        notify_wecom: notifyWecom,
+        wecom_bot_id: selectedWecomBotId ? Number(selectedWecomBotId) : null,
       };
       const updated = await updateManualTask(task.id, payload);
       setTasks((current) =>
@@ -263,6 +279,36 @@ export default function ManualTasksPage() {
                           }
                         />
                       </label>
+                      <div className="grid gap-3 rounded-md border border-slate-200 p-3">
+                        <label className="flex min-h-11 items-center gap-3">
+                          <input
+                            className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
+                            type="checkbox"
+                            checked={notifyWecom}
+                            onChange={(event) => setNotifyWecom(event.target.checked)}
+                          />
+                          <span className="text-sm font-medium text-slate-800">
+                            resolved 后同步推送企业微信
+                          </span>
+                        </label>
+                        <label>
+                          <span className="field-label">wecom_bot_id</span>
+                          <select
+                            className="field-input"
+                            value={selectedWecomBotId}
+                            onChange={(event) => setSelectedWecomBotId(event.target.value)}
+                            disabled={!notifyWecom}
+                          >
+                            <option value="">使用 manual_resolved/default 机器人</option>
+                            {wecomBots.map((bot) => (
+                              <option key={bot.id} value={bot.id}>
+                                {bot.name} / {bot.purpose}
+                                {bot.is_default ? " / 默认" : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
                       <button
                         className="btn-primary"
                         type="button"

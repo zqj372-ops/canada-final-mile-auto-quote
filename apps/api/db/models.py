@@ -215,3 +215,27 @@ class AIModelConfig(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class WeComBotConfig(Base):
+    __tablename__ = "wecom_bot_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    webhook_url_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    bot_type: Mapped[str] = mapped_column(String(32), nullable=False, default="group_webhook")
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False, default="general", index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    mention_all_on_manual_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

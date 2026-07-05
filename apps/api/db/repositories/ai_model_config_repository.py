@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import base64
-import os
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.db.models import AIModelConfig
+from apps.api.security.secrets import decrypt_secret, encrypt_secret, mask_tail
 
 
 ALLOWED_PROVIDERS = {
@@ -20,7 +19,6 @@ ALLOWED_PROVIDERS = {
     "custom",
 }
 ALLOWED_PURPOSES = {"field_extraction", "sales_note", "address_type", "general"}
-_DEFAULT_SECRET = "local-dev-ai-config-secret"
 
 
 class AIModelConfigRepository:
@@ -35,7 +33,7 @@ class AIModelConfigRepository:
             self._clear_default()
         record = AIModelConfig(**values)
         if api_key:
-            record.api_key_encrypted = encrypt_api_key(str(api_key))
+            record.api_key_encrypted = encrypt_secret(str(api_key))
         self.session.add(record)
         self.session.commit()
         self.session.refresh(record)
@@ -60,7 +58,7 @@ class AIModelConfigRepository:
         for key, value in values.items():
             setattr(record, key, value)
         if api_key:
-            record.api_key_encrypted = encrypt_api_key(str(api_key))
+            record.api_key_encrypted = encrypt_secret(str(api_key))
 
         self.session.commit()
         self.session.refresh(record)
@@ -93,7 +91,7 @@ class AIModelConfigRepository:
     def decrypt_api_key(self, record: AIModelConfig) -> str | None:
         if not record.api_key_encrypted:
             return None
-        return decrypt_api_key(record.api_key_encrypted)
+        return decrypt_secret(record.api_key_encrypted)
 
     def to_public_dict(self, record: AIModelConfig) -> dict[str, object]:
         return {
@@ -129,29 +127,4 @@ class AIModelConfigRepository:
 
 
 def mask_api_key(api_key: str | None) -> str | None:
-    if not api_key:
-        return None
-    if len(api_key) <= 8:
-        return "****"
-    return f"{api_key[:3]}****{api_key[-4:]}"
-
-
-def encrypt_api_key(api_key: str) -> str:
-    payload = _xor(api_key.encode("utf-8"), _secret_bytes())
-    return "xor1:" + base64.urlsafe_b64encode(payload).decode("ascii")
-
-
-def decrypt_api_key(value: str) -> str:
-    if not value.startswith("xor1:"):
-        return value
-    raw = base64.urlsafe_b64decode(value[5:].encode("ascii"))
-    return _xor(raw, _secret_bytes()).decode("utf-8")
-
-
-def _secret_bytes() -> bytes:
-    secret = os.getenv("AI_CONFIG_SECRET", _DEFAULT_SECRET)
-    return secret.encode("utf-8") or _DEFAULT_SECRET.encode("utf-8")
-
-
-def _xor(data: bytes, key: bytes) -> bytes:
-    return bytes(byte ^ key[index % len(key)] for index, byte in enumerate(data))
+    return mask_tail(api_key, prefix_length=3, tail_length=4)

@@ -5,8 +5,9 @@ import AISettingsPage from "./pages/AISettingsPage";
 import AuditPage from "./pages/AuditPage";
 import ManualTasksPage from "./pages/ManualTasksPage";
 import QuotePage from "./pages/QuotePage";
+import WeComSettingsPage from "./pages/WeComSettingsPage";
 
-type RoutePath = "/quote" | "/ai-quote" | "/manual-tasks" | "/audit" | "/settings/ai";
+type RoutePath = "/quote" | "/ai-quote" | "/manual-tasks" | "/audit" | "/settings/ai" | "/settings/wecom";
 
 const routes: Array<{ path: RoutePath; label: string; description: string }> = [
   { path: "/quote", label: "普通报价", description: "Zone" },
@@ -14,6 +15,7 @@ const routes: Array<{ path: RoutePath; label: string; description: string }> = [
   { path: "/manual-tasks", label: "人工任务", description: "Review" },
   { path: "/audit", label: "审计查询", description: "Log" },
   { path: "/settings/ai", label: "AI 配置", description: "Models" },
+  { path: "/settings/wecom", label: "企业微信配置", description: "Bots" },
 ];
 
 export default function App() {
@@ -46,6 +48,9 @@ export default function App() {
     }
     if (path === "/settings/ai") {
       return <AISettingsPage />;
+    }
+    if (path === "/settings/wecom") {
+      return <WeComSettingsPage />;
     }
     return <QuotePage />;
   }, [path]);
@@ -130,6 +135,9 @@ function normalizePath(pathname: string): RoutePath {
   }
   if (pathname === "/settings/ai") {
     return "/settings/ai";
+  }
+  if (pathname === "/settings/wecom") {
+    return "/settings/wecom";
   }
   return "/quote";
 }

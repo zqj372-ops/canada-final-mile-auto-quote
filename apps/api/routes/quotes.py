@@ -14,6 +14,13 @@ from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfi
 from apps.api.db.repositories.rate_rule_repository import RateRuleRepository
 from apps.api.db.repositories.zone_repository import ZoneRepository
 from apps.api.db.session import get_db
+from apps.api.services.wecom_notifier import (
+    notify_ai_missing_fields,
+    notify_ai_quote_success,
+    notify_manual_required,
+    notify_manual_task_resolved,
+    notify_quote_success,
+)
 from packages.ai_assistant.model_client import AIMessage, OpenAICompatibleClient, config_from_record
 from packages.ai_assistant.output_guard import validate_zone_ai_output
 from packages.ai_assistant.prompts import SALES_NOTE_SYSTEM_PROMPT
@@ -41,6 +48,8 @@ class ManualQuoteTaskUpdate(BaseModel):
     assigned_to: str | None = None
     resolved_price_usd: Decimal | None = Field(default=None, ge=0)
     resolved_note: str | None = None
+    notify_wecom: bool = False
+    wecom_bot_id: int | None = None
 
 
 class AIAutoQuoteRequest(BaseModel):
@@ -49,6 +58,16 @@ class AIAutoQuoteRequest(BaseModel):
     customer_message: str = Field(min_length=1)
     ai_config_id: int | None = None
     auto_submit_when_complete: bool = True
+    notify_wecom: bool = False
+    wecom_bot_id: int | None = None
+
+
+class ZoneQuoteWithNotifyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quote: ZoneQuoteRequest
+    notify_wecom: bool = False
+    wecom_bot_id: int | None = None
 
 
 class AIAutoQuoteResponse(BaseModel):
@@ -68,10 +87,20 @@ def calculate_quote(shipment: ShipmentInput, db: Session = Depends(get_db)) -> Q
 
 
 @router.post("/zone-calculate", response_model=ZoneQuoteResult)
-def calculate_zone_quote(payload: ZoneQuoteRequest, db: Session = Depends(get_db)) -> ZoneQuoteResult:
+def calculate_zone_quote(
+    payload: ZoneQuoteWithNotifyRequest | ZoneQuoteRequest,
+    db: Session = Depends(get_db),
+) -> ZoneQuoteResult:
+    quote_payload, notify_wecom, wecom_bot_id = _normalize_zone_payload(payload)
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
-    result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
-    _record_zone_quote_side_effects(db, payload, result)
+    result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(quote_payload)
+    _record_zone_quote_side_effects(db, quote_payload, result, manual_wecom_bot_id=wecom_bot_id)
+    if notify_wecom and not result.manual_review_required:
+        _try_wecom_notify(
+            "quote_success",
+            lambda: notify_quote_success(db, result=result, request=quote_payload, bot_id=wecom_bot_id),
+            result.quote_id,
+        )
     return result
 
 
@@ -91,10 +120,22 @@ def calculate_ai_auto_quote(payload: AIAutoQuoteRequest, db: Session = Depends(g
     missing_fields = sorted(set(extraction.missing_fields) | missing_required_fields(extraction))
     extraction.missing_fields = missing_fields
     if missing_fields:
+        customer_reply = build_follow_up_question(missing_fields)
+        if payload.notify_wecom:
+            _try_wecom_notify(
+                "ai_missing_fields",
+                lambda: notify_ai_missing_fields(
+                    db,
+                    customer_reply=customer_reply,
+                    missing_fields=missing_fields,
+                    bot_id=payload.wecom_bot_id,
+                ),
+                "missing-fields",
+            )
         return AIAutoQuoteResponse(
             extraction=extraction,
             quote_result=None,
-            customer_reply=build_follow_up_question(missing_fields),
+            customer_reply=customer_reply,
             internal_note="Missing required fields. Zone Quote Engine was not called.",
             missing_fields=missing_fields,
             manual_review_required=True,
@@ -113,7 +154,7 @@ def calculate_ai_auto_quote(payload: AIAutoQuoteRequest, db: Session = Depends(g
     zone_request = _zone_request_from_extraction(extraction)
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     quote_result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(zone_request)
-    _record_zone_quote_side_effects(db, zone_request, quote_result)
+    _record_zone_quote_side_effects(db, zone_request, quote_result, manual_wecom_bot_id=payload.wecom_bot_id)
 
     if quote_result.manual_review_required:
         return AIAutoQuoteResponse(
@@ -127,7 +168,7 @@ def calculate_ai_auto_quote(payload: AIAutoQuoteRequest, db: Session = Depends(g
 
     customer_reply = _build_guarded_sales_note(ai_client, quote_result)
     quote_result.sales_note = customer_reply
-    return AIAutoQuoteResponse(
+    response = AIAutoQuoteResponse(
         extraction=extraction,
         quote_result=quote_result,
         customer_reply=customer_reply,
@@ -135,6 +176,13 @@ def calculate_ai_auto_quote(payload: AIAutoQuoteRequest, db: Session = Depends(g
         missing_fields=[],
         manual_review_required=False,
     )
+    if payload.notify_wecom:
+        _try_wecom_notify(
+            "ai_quote",
+            lambda: notify_ai_quote_success(db, response=response, bot_id=payload.wecom_bot_id),
+            quote_result.quote_id,
+        )
+    return response
 
 
 @router.get("/audit/{quote_id}")
@@ -157,13 +205,27 @@ def update_manual_quote_task(
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     update = payload.model_dump(exclude_unset=True)
+    notify_wecom = bool(update.pop("notify_wecom", False))
+    wecom_bot_id = update.pop("wecom_bot_id", None)
     task = ManualQuoteTaskRepository(db).update(task_id, **update)
     if task is None:
         raise HTTPException(status_code=404, detail="Manual quote task not found.")
+    if notify_wecom and payload.status == "resolved":
+        _try_wecom_notify(
+            "manual_resolved",
+            lambda: notify_manual_task_resolved(db, task=task, bot_id=wecom_bot_id),
+            task.quote_id,
+        )
     return _manual_task_to_dict(task)
 
 
-def _record_zone_quote_side_effects(db: Session, payload: ZoneQuoteRequest, result: ZoneQuoteResult) -> None:
+def _record_zone_quote_side_effects(
+    db: Session,
+    payload: ZoneQuoteRequest,
+    result: ZoneQuoteResult,
+    *,
+    manual_wecom_bot_id: int | None = None,
+) -> None:
     try:
         QuoteAuditRepository(db).create_for_zone_quote(payload, result)
     except Exception:
@@ -178,6 +240,12 @@ def _record_zone_quote_side_effects(db: Session, payload: ZoneQuoteRequest, resu
     except Exception:
         logger.exception("Failed to create manual quote task.", extra={"quote_id": result.quote_id})
         db.rollback()
+
+    _try_wecom_notify(
+        "manual_required",
+        lambda: notify_manual_required(db, result=result, request=payload, bot_id=manual_wecom_bot_id),
+        result.quote_id,
+    )
 
 
 def _audit_to_dict(record: QuoteAuditLog) -> dict[str, object]:
@@ -223,6 +291,21 @@ def _decimal_to_string(value: Decimal | None) -> str | None:
     if value is None:
         return None
     return f"{value:.2f}"
+
+
+def _normalize_zone_payload(
+    payload: ZoneQuoteWithNotifyRequest | ZoneQuoteRequest,
+) -> tuple[ZoneQuoteRequest, bool, int | None]:
+    if isinstance(payload, ZoneQuoteWithNotifyRequest):
+        return payload.quote, payload.notify_wecom, payload.wecom_bot_id
+    return payload, False, None
+
+
+def _try_wecom_notify(label: str, callback, quote_id: str) -> None:
+    try:
+        callback()
+    except Exception:
+        logger.exception("WeCom notification side effect failed.", extra={"label": label, "quote_id": quote_id})
 
 
 def _select_ai_config(repository: AIModelConfigRepository, config_id: int | None):

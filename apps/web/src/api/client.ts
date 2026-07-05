@@ -41,6 +41,12 @@ export interface ZoneQuoteRequest {
   detention_minutes: number;
 }
 
+export interface ZoneQuoteWithNotifyRequest {
+  quote: ZoneQuoteRequest;
+  notify_wecom: boolean;
+  wecom_bot_id?: number | null;
+}
+
 export interface ZoneQuoteResult {
   quote_id: string;
   source_type: "zone_matrix" | "manual_required" | string;
@@ -90,6 +96,8 @@ export interface AIAutoQuoteRequest {
   customer_message: string;
   ai_config_id?: number | null;
   auto_submit_when_complete: boolean;
+  notify_wecom?: boolean;
+  wecom_bot_id?: number | null;
 }
 
 export interface AIAutoQuoteResponse {
@@ -139,6 +147,36 @@ export interface AIConfigTestResult {
   preview?: string;
 }
 
+export interface WeComBotConfigPublic {
+  id: number;
+  name: string;
+  masked_webhook_url: string | null;
+  bot_type: string;
+  purpose: string;
+  enabled: boolean;
+  is_default: boolean;
+  mention_all_on_manual_required: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface WeComBotConfigPayload {
+  name?: string;
+  webhook_url?: string | null;
+  bot_type?: string;
+  purpose?: string;
+  enabled?: boolean;
+  is_default?: boolean;
+  mention_all_on_manual_required?: boolean;
+}
+
+export interface WeComTestResult {
+  success: boolean;
+  error: string | null;
+  latency_ms: number;
+  status_code: number | null;
+}
+
 export interface ManualQuoteTask {
   id: number;
   quote_id: string;
@@ -159,6 +197,8 @@ export interface ManualQuoteTaskUpdate {
   assigned_to?: string | null;
   resolved_price_usd?: number | null;
   resolved_note?: string | null;
+  notify_wecom?: boolean;
+  wecom_bot_id?: number | null;
 }
 
 export interface QuoteAuditLog {
@@ -245,7 +285,7 @@ function formatApiError(data: unknown, fallback: string): string {
 }
 
 export function calculateZoneQuote(
-  payload: ZoneQuoteRequest,
+  payload: ZoneQuoteRequest | ZoneQuoteWithNotifyRequest,
 ): Promise<ZoneQuoteResult> {
   return request<ZoneQuoteResult>("/quotes/zone-calculate", {
     method: "POST",
@@ -317,6 +357,47 @@ export function setDefaultAIConfig(configId: number): Promise<AIModelConfigPubli
 
 export function testAIConfig(configId: number): Promise<AIConfigTestResult> {
   return request<AIConfigTestResult>(`/ai-configs/${configId}/test`, {
+    method: "POST",
+  });
+}
+
+export function listWeComBots(): Promise<WeComBotConfigPublic[]> {
+  return request<WeComBotConfigPublic[]>("/wecom/bots");
+}
+
+export function createWeComBot(
+  payload: Required<Pick<WeComBotConfigPayload, "name" | "webhook_url">> & WeComBotConfigPayload,
+): Promise<WeComBotConfigPublic> {
+  return request<WeComBotConfigPublic>("/wecom/bots", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateWeComBot(
+  botId: number,
+  payload: WeComBotConfigPayload,
+): Promise<WeComBotConfigPublic> {
+  return request<WeComBotConfigPublic>(`/wecom/bots/${botId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteWeComBot(botId: number): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/wecom/bots/${botId}`, {
+    method: "DELETE",
+  });
+}
+
+export function setDefaultWeComBot(botId: number): Promise<WeComBotConfigPublic> {
+  return request<WeComBotConfigPublic>(`/wecom/bots/${botId}/set-default`, {
+    method: "POST",
+  });
+}
+
+export function testWeComBot(botId: number): Promise<WeComTestResult> {
+  return request<WeComTestResult>(`/wecom/bots/${botId}/test`, {
     method: "POST",
   });
 }
