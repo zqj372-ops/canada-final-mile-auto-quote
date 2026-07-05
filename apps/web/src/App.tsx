@@ -8,6 +8,7 @@ import QuotePage from "./pages/QuotePage";
 import WeComSettingsPage from "./pages/WeComSettingsPage";
 
 type RoutePath = "/quote" | "/ai-quote" | "/manual-tasks" | "/audit" | "/settings/ai" | "/settings/wecom";
+const APP_BASE_PATH = normalizeBasePath(import.meta.env.VITE_APP_BASE_PATH || "/");
 
 const routes: Array<{ path: RoutePath; label: string; description: string }> = [
   { path: "/quote", label: "普通报价", description: "Zone" },
@@ -61,7 +62,7 @@ export default function App() {
     if (nextPath === path) {
       return;
     }
-    window.history.pushState({}, "", nextPath);
+    window.history.pushState({}, "", withBasePath(nextPath));
     setPath(nextPath);
   }
 
@@ -132,7 +133,7 @@ export default function App() {
                       ? "bg-blue-700 text-white"
                       : "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
                   }`}
-                  href={route.path}
+                  href={withBasePath(route.path)}
                   aria-current={isActive ? "page" : undefined}
                   onClick={(event) => {
                     event.preventDefault();
@@ -163,20 +164,45 @@ export default function App() {
 }
 
 function normalizePath(pathname: string): RoutePath {
-  if (pathname === "/manual-tasks") {
+  const strippedPath = stripBasePath(pathname);
+  if (strippedPath === "/manual-tasks") {
     return "/manual-tasks";
   }
-  if (pathname === "/ai-quote") {
+  if (strippedPath === "/ai-quote") {
     return "/ai-quote";
   }
-  if (pathname === "/audit") {
+  if (strippedPath === "/audit") {
     return "/audit";
   }
-  if (pathname === "/settings/ai") {
+  if (strippedPath === "/settings/ai") {
     return "/settings/ai";
   }
-  if (pathname === "/settings/wecom") {
+  if (strippedPath === "/settings/wecom") {
     return "/settings/wecom";
   }
   return "/quote";
+}
+
+function normalizeBasePath(basePath: string): string {
+  if (!basePath || basePath === "/") {
+    return "";
+  }
+  return `/${basePath.replace(/^\/+|\/+$/g, "")}`;
+}
+
+function stripBasePath(pathname: string): string {
+  if (!APP_BASE_PATH) {
+    return pathname;
+  }
+  if (pathname === APP_BASE_PATH || pathname === `${APP_BASE_PATH}/`) {
+    return "/";
+  }
+  if (pathname.startsWith(`${APP_BASE_PATH}/`)) {
+    return pathname.slice(APP_BASE_PATH.length) || "/";
+  }
+  return pathname;
+}
+
+function withBasePath(routePath: RoutePath): string {
+  return `${APP_BASE_PATH}${routePath}`;
 }

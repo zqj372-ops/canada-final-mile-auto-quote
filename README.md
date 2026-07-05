@@ -169,10 +169,12 @@ docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod
 
 生产部署默认：
 
-- Web 工作台：`WEB_PORT`，默认 `18080`。
+- Web 工作台：只绑定服务器本机 `127.0.0.1:WEB_PORT`，默认 `18080`。
 - API：只绑定服务器本机 `127.0.0.1:API_PORT`，默认 `18000`。
 - 前端通过 `/api` 反代访问后端，不需要浏览器直连 API 端口。
 - 生产环境应保持 `DEV_AUTH_DISABLED=false`，并在前端顶部保存 `X-API-Key`。
+- 如果挂在已有域名子路径下，可设置 `VITE_APP_BASE_PATH=/canada-quote/`
+  和 `VITE_API_BASE_URL=/canada-quote-api` 后重建 Web 容器。
 
 ## 报价 API
 
