@@ -65,4 +65,36 @@ textarea {
   .metric-value {
     @apply mt-1 text-sm font-semibold text-slate-950;
   }
+
+  .ai-quote-workbench {
+    background:
+      linear-gradient(rgba(56, 189, 248, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(139, 92, 246, 0.06) 1px, transparent 1px),
+      radial-gradient(circle at 20% 10%, rgba(56, 189, 248, 0.18), transparent 28rem),
+      radial-gradient(circle at 80% 0%, rgba(139, 92, 246, 0.16), transparent 26rem),
+      #050816;
+    background-size: 28px 28px, 28px 28px, auto, auto, auto;
+  }
+
+  .ai-glass-panel {
+    @apply rounded-lg border border-cyan-200/20 bg-slate-900/70 shadow-[0_0_34px_rgba(56,189,248,0.10)] backdrop-blur-xl;
+  }
+
+  .ai-textarea,
+  .ai-input,
+  .ai-select {
+    @apply w-full rounded-md border border-cyan-200/20 bg-slate-950/70 px-3 py-2 text-base text-slate-50 shadow-inner outline-none transition placeholder:text-slate-500 focus:border-cyan-300 focus:ring-2 focus:ring-cyan-300/30 disabled:cursor-not-allowed disabled:border-slate-700 disabled:bg-slate-900 disabled:text-slate-500;
+  }
+
+  .ai-textarea {
+    @apply resize-y leading-6;
+  }
+
+  .ai-primary-button {
+    @apply inline-flex min-h-11 items-center justify-center rounded-md border border-cyan-300/50 bg-cyan-400 px-4 py-2 text-sm font-bold text-slate-950 shadow-[0_0_24px_rgba(56,189,248,0.25)] transition hover:bg-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:border-slate-600 disabled:bg-slate-700 disabled:text-slate-400 disabled:shadow-none;
+  }
+
+  .ai-secondary-button {
+    @apply inline-flex min-h-11 items-center justify-center rounded-md border border-white/15 bg-white/[0.06] px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-cyan-200/50 hover:bg-cyan-300/10 focus:outline-none focus:ring-2 focus:ring-cyan-200 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:text-slate-500;
+  }
 }

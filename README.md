@@ -95,8 +95,14 @@ VITE_API_BASE_URL=http://localhost:8000 npm run dev
 - `/ai-quote`：粘贴客户原始消息，由 AI 提取字段，再由 Zone Quote Engine 报价。
 - `/manual-tasks`：处理 `manual_required` 人工确认任务。
 - `/audit`：按 `quote_id` 查询报价审计记录。
+- `/settings/quote`：维护 `/quote` 工作台后台配置，包括示例、字段选项、风险阈值和复制话术。
 - `/settings/ai`：维护 OpenAI-compatible 模型配置。
 - `/settings/wecom`：维护企业微信群机器人 Webhook 配置。
+
+`/quote` 是中文 AI 报价工作台：销售粘贴尺寸、重量、地址和邮编，页面只做字段识别
+和展示，价格仍由后端 `POST /quotes/zone-calculate` 计算。包装类型、地址类型、风险
+阈值、示例文本、附加费显示名和报价复制模板由后端
+`GET /quote-configs/workbench` 返回，不写死在前端。
 
 Docker Compose：
 
@@ -153,6 +159,16 @@ PATCH /api-keys/{key_id}
 - `operator`：创建报价、查看审计、查看并处理人工任务。
 - `sales`：创建普通报价和 AI 自动报价。
 - `viewer`：只读审计和人工任务。
+
+报价工作台配置接口：
+
+```bash
+GET /quote-configs/workbench
+PUT /quote-configs/workbench
+```
+
+读取配置允许所有角色；更新配置仅允许 `admin`。配置存储在 `quote_rule_config`
+表的 `quote_workbench_config` 记录中，前端不得维护另一份业务配置。
 
 ### 生产部署
 

@@ -221,6 +221,78 @@ export interface QuoteAuditLog {
   created_at: string | null;
 }
 
+export interface WorkbenchOption {
+  value: string;
+  label: string;
+}
+
+export interface ProvinceAlias {
+  code: string;
+  name: string;
+  aliases: string[];
+}
+
+export interface WorkbenchParserConfig {
+  dimension_separators: string[];
+  allow_space_dimension_separator: boolean;
+  weight_units: string[];
+  postal_code_pattern: string;
+  country_aliases: string[];
+  default_country: string;
+}
+
+export interface WorkbenchQuoteDefaults {
+  packaging_type: PackagingType;
+  address_type: AddressType;
+  is_stackable: boolean | null;
+  explicit_pallet_count: number | null;
+  requires_liftgate: boolean;
+  requires_pallet_jack: boolean;
+  requires_appointment: boolean;
+  detention_minutes: number;
+  notify_wecom: boolean;
+}
+
+export interface WorkbenchRiskConfig {
+  dense_density_kg_per_cbm: number;
+  light_density_kg_per_cbm: number;
+  oversized_longest_side_cm: number;
+  heavy_single_piece_kg: number;
+  core_city_names: string[];
+}
+
+export interface WorkbenchCopyTemplateConfig {
+  currency_code: string;
+  valid_days: number;
+  manual_price_text: string;
+  included_items: string[];
+  excluded_items: string[];
+  remark: string;
+}
+
+export interface QuoteWorkbenchConfig {
+  title: string;
+  subtitle: string;
+  input_title: string;
+  input_label: string;
+  primary_button_label: string;
+  clear_button_label: string;
+  import_button_label: string;
+  status_labels: Record<string, string>;
+  sample_input: string;
+  format_hints: string[];
+  packaging_options: WorkbenchOption[];
+  address_type_options: WorkbenchOption[];
+  service_options: WorkbenchOption[];
+  accessorial_labels: Record<string, string>;
+  backend_risk_tag_labels: Record<string, string>;
+  provinces: ProvinceAlias[];
+  parser: WorkbenchParserConfig;
+  defaults: WorkbenchQuoteDefaults;
+  risks: WorkbenchRiskConfig;
+  copy_template: WorkbenchCopyTemplateConfig;
+}
+
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"
 ).replace(/\/$/, "");
@@ -321,6 +393,19 @@ export function updateManualTask(
 
 export function getQuoteAudit(quoteId: string): Promise<QuoteAuditLog> {
   return request<QuoteAuditLog>(`/quotes/audit/${encodeURIComponent(quoteId)}`);
+}
+
+export function getQuoteWorkbenchConfig(): Promise<QuoteWorkbenchConfig> {
+  return request<QuoteWorkbenchConfig>("/quote-configs/workbench");
+}
+
+export function updateQuoteWorkbenchConfig(
+  payload: QuoteWorkbenchConfig,
+): Promise<QuoteWorkbenchConfig> {
+  return request<QuoteWorkbenchConfig>("/quote-configs/workbench", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function listAIConfigs(): Promise<AIModelConfigPublic[]> {

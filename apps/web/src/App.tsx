@@ -5,18 +5,27 @@ import AISettingsPage from "./pages/AISettingsPage";
 import AuditPage from "./pages/AuditPage";
 import ManualTasksPage from "./pages/ManualTasksPage";
 import QuotePage from "./pages/QuotePage";
+import QuoteSettingsPage from "./pages/QuoteSettingsPage";
 import WeComSettingsPage from "./pages/WeComSettingsPage";
 
-type RoutePath = "/quote" | "/ai-quote" | "/manual-tasks" | "/audit" | "/settings/ai" | "/settings/wecom";
+type RoutePath =
+  | "/quote"
+  | "/ai-quote"
+  | "/manual-tasks"
+  | "/audit"
+  | "/settings/quote"
+  | "/settings/ai"
+  | "/settings/wecom";
 const APP_BASE_PATH = normalizeBasePath(import.meta.env.VITE_APP_BASE_PATH || "/");
 
 const routes: Array<{ path: RoutePath; label: string; description: string }> = [
-  { path: "/quote", label: "普通报价", description: "Zone" },
-  { path: "/ai-quote", label: "AI 自动报价", description: "Extract" },
-  { path: "/manual-tasks", label: "人工任务", description: "Review" },
-  { path: "/audit", label: "审计查询", description: "Log" },
-  { path: "/settings/ai", label: "AI 配置", description: "Models" },
-  { path: "/settings/wecom", label: "企业微信配置", description: "Bots" },
+  { path: "/quote", label: "AI 报价工作台", description: "粘贴识别" },
+  { path: "/ai-quote", label: "AI 自动报价", description: "模型提取" },
+  { path: "/manual-tasks", label: "人工任务", description: "复核" },
+  { path: "/audit", label: "审计查询", description: "日志" },
+  { path: "/settings/quote", label: "报价配置", description: "后台" },
+  { path: "/settings/ai", label: "AI 配置", description: "模型" },
+  { path: "/settings/wecom", label: "企业微信配置", description: "机器人" },
 ];
 
 export default function App() {
@@ -51,6 +60,9 @@ export default function App() {
     }
     if (path === "/settings/ai") {
       return <AISettingsPage />;
+    }
+    if (path === "/settings/quote") {
+      return <QuoteSettingsPage />;
     }
     if (path === "/settings/wecom") {
       return <WeComSettingsPage />;
@@ -176,6 +188,9 @@ function normalizePath(pathname: string): RoutePath {
   }
   if (strippedPath === "/settings/ai") {
     return "/settings/ai";
+  }
+  if (strippedPath === "/settings/quote") {
+    return "/settings/quote";
   }
   if (strippedPath === "/settings/wecom") {
     return "/settings/wecom";

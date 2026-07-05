@@ -1,83 +1,76 @@
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   calculateZoneQuote,
+  getQuoteWorkbenchConfig,
   listWeComBots,
   type AddressType,
   type PackagingType,
+  type QuoteWorkbenchConfig,
   type WeComBotConfigPublic,
   type ZoneQuoteRequest,
   type ZoneQuoteResult,
 } from "../api/client";
-import ResultCard from "../components/ResultCard";
+import AiQuoteInputPanel from "../components/AiQuoteInputPanel";
+import ParsedAddressCard from "../components/ParsedAddressCard";
+import ParsedCargoTable from "../components/ParsedCargoTable";
+import QuoteCalculationPanel from "../components/QuoteCalculationPanel";
+import QuoteRiskPanel from "../components/QuoteRiskPanel";
+import { parseQuoteInput, type ParsedQuoteInput } from "../utils/quoteParser";
 
-type StackableValue = "unknown" | "true" | "false";
-
-interface QuoteFormState {
-  address_line: string;
-  postal_code: string;
-  city: string;
-  province: string;
-  cbm: string;
-  weight_kg: string;
-  piece_count: string;
-  packaging_type: PackagingType;
-  longest_side_cm: string;
-  explicit_pallet_count: string;
-  is_stackable: StackableValue;
-  address_type: AddressType;
-  requires_liftgate: boolean;
-  requires_pallet_jack: boolean;
-  requires_appointment: boolean;
-  detention_minutes: string;
-}
-
-const initialForm: QuoteFormState = {
-  address_line: "",
-  postal_code: "",
-  city: "",
-  province: "",
-  cbm: "",
-  weight_kg: "",
-  piece_count: "1",
-  packaging_type: "carton",
-  longest_side_cm: "",
-  explicit_pallet_count: "",
-  is_stackable: "unknown",
-  address_type: "commercial",
-  requires_liftgate: false,
-  requires_pallet_jack: false,
-  requires_appointment: false,
-  detention_minutes: "0",
-};
-
-const packagingOptions: Array<{ value: PackagingType; label: string }> = [
-  { value: "carton", label: "纸箱 carton" },
-  { value: "wooden_crate", label: "木箱 wooden_crate" },
-  { value: "pallet", label: "托盘 pallet" },
-  { value: "woven_bag", label: "编织袋 woven_bag" },
-  { value: "flexible_packaging", label: "软包装 flexible_packaging" },
-  { value: "unknown", label: "未知 unknown" },
-];
-
-const addressTypeOptions: Array<{ value: AddressType; label: string }> = [
-  { value: "commercial", label: "商业 commercial" },
-  { value: "residential", label: "住宅 residential" },
-  { value: "private", label: "私人 private" },
-  { value: "rural_residential", label: "偏远住宅 rural_residential" },
-];
+type WorkbenchStatus =
+  | "idle"
+  | "parsing"
+  | "parsed"
+  | "quoting"
+  | "quoted"
+  | "manual_required";
 
 export default function QuotePage() {
-  const [form, setForm] = useState<QuoteFormState>(initialForm);
+  const [config, setConfig] = useState<QuoteWorkbenchConfig | null>(null);
+  const [rawInput, setRawInput] = useState("");
   const [result, setResult] = useState<ZoneQuoteResult | null>(null);
+  const [status, setStatus] = useState<WorkbenchStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [packagingType, setPackagingType] = useState<PackagingType | "">("");
+  const [addressType, setAddressType] = useState<AddressType | "">("");
+  const [services, setServices] = useState<Record<string, boolean>>({});
+  const [detentionMinutes, setDetentionMinutes] = useState(0);
   const [wecomBots, setWecomBots] = useState<WeComBotConfigPublic[]>([]);
   const [notifyWecom, setNotifyWecom] = useState(false);
   const [selectedWecomBotId, setSelectedWecomBotId] = useState("");
 
   useEffect(() => {
+    void loadConfig();
     void loadWecomBots();
   }, []);
+
+  async function loadConfig() {
+    setError(null);
+    try {
+      const nextConfig = await getQuoteWorkbenchConfig();
+      setConfig(nextConfig);
+      setPackagingType(nextConfig.defaults.packaging_type);
+      setAddressType(nextConfig.defaults.address_type);
+      setDetentionMinutes(nextConfig.defaults.detention_minutes);
+      setNotifyWecom(nextConfig.defaults.notify_wecom);
+      setServices(
+        Object.fromEntries(
+          nextConfig.service_options.map((option) => [
+            option.value,
+            Boolean(
+              nextConfig.defaults[
+                option.value as keyof typeof nextConfig.defaults
+              ],
+            ),
+          ]),
+        ),
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "报价工作台配置加载失败");
+    }
+  }
 
   async function loadWecomBots() {
     try {
@@ -87,13 +80,61 @@ export default function QuotePage() {
     }
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
+  const parsed = useMemo(
+    () => (config ? parseQuoteInput(rawInput, config) : null),
+    [config, rawInput],
+  );
 
+  const statusLabel = config?.status_labels[status] ?? status;
+  const manualRequired = Boolean(result?.manual_review_required) || status === "manual_required";
+  const riskMessages = useMemo(
+    () => (config && parsed ? buildRiskMessages(config, parsed, result, manualRequired) : []),
+    [config, parsed, result, manualRequired],
+  );
+  const salesText = useMemo(
+    () => (config && parsed ? buildSalesText(config, parsed, result) : ""),
+    [config, parsed, result],
+  );
+
+  function updateRawInput(value: string) {
+    setRawInput(value);
+    setResult(null);
+    setNotice(null);
+    setError(null);
+    setStatus(value.trim() ? "parsed" : "idle");
+  }
+
+  async function handleSmartQuote() {
+    if (!config || !parsed) {
+      setError("后台配置尚未加载完成");
+      return;
+    }
+    if (!rawInput.trim()) {
+      setError("请先粘贴报价信息");
+      setStatus("idle");
+      return;
+    }
+
+    setStatus("parsing");
+    setError(null);
+    setNotice(null);
+
+    if (parsed.missing_fields.length) {
+      setStatus("manual_required");
+      setError(`识别信息不完整：${parsed.missing_fields.join("、")}。请补齐后再自动报价。`);
+      return;
+    }
+
+    const payload = buildPayload(config, parsed, {
+      packagingType,
+      addressType,
+      services,
+      detentionMinutes,
+    });
+
+    setIsSubmitting(true);
+    setStatus("quoting");
     try {
-      const payload = buildPayload(form);
-      setIsSubmitting(true);
       const quoteResult = await calculateZoneQuote(
         notifyWecom
           ? {
@@ -104,403 +145,285 @@ export default function QuotePage() {
           : payload,
       );
       setResult(quoteResult);
+      setStatus(quoteResult.manual_review_required ? "manual_required" : "quoted");
+      if (quoteResult.manual_review_required) {
+        setNotice("该票已进入人工确认流程，请勿直接发送客户报价。");
+      }
     } catch (caught) {
+      setStatus("manual_required");
       setError(caught instanceof Error ? caught.message : "报价请求失败");
     } finally {
       setIsSubmitting(false);
     }
   }
 
-  function update<K extends keyof QuoteFormState>(
-    key: K,
-    value: QuoteFormState[K],
-  ) {
-    setForm((current) => ({ ...current, [key]: value }));
+  function clearInput() {
+    setRawInput("");
+    setResult(null);
+    setError(null);
+    setNotice(null);
+    setStatus("idle");
+  }
+
+  function handleImportText(value: string) {
+    if (!value) {
+      setError("Excel 文件请走后台导入模块；当前工作台只读取文本或 CSV 内容。");
+      return;
+    }
+    updateRawInput(value);
+  }
+
+  function exportQuote() {
+    if (!salesText.trim()) {
+      return;
+    }
+    const blob = new Blob([salesText], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `canada-final-mile-quote-${result?.quote_id ?? "draft"}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  if (!config || !parsed) {
+    return (
+      <div className="ai-quote-workbench min-h-[calc(100dvh-96px)] px-4 py-8">
+        <section className="ai-glass-panel mx-auto max-w-3xl p-6">
+          <h1 className="text-2xl font-semibold text-white">加拿大尾端 AI 报价系统</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
+            {error ? `配置加载失败：${error}` : "正在读取后台配置..."}
+          </p>
+          <button className="ai-primary-button mt-5" type="button" onClick={loadConfig}>
+            重新加载配置
+          </button>
+        </section>
+      </div>
+    );
   }
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-      <header>
-        <p className="text-sm font-medium text-blue-800">Zone Quote</p>
-        <h1 className="mt-1 text-2xl font-semibold text-slate-950">
-          加拿大尾程派送报价
-        </h1>
-      </header>
-
-      <form className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]" onSubmit={handleSubmit}>
-        <section className="panel p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h2 className="section-title">报价输入</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                前端只提交货物与地址信息，金额全部由后端 Quote Engine 返回。
-              </p>
-            </div>
-            <button
-              className="btn-secondary shrink-0"
-              type="button"
-              onClick={() => {
-                setForm(initialForm);
-                setResult(null);
-                setError(null);
-              }}
-            >
-              清空
-            </button>
-          </div>
-
-          {error && (
-            <div
-              className="mt-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900"
-              role="alert"
-            >
-              {error}
-            </div>
-          )}
-
-          <fieldset className="mt-5 border-t border-slate-200 pt-5">
-            <legend className="text-sm font-semibold text-slate-950">地址信息</legend>
-            <div className="mt-3 grid gap-4 md:grid-cols-2">
-              <TextField
-                label="address_line"
-                value={form.address_line}
-                onChange={(value) => update("address_line", value)}
-                placeholder="收货地址"
-              />
-              <TextField
-                label="postal_code *"
-                value={form.postal_code}
-                onChange={(value) => update("postal_code", value)}
-                placeholder="A1A 1A1"
-                required
-              />
-              <TextField
-                label="city"
-                value={form.city}
-                onChange={(value) => update("city", value)}
-                placeholder="Richmond"
-              />
-              <TextField
-                label="province"
-                value={form.province}
-                onChange={(value) => update("province", value)}
-                placeholder="BC / ON"
-              />
-            </div>
-          </fieldset>
-
-          <fieldset className="mt-6 border-t border-slate-200 pt-5">
-            <legend className="text-sm font-semibold text-slate-950">货物信息</legend>
-            <div className="mt-3 grid gap-4 md:grid-cols-2">
-              <NumberField
-                label="cbm *"
-                value={form.cbm}
-                onChange={(value) => update("cbm", value)}
-                min="0"
-                step="0.01"
-                required
-              />
-              <NumberField
-                label="weight_kg *"
-                value={form.weight_kg}
-                onChange={(value) => update("weight_kg", value)}
-                min="0"
-                step="0.01"
-                required
-              />
-              <NumberField
-                label="piece_count *"
-                value={form.piece_count}
-                onChange={(value) => update("piece_count", value)}
-                min="1"
-                step="1"
-                required
-              />
-              <label>
-                <span className="field-label">packaging_type</span>
-                <select
-                  className="field-input"
-                  value={form.packaging_type}
-                  onChange={(event) =>
-                    update("packaging_type", event.target.value as PackagingType)
-                  }
-                >
-                  {packagingOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <NumberField
-                label="longest_side_cm"
-                value={form.longest_side_cm}
-                onChange={(value) => update("longest_side_cm", value)}
-                min="0"
-                step="0.1"
-              />
-              <NumberField
-                label="explicit_pallet_count"
-                value={form.explicit_pallet_count}
-                onChange={(value) => update("explicit_pallet_count", value)}
-                min="1"
-                step="1"
-              />
-              <label>
-                <span className="field-label">is_stackable</span>
-                <select
-                  className="field-input"
-                  value={form.is_stackable}
-                  onChange={(event) =>
-                    update("is_stackable", event.target.value as StackableValue)
-                  }
-                >
-                  <option value="unknown">未知</option>
-                  <option value="true">是</option>
-                  <option value="false">否</option>
-                </select>
-              </label>
-              <label>
-                <span className="field-label">address_type</span>
-                <select
-                  className="field-input"
-                  value={form.address_type}
-                  onChange={(event) =>
-                    update("address_type", event.target.value as AddressType)
-                  }
-                >
-                  {addressTypeOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </fieldset>
-
-          <fieldset className="mt-6 border-t border-slate-200 pt-5">
-            <legend className="text-sm font-semibold text-slate-950">服务要求</legend>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              <CheckboxField
-                label="requires_liftgate"
-                checked={form.requires_liftgate}
-                onChange={(checked) => update("requires_liftgate", checked)}
-              />
-              <CheckboxField
-                label="requires_pallet_jack"
-                checked={form.requires_pallet_jack}
-                onChange={(checked) => update("requires_pallet_jack", checked)}
-              />
-              <CheckboxField
-                label="requires_appointment"
-                checked={form.requires_appointment}
-                onChange={(checked) => update("requires_appointment", checked)}
-              />
-              <NumberField
-                label="detention_minutes"
-                value={form.detention_minutes}
-                onChange={(value) => update("detention_minutes", value)}
-                min="0"
-                step="1"
-              />
-            </div>
-          </fieldset>
-
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <button className="btn-primary" type="submit" disabled={isSubmitting}>
-              {isSubmitting ? "报价中..." : "提交报价"}
-            </button>
-            <p className="text-sm text-slate-600">
-              命中失败会进入 manual_required，不会在前端估价。
+    <div className="ai-quote-workbench min-h-[calc(100dvh-96px)] px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mx-auto flex max-w-[1800px] flex-col gap-6">
+        <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="text-sm font-semibold uppercase text-cyan-200">
+              AI 报价工作台
+            </p>
+            <h1 className="mt-3 text-3xl font-bold text-white sm:text-4xl">
+              {config.title}
+            </h1>
+            <p className="mt-3 max-w-3xl text-base leading-7 text-slate-300">
+              {config.subtitle}
             </p>
           </div>
+          <span
+            className={`w-fit rounded-full border px-4 py-2 text-sm font-semibold ${
+              manualRequired
+                ? "border-amber-300/60 bg-amber-300/10 text-amber-100"
+                : "border-cyan-300/50 bg-cyan-300/10 text-cyan-100"
+            }`}
+          >
+            {statusLabel}
+          </span>
+        </header>
 
-          <fieldset className="mt-6 border-t border-slate-200 pt-5">
-            <legend className="text-sm font-semibold text-slate-950">企业微信推送</legend>
-            <div className="mt-3 grid gap-3">
-              <CheckboxField
-                label="成功报价后推送企业微信"
-                checked={notifyWecom}
-                onChange={setNotifyWecom}
-              />
-              <label>
-                <span className="field-label">wecom_bot_id</span>
-                <select
-                  className="field-input"
-                  value={selectedWecomBotId}
-                  onChange={(event) => setSelectedWecomBotId(event.target.value)}
-                  disabled={!notifyWecom}
-                >
-                  <option value="">使用 quote_success/default 机器人</option>
-                  {wecomBots.map((bot) => (
-                    <option key={bot.id} value={bot.id}>
-                      {bot.name} / {bot.purpose}
-                      {bot.is_default ? " / 默认" : ""}
-                    </option>
-                  ))}
-                </select>
-                <p className="field-hint">
-                  manual_required 会自动进入人工确认池，并尝试推送人工确认通知。
-                </p>
-              </label>
-            </div>
-          </fieldset>
-        </section>
+        {error && (
+          <div
+            className="rounded-md border border-red-300/60 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-100"
+            role="alert"
+          >
+            {error}
+          </div>
+        )}
+        {notice && (
+          <div
+            className="rounded-md border border-amber-300/50 bg-amber-300/10 px-4 py-3 text-sm font-semibold text-amber-50"
+            role="status"
+          >
+            {notice}
+          </div>
+        )}
 
-        <div>
-          {result ? (
-            <ResultCard result={result} />
-          ) : (
-            <section className="panel flex min-h-72 items-center justify-center p-6 text-center">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-950">等待报价结果</h2>
-                <p className="mt-2 max-w-md text-sm leading-6 text-slate-600">
-                  提交后会展示 Zone、计费托数、基础价、燃油、附加费、风险标签和销售备注。
-                </p>
-              </div>
-            </section>
-          )}
+        <div className="grid gap-6 xl:grid-cols-[minmax(320px,0.88fr)_minmax(440px,1.1fr)_minmax(360px,0.9fr)]">
+          <div className="grid gap-6">
+            <AiQuoteInputPanel
+              config={config}
+              value={rawInput}
+              statusLabel={statusLabel}
+              isQuoting={isSubmitting}
+              onChange={updateRawInput}
+              onSubmit={handleSmartQuote}
+              onClear={clearInput}
+              onImportText={handleImportText}
+            />
+            <NotificationPanel
+              bots={wecomBots}
+              notifyWecom={notifyWecom}
+              selectedBotId={selectedWecomBotId}
+              onNotifyChange={setNotifyWecom}
+              onBotChange={setSelectedWecomBotId}
+            />
+          </div>
+
+          <div className="grid gap-6">
+            <ParsedCargoTable parsed={parsed} />
+            <ParsedAddressCard
+              parsed={parsed}
+              config={config}
+              packagingType={packagingType}
+              onPackagingTypeChange={(value) => setPackagingType(value as PackagingType)}
+              addressType={addressType}
+              onAddressTypeChange={(value) => setAddressType(value as AddressType)}
+              services={services}
+              onServiceChange={(key, checked) =>
+                setServices((current) => ({ ...current, [key]: checked }))
+              }
+              detentionMinutes={detentionMinutes}
+              onDetentionMinutesChange={setDetentionMinutes}
+            />
+          </div>
+
+          <div className="grid content-start gap-6">
+            <QuoteCalculationPanel
+              config={config}
+              parsed={parsed}
+              result={result}
+              salesText={salesText}
+              onExport={exportQuote}
+            />
+            <QuoteRiskPanel risks={riskMessages} manualRequired={manualRequired} />
+          </div>
         </div>
-      </form>
+      </div>
     </div>
   );
 }
 
-function TextField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  required = false,
+function NotificationPanel({
+  bots,
+  notifyWecom,
+  selectedBotId,
+  onNotifyChange,
+  onBotChange,
 }: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  required?: boolean;
+  bots: WeComBotConfigPublic[];
+  notifyWecom: boolean;
+  selectedBotId: string;
+  onNotifyChange: (value: boolean) => void;
+  onBotChange: (value: string) => void;
 }) {
   return (
-    <label>
-      <span className="field-label">{label}</span>
-      <input
-        className="field-input"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        required={required}
-      />
-    </label>
+    <section className="ai-glass-panel p-4">
+      <label className="flex min-h-11 items-center gap-3 text-sm font-semibold text-slate-100">
+        <input
+          className="h-4 w-4 rounded border-cyan-200 bg-slate-950 text-cyan-400 focus:ring-cyan-300"
+          type="checkbox"
+          checked={notifyWecom}
+          onChange={(event) => onNotifyChange(event.target.checked)}
+        />
+        报价完成后推送企业微信
+      </label>
+      <label className="mt-3 block">
+        <span className="text-xs font-semibold text-slate-300">企业微信机器人</span>
+        <select
+          className="ai-select mt-2"
+          value={selectedBotId}
+          onChange={(event) => onBotChange(event.target.value)}
+          disabled={!notifyWecom}
+        >
+          <option value="">使用后台默认机器人</option>
+          {bots.map((bot) => (
+            <option key={bot.id} value={bot.id}>
+              {bot.name} / {bot.purpose}
+              {bot.is_default ? " / 默认" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+    </section>
   );
 }
 
-function NumberField({
-  label,
-  value,
-  onChange,
-  min,
-  step,
-  required = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  min?: string;
-  step?: string;
-  required?: boolean;
-}) {
-  return (
-    <label>
-      <span className="field-label">{label}</span>
-      <input
-        className="field-input"
-        type="number"
-        inputMode="decimal"
-        value={value}
-        min={min}
-        step={step}
-        onChange={(event) => onChange(event.target.value)}
-        required={required}
-      />
-    </label>
-  );
-}
-
-function CheckboxField({
-  label,
-  checked,
-  onChange,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="flex min-h-11 items-center gap-3 rounded-md border border-slate-200 px-3 py-2">
-      <input
-        className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      <span className="text-sm font-medium text-slate-800">{label}</span>
-    </label>
-  );
-}
-
-function buildPayload(form: QuoteFormState): ZoneQuoteRequest {
+function buildPayload(
+  config: QuoteWorkbenchConfig,
+  parsed: ParsedQuoteInput,
+  options: {
+    packagingType: PackagingType | "";
+    addressType: AddressType | "";
+    services: Record<string, boolean>;
+    detentionMinutes: number;
+  },
+): ZoneQuoteRequest {
   return {
-    address_line: optionalText(form.address_line),
-    postal_code: form.postal_code.trim(),
-    city: optionalText(form.city),
-    province: optionalText(form.province),
-    cbm: requiredNumber(form.cbm, "cbm"),
-    weight_kg: requiredNumber(form.weight_kg, "weight_kg"),
-    piece_count: requiredInteger(form.piece_count, "piece_count", 1),
-    packaging_type: form.packaging_type,
-    longest_side_cm: optionalNumber(form.longest_side_cm),
-    explicit_pallet_count: optionalInteger(form.explicit_pallet_count, 1),
-    is_stackable:
-      form.is_stackable === "unknown" ? null : form.is_stackable === "true",
-    address_type: form.address_type,
-    requires_liftgate: form.requires_liftgate,
-    requires_pallet_jack: form.requires_pallet_jack,
-    requires_appointment: form.requires_appointment,
-    detention_minutes: optionalInteger(form.detention_minutes) ?? 0,
+    address_line: parsed.address.address_line,
+    postal_code: parsed.address.postal_code || "",
+    city: parsed.address.city,
+    province: parsed.address.province_code,
+    cbm: parsed.total_cbm,
+    weight_kg: parsed.total_weight_kg,
+    piece_count: parsed.piece_count,
+    packaging_type: (options.packagingType || config.defaults.packaging_type) as PackagingType,
+    longest_side_cm: parsed.longest_side_cm,
+    explicit_pallet_count: config.defaults.explicit_pallet_count,
+    is_stackable: config.defaults.is_stackable,
+    address_type: (options.addressType || config.defaults.address_type) as AddressType,
+    requires_liftgate: Boolean(options.services.requires_liftgate),
+    requires_pallet_jack: Boolean(options.services.requires_pallet_jack),
+    requires_appointment: Boolean(options.services.requires_appointment),
+    detention_minutes: options.detentionMinutes,
   };
 }
 
-function optionalText(value: string): string | null {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
+function buildRiskMessages(
+  config: QuoteWorkbenchConfig,
+  parsed: ParsedQuoteInput,
+  result: ZoneQuoteResult | null,
+  manualRequired: boolean,
+): string[] {
+  const backendRisks =
+    result?.risk_tags.map((tag) => config.backend_risk_tag_labels[tag] || tag) ?? [];
+  const manualRisk = manualRequired ? ["需要人工确认，不要直接发客户。"] : [];
+  return Array.from(new Set([...manualRisk, ...parsed.risk_hints, ...backendRisks]));
 }
 
-function optionalNumber(value: string): number | null {
-  if (!value.trim()) {
-    return null;
-  }
-  return requiredNumber(value, "number");
-}
+function buildSalesText(
+  config: QuoteWorkbenchConfig,
+  parsed: ParsedQuoteInput,
+  result: ZoneQuoteResult | null,
+): string {
+  const destination = [
+    parsed.address.address_line,
+    parsed.address.city,
+    parsed.address.province_name || parsed.address.province_code,
+    parsed.address.country,
+    parsed.address.postal_code,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  const maxDimensions = parsed.max_dimensions_cm
+    ? `${parsed.max_dimensions_cm.join(" × ")} cm`
+    : "待确认";
+  const totalPrice =
+    result?.total_price_usd && !result.manual_review_required
+      ? `${config.copy_template.currency_code} ${Number(result.total_price_usd).toFixed(2)}`
+      : config.copy_template.manual_price_text;
 
-function optionalInteger(value: string, min = 0): number | null {
-  if (!value.trim()) {
-    return null;
-  }
-  return requiredInteger(value, "integer", min);
-}
-
-function requiredNumber(value: string, fieldName: string): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(`${fieldName} 必须是大于等于 0 的数字`);
-  }
-  return parsed;
-}
-
-function requiredInteger(value: string, fieldName: string, min = 0): number {
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < min) {
-    throw new Error(`${fieldName} 必须是大于等于 ${min} 的整数`);
-  }
-  return parsed;
+  return [
+    "加拿大尾端派送报价如下：",
+    `目的地：${destination || "待确认"}`,
+    `货物数据：共 ${parsed.piece_count || "待确认"} 件，约 ${parsed.total_cbm ? parsed.total_cbm.toFixed(3) : "待确认"} CBM，${parsed.total_weight_kg ? parsed.total_weight_kg.toFixed(1) : "待确认"} KG`,
+    `最大单件：${maxDimensions}`,
+    `计费密度：${parsed.density_kg_per_cbm !== null ? `约 ${parsed.density_kg_per_cbm.toFixed(1)} KG/CBM` : "待确认"}`,
+    `报价合计：${totalPrice}`,
+    "费用包含：",
+    ...config.copy_template.included_items.map((item) => `- ${item}`),
+    "费用不含：",
+    ...config.copy_template.excluded_items.map((item) => `- ${item}`),
+    "备注：",
+    config.copy_template.remark,
+    `报价有效期：${config.copy_template.valid_days} 天`,
+  ].join("\n");
 }
