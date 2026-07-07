@@ -278,7 +278,7 @@ export default function QuoteSettingsPage() {
                 <CheckboxField label="默认需要尾板" checked={config.defaults.requires_liftgate} onChange={(checked) => updateDefaults("requires_liftgate", checked)} />
                 <CheckboxField label="默认需要手叉车" checked={config.defaults.requires_pallet_jack} onChange={(checked) => updateDefaults("requires_pallet_jack", checked)} />
                 <CheckboxField label="默认需要预约" checked={config.defaults.requires_appointment} onChange={(checked) => updateDefaults("requires_appointment", checked)} />
-                <CheckboxField label="默认推送企业微信" checked={config.defaults.notify_wecom} onChange={(checked) => updateDefaults("notify_wecom", checked)} />
+                <CheckboxField label="默认发送邮件通知" checked={config.defaults.notify_wecom} onChange={(checked) => updateDefaults("notify_wecom", checked)} />
               </div>
             </div>
 
@@ -779,7 +779,7 @@ function validateDefaults(
   requireBoolean(defaults.requires_pallet_jack, "默认需要手叉车", errors);
   requireBoolean(defaults.requires_appointment, "默认需要预约", errors);
   requireNumber(defaults.detention_minutes, "默认等待时间", errors, { min: 0, integer: true });
-  requireBoolean(defaults.notify_wecom, "默认推送企业微信", errors);
+  requireBoolean(defaults.notify_wecom, "默认发送邮件通知", errors);
 }
 
 function validateRisks(value: unknown, errors: string[]) {

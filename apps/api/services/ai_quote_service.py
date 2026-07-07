@@ -14,7 +14,7 @@ from apps.api.db.repositories.manual_quote_task_repository import ManualQuoteTas
 from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
 from apps.api.db.repositories.zone_repository import ZoneRepository
 from apps.api.services.notification_service import notify_ai_missing_fields, notify_ai_quote_success
-from apps.api.services.quote_service import apply_learned_quote_if_available, record_zone_quote_side_effects, try_wecom_notify
+from apps.api.services.quote_service import apply_learned_quote_if_available, record_zone_quote_side_effects, try_notification
 from apps.api.services.search_context_service import QuoteSearchContext, build_quote_search_context
 from packages.ai_assistant.model_client import AIMessage, OpenAICompatibleClient, config_from_record
 from packages.ai_assistant.output_guard import validate_zone_ai_output
@@ -40,6 +40,8 @@ class AIAutoQuoteRequest(BaseModel):
     customer_message: str = Field(min_length=1)
     ai_config_id: int | None = None
     auto_submit_when_complete: bool = True
+    notify_email: bool = False
+    email_config_id: int | None = None
     notify_wecom: bool = False
     wecom_bot_id: int | None = None
     enable_search_context: bool = False
@@ -138,14 +140,15 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
                 "customer_reply": customer_reply,
             },
         )
-        if payload.notify_wecom:
-            try_wecom_notify(
+        if payload.notify_email or payload.notify_wecom:
+            try_notification(
                 "ai_missing_fields",
                 lambda: notify_ai_missing_fields(
                     db,
                     customer_reply=customer_reply,
                     missing_fields=missing_fields,
                     bot_id=payload.wecom_bot_id,
+                    email_config_id=payload.email_config_id,
                 ),
                 "missing-fields",
             )
@@ -179,7 +182,13 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     quote_result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(zone_request)
     quote_result = apply_learned_quote_if_available(db, zone_request, quote_result)
-    record_zone_quote_side_effects(db, zone_request, quote_result, manual_wecom_bot_id=payload.wecom_bot_id)
+    record_zone_quote_side_effects(
+        db,
+        zone_request,
+        quote_result,
+        manual_email_config_id=payload.email_config_id,
+        manual_wecom_bot_id=payload.wecom_bot_id,
+    )
 
     if quote_result.manual_review_required:
         return AIAutoQuoteResponse(
@@ -212,10 +221,15 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
         manual_review_required=False,
         search_context=search_context,
     )
-    if payload.notify_wecom:
-        try_wecom_notify(
+    if payload.notify_email or payload.notify_wecom:
+        try_notification(
             "ai_quote",
-            lambda: notify_ai_quote_success(db, response=response, bot_id=payload.wecom_bot_id),
+            lambda: notify_ai_quote_success(
+                db,
+                response=response,
+                bot_id=payload.wecom_bot_id,
+                email_config_id=payload.email_config_id,
+            ),
             quote_result.quote_id,
         )
     return response

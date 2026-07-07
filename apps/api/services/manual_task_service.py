@@ -10,7 +10,7 @@ from apps.api.db.repositories.hermes_learning_candidate_repository import Hermes
 from apps.api.db.repositories.manual_quote_task_repository import ManualQuoteTaskRepository
 from apps.api.services.notification_service import notify_manual_task_resolved
 from apps.api.services.quote_issue_labels import localize_issue_reason, risk_tag_labels
-from apps.api.services.quote_service import try_wecom_notify
+from apps.api.services.quote_service import try_notification
 
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,8 @@ class ManualQuoteTaskUpdate(BaseModel):
     assigned_to: str | None = None
     resolved_price_usd: Decimal | None = Field(default=None, ge=0)
     resolved_note: str | None = None
+    notify_email: bool = False
+    email_config_id: int | None = None
     notify_wecom: bool = False
     wecom_bot_id: int | None = None
 
@@ -37,6 +39,8 @@ def update_manual_quote_task(
     payload: ManualQuoteTaskUpdate,
 ) -> dict[str, object]:
     update = payload.model_dump(exclude_unset=True)
+    notify_email = bool(update.pop("notify_email", False))
+    email_config_id = update.pop("email_config_id", None)
     notify_wecom = bool(update.pop("notify_wecom", False))
     wecom_bot_id = update.pop("wecom_bot_id", None)
     task = ManualQuoteTaskRepository(db).update(task_id, **update)
@@ -48,10 +52,15 @@ def update_manual_quote_task(
         except Exception:
             logger.exception("Failed to create Hermes learning candidate from resolved manual quote task.", extra={"task_id": task.id})
             db.rollback()
-    if notify_wecom and payload.status == "resolved":
-        try_wecom_notify(
+    if (notify_email or notify_wecom) and payload.status == "resolved":
+        try_notification(
             "manual_resolved",
-            lambda: notify_manual_task_resolved(db, task=task, bot_id=wecom_bot_id),
+            lambda: notify_manual_task_resolved(
+                db,
+                task=task,
+                bot_id=wecom_bot_id,
+                email_config_id=email_config_id,
+            ),
             task.quote_id,
         )
     return manual_task_to_dict(task)

@@ -2,13 +2,13 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   calculateAIAutoQuote,
   listAIConfigs,
+  listEmailConfigs,
   listSearchConfigs,
-  listWeComBots,
   type AIModelConfigPublic,
   type AIAutoQuoteResponse,
+  type EmailConfigPublic,
   type SearchApiConfigPublic,
   type SearchEvidence,
-  type WeComBotConfigPublic,
 } from "../api/client";
 import ResultCard from "../components/ResultCard";
 import RiskTags from "../components/RiskTags";
@@ -16,13 +16,13 @@ import RiskTags from "../components/RiskTags";
 export default function AIQuotePage() {
   const [message, setMessage] = useState("");
   const [configs, setConfigs] = useState<AIModelConfigPublic[]>([]);
-  const [wecomBots, setWecomBots] = useState<WeComBotConfigPublic[]>([]);
+  const [emailConfigs, setEmailConfigs] = useState<EmailConfigPublic[]>([]);
   const [searchConfigs, setSearchConfigs] = useState<SearchApiConfigPublic[]>([]);
   const [selectedConfigId, setSelectedConfigId] = useState("");
-  const [selectedWecomBotId, setSelectedWecomBotId] = useState("");
+  const [selectedEmailConfigId, setSelectedEmailConfigId] = useState("");
   const [selectedSearchConfigId, setSelectedSearchConfigId] = useState("");
   const [autoSubmit, setAutoSubmit] = useState(true);
-  const [notifyWecom, setNotifyWecom] = useState(false);
+  const [notifyEmail, setNotifyEmail] = useState(false);
   const [enableSearchContext, setEnableSearchContext] = useState(false);
   const [result, setResult] = useState<AIAutoQuoteResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +31,7 @@ export default function AIQuotePage() {
 
   useEffect(() => {
     void loadConfigs();
-    void loadWecomBots();
+    void loadEmailConfigs();
     void loadSearchConfigs();
   }, []);
 
@@ -43,11 +43,11 @@ export default function AIQuotePage() {
     }
   }
 
-  async function loadWecomBots() {
+  async function loadEmailConfigs() {
     try {
-      setWecomBots(await listWeComBots());
+      setEmailConfigs(await listEmailConfigs());
     } catch {
-      setWecomBots([]);
+      setEmailConfigs([]);
     }
   }
 
@@ -74,8 +74,8 @@ export default function AIQuotePage() {
         customer_message: message.trim(),
         ai_config_id: selectedConfigId ? Number(selectedConfigId) : null,
         auto_submit_when_complete: autoSubmit,
-        notify_wecom: notifyWecom,
-        wecom_bot_id: selectedWecomBotId ? Number(selectedWecomBotId) : null,
+        notify_email: notifyEmail,
+        email_config_id: selectedEmailConfigId ? Number(selectedEmailConfigId) : null,
         enable_search_context: enableSearchContext,
         search_config_id: selectedSearchConfigId ? Number(selectedSearchConfigId) : null,
       });
@@ -203,36 +203,36 @@ export default function AIQuotePage() {
             </fieldset>
 
             <fieldset className="grid gap-3 rounded-md border border-slate-200 p-3">
-              <legend className="px-1 text-sm font-semibold text-slate-950">企业微信推送</legend>
+              <legend className="px-1 text-sm font-semibold text-slate-950">邮件通知</legend>
               <label className="flex min-h-11 items-center gap-3">
                 <input
                   className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
                   type="checkbox"
-                  checked={notifyWecom}
-                  onChange={(event) => setNotifyWecom(event.target.checked)}
+                  checked={notifyEmail}
+                  onChange={(event) => setNotifyEmail(event.target.checked)}
                 />
                 <span className="text-sm font-medium text-slate-800">
-                  成功报价后推送企业微信
+                  成功报价后发送邮件
                 </span>
               </label>
               <label>
-                <span className="field-label">wecom_bot_id</span>
+                <span className="field-label">email_config_id</span>
                 <select
                   className="field-input"
-                  value={selectedWecomBotId}
-                  onChange={(event) => setSelectedWecomBotId(event.target.value)}
-                  disabled={!notifyWecom}
+                  value={selectedEmailConfigId}
+                  onChange={(event) => setSelectedEmailConfigId(event.target.value)}
+                  disabled={!notifyEmail}
                 >
-                  <option value="">使用 ai_quote/default 机器人</option>
-                  {wecomBots.map((bot) => (
-                    <option key={bot.id} value={bot.id}>
-                      {bot.name} / {bot.purpose}
-                      {bot.is_default ? " / 默认" : ""}
+                  <option value="">使用 ai_quote/default 邮箱</option>
+                  {emailConfigs.map((config) => (
+                    <option key={config.id} value={config.id}>
+                      {config.name} / {config.purpose}
+                      {config.is_default ? " / 默认" : ""}
                     </option>
                   ))}
                 </select>
                 <p className="field-hint">
-                  字段缺失时仅在勾选后推送追问提示；manual_required 会自动通知人工确认群。
+                  字段缺失时仅在勾选后发送追问提示；manual_required 会自动发送人工确认邮件。
                 </p>
               </label>
             </fieldset>

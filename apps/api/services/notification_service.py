@@ -4,8 +4,17 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from apps.api.db.models import ManualQuoteTask, WeComBotConfig
+from apps.api.db.models import EmailNotificationConfig, ManualQuoteTask, WeComBotConfig
+from apps.api.db.repositories.email_notification_config_repository import EmailNotificationConfigRepository
 from apps.api.db.repositories.wecom_bot_config_repository import GROUP_WEBHOOK_BOT_TYPE, WeComBotConfigRepository
+from packages.email_notifier.client import EmailSendResult, SmtpEmailClient
+from packages.email_notifier.templates import (
+    build_ai_missing_fields_email,
+    build_ai_quote_success_email,
+    build_manual_required_email,
+    build_manual_task_resolved_email,
+    build_quote_success_email,
+)
 from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult
 from packages.wecom.bot_client import WeComBotClient, WeComSendResult
 from packages.wecom.templates import (
@@ -19,6 +28,7 @@ from packages.wecom.templates import (
 
 logger = logging.getLogger(__name__)
 MANUAL_REQUIRED_AT_ALL_TEXT = "@all 有新的加拿大尾程报价需人工确认，请查看上一条详情。"
+NotificationSendResult = EmailSendResult | WeComSendResult
 
 
 def notify_quote_success(
@@ -27,14 +37,39 @@ def notify_quote_success(
     result: ZoneQuoteResult,
     request: ZoneQuoteRequest,
     bot_id: int | None = None,
-) -> WeComSendResult | None:
+    email_config_id: int | None = None,
+) -> NotificationSendResult | None:
     markdown = build_quote_success_markdown(result, request)
-    return _send_markdown(db, purpose="quote_success", markdown=markdown, bot_id=bot_id)
+    subject, body_text = build_quote_success_email(result, request)
+    return _send_notification(
+        db,
+        purpose="quote_success",
+        subject=subject,
+        body_text=body_text,
+        markdown=markdown,
+        bot_id=bot_id,
+        email_config_id=email_config_id,
+    )
 
 
-def notify_ai_quote_success(db: Session, *, response: object, bot_id: int | None = None) -> WeComSendResult | None:
+def notify_ai_quote_success(
+    db: Session,
+    *,
+    response: object,
+    bot_id: int | None = None,
+    email_config_id: int | None = None,
+) -> NotificationSendResult | None:
     markdown = build_ai_quote_success_markdown(response)
-    return _send_markdown(db, purpose="ai_quote", markdown=markdown, bot_id=bot_id)
+    subject, body_text = build_ai_quote_success_email(response)
+    return _send_notification(
+        db,
+        purpose="ai_quote",
+        subject=subject,
+        body_text=body_text,
+        markdown=markdown,
+        bot_id=bot_id,
+        email_config_id=email_config_id,
+    )
 
 
 def notify_ai_missing_fields(
@@ -43,9 +78,19 @@ def notify_ai_missing_fields(
     customer_reply: str,
     missing_fields: list[str],
     bot_id: int | None = None,
-) -> WeComSendResult | None:
+    email_config_id: int | None = None,
+) -> NotificationSendResult | None:
     markdown = build_ai_missing_fields_markdown(customer_reply, missing_fields)
-    return _send_markdown(db, purpose="ai_quote", markdown=markdown, bot_id=bot_id)
+    subject, body_text = build_ai_missing_fields_email(customer_reply, missing_fields)
+    return _send_notification(
+        db,
+        purpose="ai_quote",
+        subject=subject,
+        body_text=body_text,
+        markdown=markdown,
+        bot_id=bot_id,
+        email_config_id=email_config_id,
+    )
 
 
 def notify_manual_required(
@@ -54,8 +99,16 @@ def notify_manual_required(
     result: ZoneQuoteResult,
     request: ZoneQuoteRequest,
     bot_id: int | None = None,
-) -> WeComSendResult | None:
+    email_config_id: int | None = None,
+) -> NotificationSendResult | None:
     markdown = build_manual_required_markdown(result, request)
+    subject, body_text = build_manual_required_email(result, request)
+    email_repository = EmailNotificationConfigRepository(db)
+    email_config = _select_email_config(email_repository, purpose="manual_required", email_config_id=email_config_id)
+    if email_config is not None:
+        return _send_with_email_config(email_repository, email_config, subject=subject, body_text=body_text)
+    if email_config_id is not None:
+        return None
     repository = WeComBotConfigRepository(db)
     bot = _select_bot(repository, purpose="manual_required", bot_id=bot_id)
     if bot is None:
@@ -71,9 +124,84 @@ def notify_manual_task_resolved(
     *,
     task: ManualQuoteTask,
     bot_id: int | None = None,
-) -> WeComSendResult | None:
+    email_config_id: int | None = None,
+) -> NotificationSendResult | None:
     markdown = build_manual_task_resolved_markdown(task)
-    return _send_markdown(db, purpose="manual_resolved", markdown=markdown, bot_id=bot_id)
+    subject, body_text = build_manual_task_resolved_email(task)
+    return _send_notification(
+        db,
+        purpose="manual_resolved",
+        subject=subject,
+        body_text=body_text,
+        markdown=markdown,
+        bot_id=bot_id,
+        email_config_id=email_config_id,
+    )
+
+
+def _send_notification(
+    db: Session,
+    *,
+    purpose: str,
+    subject: str,
+    body_text: str,
+    markdown: str,
+    bot_id: int | None = None,
+    email_config_id: int | None = None,
+) -> NotificationSendResult | None:
+    email_repository = EmailNotificationConfigRepository(db)
+    email_config = _select_email_config(email_repository, purpose=purpose, email_config_id=email_config_id)
+    if email_config is not None:
+        return _send_with_email_config(email_repository, email_config, subject=subject, body_text=body_text)
+    if email_config_id is not None:
+        return None
+    return _send_markdown(db, purpose=purpose, markdown=markdown, bot_id=bot_id)
+
+
+def _select_email_config(
+    repository: EmailNotificationConfigRepository,
+    *,
+    purpose: str,
+    email_config_id: int | None,
+) -> EmailNotificationConfig | None:
+    if email_config_id is not None:
+        record = repository.get_config(email_config_id)
+        if record is None or not record.enabled:
+            return None
+        return record
+    return repository.get_by_purpose(purpose)
+
+
+def _send_with_email_config(
+    repository: EmailNotificationConfigRepository,
+    record: EmailNotificationConfig,
+    *,
+    subject: str,
+    body_text: str,
+) -> EmailSendResult:
+    try:
+        result = SmtpEmailClient(
+            smtp_host=record.smtp_host,
+            smtp_port=record.smtp_port,
+            username=record.username,
+            password=repository.decrypt_password(record),
+            from_email=record.from_email,
+            from_name=record.from_name,
+            use_tls=record.use_tls,
+            use_ssl=record.use_ssl,
+        ).send(subject=subject, body_text=body_text, to_emails=list(record.recipient_emails or []))
+    except Exception as exc:
+        logger.warning(
+            "Email notification failed.",
+            extra={"email_config_id": record.id, "purpose": record.purpose, "error": exc.__class__.__name__},
+        )
+        return EmailSendResult(success=False, error=exc.__class__.__name__, latency_ms=0, status_code=None)
+    if not result.success:
+        logger.warning(
+            "Email notification failed.",
+            extra={"email_config_id": record.id, "purpose": record.purpose, "error": result.error},
+        )
+    return result
 
 
 def _send_markdown(

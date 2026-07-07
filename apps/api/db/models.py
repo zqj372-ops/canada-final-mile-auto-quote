@@ -306,6 +306,36 @@ class WeComBotConfig(Base):
     )
 
 
+class EmailNotificationConfig(Base):
+    __tablename__ = "email_notification_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    smtp_host: Mapped[str] = mapped_column(String(255), nullable=False)
+    smtp_port: Mapped[int] = mapped_column(Integer, nullable=False, default=587)
+    username: Mapped[str | None] = mapped_column(String(255))
+    password_encrypted: Mapped[str | None] = mapped_column(Text)
+    from_email: Mapped[str] = mapped_column(String(255), nullable=False)
+    from_name: Mapped[str | None] = mapped_column(String(128))
+    recipient_emails: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    use_tls: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    use_ssl: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False, default="general", index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class SearchApiConfig(Base):
     __tablename__ = "search_api_configs"
 

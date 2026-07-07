@@ -300,6 +300,31 @@ CREATE INDEX IF NOT EXISTS idx_wecom_bot_configs_default
 CREATE INDEX IF NOT EXISTS idx_wecom_bot_configs_purpose
     ON wecom_bot_configs (purpose, enabled);
 
+CREATE TABLE IF NOT EXISTS email_notification_configs (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    smtp_host VARCHAR(255) NOT NULL,
+    smtp_port INTEGER NOT NULL DEFAULT 587,
+    username VARCHAR(255),
+    password_encrypted TEXT,
+    from_email VARCHAR(255) NOT NULL,
+    from_name VARCHAR(128),
+    recipient_emails JSONB NOT NULL,
+    use_tls BOOLEAN NOT NULL DEFAULT TRUE,
+    use_ssl BOOLEAN NOT NULL DEFAULT FALSE,
+    purpose VARCHAR(32) NOT NULL DEFAULT 'general',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_notification_configs_default
+    ON email_notification_configs (is_default, enabled);
+
+CREATE INDEX IF NOT EXISTS idx_email_notification_configs_purpose
+    ON email_notification_configs (purpose, enabled);
+
 CREATE TABLE IF NOT EXISTS search_api_configs (
     id BIGSERIAL PRIMARY KEY,
     name VARCHAR(128) NOT NULL,

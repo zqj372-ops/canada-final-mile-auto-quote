@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   listHermesLearningCandidates,
-  listWeComBots,
+  listEmailConfigs,
   listManualTasks,
   updateManualTask,
+  type EmailConfigPublic,
   type HermesLearningCandidate,
   type ManualQuoteTask,
   type ManualQuoteTaskUpdate,
-  type WeComBotConfigPublic,
 } from "../api/client";
 import RiskTags from "../components/RiskTags";
 
@@ -29,14 +29,14 @@ export default function ManualTasksPage() {
   const [savingTaskId, setSavingTaskId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [wecomBots, setWecomBots] = useState<WeComBotConfigPublic[]>([]);
+  const [emailConfigs, setEmailConfigs] = useState<EmailConfigPublic[]>([]);
   const [learningCandidates, setLearningCandidates] = useState<HermesLearningCandidate[]>([]);
-  const [notifyWecom, setNotifyWecom] = useState(false);
-  const [selectedWecomBotId, setSelectedWecomBotId] = useState("");
+  const [notifyEmail, setNotifyEmail] = useState(false);
+  const [selectedEmailConfigId, setSelectedEmailConfigId] = useState("");
 
   useEffect(() => {
     void refreshTasksAndLearning();
-    void loadWecomBots();
+    void loadEmailConfigs();
   }, []);
 
   const visibleTasks = useMemo(() => {
@@ -84,11 +84,11 @@ export default function ManualTasksPage() {
     }
   }
 
-  async function loadWecomBots() {
+  async function loadEmailConfigs() {
     try {
-      setWecomBots(await listWeComBots());
+      setEmailConfigs(await listEmailConfigs());
     } catch {
-      setWecomBots([]);
+      setEmailConfigs([]);
     }
   }
 
@@ -110,8 +110,8 @@ export default function ManualTasksPage() {
         assigned_to: optionalText(draft.assigned_to),
         resolved_price_usd: optionalNumber(draft.resolved_price_usd),
         resolved_note: optionalText(draft.resolved_note),
-        notify_wecom: notifyWecom,
-        wecom_bot_id: selectedWecomBotId ? Number(selectedWecomBotId) : null,
+        notify_email: notifyEmail,
+        email_config_id: selectedEmailConfigId ? Number(selectedEmailConfigId) : null,
       };
       const updated = await updateManualTask(task.id, payload);
       setTasks((current) =>
@@ -330,26 +330,26 @@ export default function ManualTasksPage() {
                           <input
                             className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
                             type="checkbox"
-                            checked={notifyWecom}
-                            onChange={(event) => setNotifyWecom(event.target.checked)}
+                            checked={notifyEmail}
+                            onChange={(event) => setNotifyEmail(event.target.checked)}
                           />
                           <span className="text-sm font-medium text-slate-800">
-                            resolved 后同步推送企业微信
+                            resolved 后同步发送邮件
                           </span>
                         </label>
                         <label>
-                          <span className="field-label">企业微信机器人</span>
+                          <span className="field-label">邮件通知配置</span>
                           <select
                             className="field-input"
-                            value={selectedWecomBotId}
-                            onChange={(event) => setSelectedWecomBotId(event.target.value)}
-                            disabled={!notifyWecom}
+                            value={selectedEmailConfigId}
+                            onChange={(event) => setSelectedEmailConfigId(event.target.value)}
+                            disabled={!notifyEmail}
                           >
-                            <option value="">使用 manual_resolved/default 机器人</option>
-                            {wecomBots.map((bot) => (
-                              <option key={bot.id} value={bot.id}>
-                                {bot.name} / {bot.purpose}
-                                {bot.is_default ? " / 默认" : ""}
+                            <option value="">使用 manual_resolved/default 邮箱</option>
+                            {emailConfigs.map((config) => (
+                              <option key={config.id} value={config.id}>
+                                {config.name} / {config.purpose}
+                                {config.is_default ? " / 默认" : ""}
                               </option>
                             ))}
                           </select>

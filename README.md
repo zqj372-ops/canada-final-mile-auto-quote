@@ -340,37 +340,36 @@ POST /search-configs/{config_id}/test
 `masked_api_key`。搜索结果只能进入 AI 的参考上下文，用于描述地址风险、偏远性或市场行情背景；
 不能替代 `zone_price_matrix`，不能新增费用，也不能改变 Quote Engine 返回的金额。
 
-### WeCom Bot Notify
+### Email Notify
 
-企业微信机器人只负责通知和推送，不参与报价、不绕过 Quote Engine。
-Webhook URL 存入 `wecom_bot_configs.webhook_url_encrypted`，接口只返回
-`masked_webhook_url`，不会返回明文 URL。
+邮件通知只负责推送报价结果和人工任务提醒，不参与报价、不绕过 Quote Engine。
+SMTP 密码存入 `email_notification_configs.password_encrypted`，接口只返回
+`has_password` 和掩码用户名，不会返回明文密码。
 
 配置接口：
 
 ```bash
-GET /wecom/bots
-POST /wecom/bots
-GET /wecom/bots/{bot_id}
-PATCH /wecom/bots/{bot_id}
-DELETE /wecom/bots/{bot_id}
-POST /wecom/bots/{bot_id}/set-default
-POST /wecom/bots/{bot_id}/test
+GET /email/configs
+POST /email/configs
+GET /email/configs/{config_id}
+PATCH /email/configs/{config_id}
+DELETE /email/configs/{config_id}
+POST /email/configs/{config_id}/set-default
+POST /email/configs/{config_id}/test
 ```
 
 推送接入点：
 
-- `/quotes/zone-calculate`：支持 wrapper body `{ "quote": {...}, "notify_wecom": true }`。
-  普通成功报价仅在 `notify_wecom=true` 时推送；`manual_required=true` 会自动尝试推送人工确认通知。
-- `/quotes/ai-auto-quote`：支持 `notify_wecom` 和 `wecom_bot_id`。
-  成功报价可推送 AI 自动报价通知；字段缺失时仅在勾选后推送追问提示；`manual_required=true`
-  会自动尝试推送人工确认通知。
-- `/quotes/manual-tasks/{task_id}`：PATCH `status=resolved` 且 `notify_wecom=true`
+- `/quotes/zone-calculate`：支持 wrapper body `{ "quote": {...}, "notify_email": true }`。
+  普通成功报价仅在 `notify_email=true` 时发送邮件；`manual_required=true` 会自动尝试发送人工确认邮件。
+- `/quotes/ai-auto-quote`：支持 `notify_email` 和 `email_config_id`。
+  成功报价可发送 AI 自动报价通知；字段缺失时仅在勾选后发送追问提示；`manual_required=true`
+  会自动尝试发送人工确认邮件。
+- `/quotes/manual-tasks/{task_id}`：PATCH `status=resolved` 且 `notify_email=true`
   时推送人工报价已处理通知。
 
-如果人工确认机器人启用了 `mention_all_on_manual_required`，系统会先推送 markdown
-详情，再单独发送 `@all 有新的加拿大尾程报价需人工确认，请查看上一条详情。` 文本提醒。
-所有企业微信推送失败都只记录日志，不影响报价或人工任务接口返回。
+邮件配置按 `purpose` 匹配，找不到时使用默认配置。旧企业微信接口仍保留为兼容回退；
+所有通知失败都只记录日志，不影响报价或人工任务接口返回。
 
 ### Vendor Rate Rule Quote
 

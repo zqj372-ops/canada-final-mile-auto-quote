@@ -4,15 +4,15 @@ import {
   clearStoredApiKey,
   getStoredApiKey,
   getQuoteWorkbenchConfig,
-  listWeComBots,
+  listEmailConfigs,
   setStoredApiKey,
   type AIExtractedQuoteDraft,
   type AIAutoQuoteResponse,
   type AddressType,
+  type EmailConfigPublic,
   type PackagingType,
   type QuoteSearchContext,
   type QuoteWorkbenchConfig,
-  type WeComBotConfigPublic,
   type ZoneQuoteResult,
 } from "../api/client";
 import AiQuoteInputPanel from "../components/AiQuoteInputPanel";
@@ -47,16 +47,16 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
   const [addressType, setAddressType] = useState<AddressType | "">("");
   const [services, setServices] = useState<Record<string, boolean>>({});
   const [detentionMinutes, setDetentionMinutes] = useState(0);
-  const [wecomBots, setWecomBots] = useState<WeComBotConfigPublic[]>([]);
-  const [notifyWecom, setNotifyWecom] = useState(false);
-  const [selectedWecomBotId, setSelectedWecomBotId] = useState("");
+  const [emailConfigs, setEmailConfigs] = useState<EmailConfigPublic[]>([]);
+  const [notifyEmail, setNotifyEmail] = useState(false);
+  const [selectedEmailConfigId, setSelectedEmailConfigId] = useState("");
   const [apiKeyInput, setApiKeyInput] = useState(() => getStoredApiKey("quote"));
   const [hasApiKey, setHasApiKey] = useState(() => Boolean(getStoredApiKey("quote")));
   const [themeMode, setThemeMode] = useState<QuoteThemeMode>(() => readQuoteThemeMode());
 
   useEffect(() => {
     void loadConfig();
-    void loadWecomBots();
+    void loadEmailConfigs();
   }, []);
 
   useEffect(() => {
@@ -71,7 +71,7 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
       setPackagingType(nextConfig.defaults.packaging_type);
       setAddressType(nextConfig.defaults.address_type);
       setDetentionMinutes(nextConfig.defaults.detention_minutes);
-      setNotifyWecom(nextConfig.defaults.notify_wecom);
+      setNotifyEmail(nextConfig.defaults.notify_wecom);
       setServices(
         Object.fromEntries(
           nextConfig.service_options.map((option) => [
@@ -89,11 +89,11 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
     }
   }
 
-  async function loadWecomBots() {
+  async function loadEmailConfigs() {
     try {
-      setWecomBots(await listWeComBots("quote"));
+      setEmailConfigs(await listEmailConfigs("quote"));
     } catch {
-      setWecomBots([]);
+      setEmailConfigs([]);
     }
   }
 
@@ -166,8 +166,8 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
             detentionMinutes,
           }),
           auto_submit_when_complete: true,
-          notify_wecom: notifyWecom,
-          wecom_bot_id: selectedWecomBotId ? Number(selectedWecomBotId) : null,
+          notify_email: notifyEmail,
+          email_config_id: selectedEmailConfigId ? Number(selectedEmailConfigId) : null,
           enable_search_context: true,
         },
         "quote",
@@ -238,7 +238,7 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
     setStoredApiKey("quote", apiKeyInput);
     setHasApiKey(Boolean(apiKeyInput.trim()));
     await loadConfig();
-    void loadWecomBots();
+    void loadEmailConfigs();
   }
 
   function clearAccessKey() {
@@ -356,11 +356,11 @@ export default function QuotePage({ adminHref }: { adminHref: string }) {
                 onImportText={handleImportText}
               />
               <NotificationPanel
-                bots={wecomBots}
-                notifyWecom={notifyWecom}
-                selectedBotId={selectedWecomBotId}
-                onNotifyChange={setNotifyWecom}
-                onBotChange={setSelectedWecomBotId}
+                configs={emailConfigs}
+                notifyEmail={notifyEmail}
+                selectedConfigId={selectedEmailConfigId}
+                onNotifyChange={setNotifyEmail}
+                onConfigChange={setSelectedEmailConfigId}
               />
             </div>
 
@@ -527,17 +527,17 @@ function AccessKeyBox({
 }
 
 function NotificationPanel({
-  bots,
-  notifyWecom,
-  selectedBotId,
+  configs,
+  notifyEmail,
+  selectedConfigId,
   onNotifyChange,
-  onBotChange,
+  onConfigChange,
 }: {
-  bots: WeComBotConfigPublic[];
-  notifyWecom: boolean;
-  selectedBotId: string;
+  configs: EmailConfigPublic[];
+  notifyEmail: boolean;
+  selectedConfigId: string;
   onNotifyChange: (value: boolean) => void;
-  onBotChange: (value: string) => void;
+  onConfigChange: (value: string) => void;
 }) {
   return (
     <section className="ai-glass-panel p-4">
@@ -545,24 +545,24 @@ function NotificationPanel({
         <input
           className="h-4 w-4 rounded border-cyan-200 bg-slate-950 text-cyan-400 focus:ring-cyan-300"
           type="checkbox"
-          checked={notifyWecom}
+          checked={notifyEmail}
           onChange={(event) => onNotifyChange(event.target.checked)}
         />
-        报价完成后推送企业微信
+        报价完成后发送邮件
       </label>
       <label className="mt-3 block">
-        <span className="text-xs font-semibold text-slate-300">企业微信机器人</span>
+        <span className="text-xs font-semibold text-slate-300">邮件通知配置</span>
         <select
           className="ai-select mt-2"
-          value={selectedBotId}
-          onChange={(event) => onBotChange(event.target.value)}
-          disabled={!notifyWecom}
+          value={selectedConfigId}
+          onChange={(event) => onConfigChange(event.target.value)}
+          disabled={!notifyEmail}
         >
-          <option value="">使用后台默认机器人</option>
-          {bots.map((bot) => (
-            <option key={bot.id} value={bot.id}>
-              {bot.name} / {bot.purpose}
-              {bot.is_default ? " / 默认" : ""}
+          <option value="">使用后台默认邮箱</option>
+          {configs.map((config) => (
+            <option key={config.id} value={config.id}>
+              {config.name} / {config.purpose}
+              {config.is_default ? " / 默认" : ""}
             </option>
           ))}
         </select>

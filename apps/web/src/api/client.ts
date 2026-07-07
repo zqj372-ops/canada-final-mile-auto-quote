@@ -43,7 +43,9 @@ export interface ZoneQuoteRequest {
 
 export interface ZoneQuoteWithNotifyRequest {
   quote: ZoneQuoteRequest;
-  notify_wecom: boolean;
+  notify_email?: boolean;
+  email_config_id?: number | null;
+  notify_wecom?: boolean;
   wecom_bot_id?: number | null;
 }
 
@@ -106,6 +108,8 @@ export interface AIAutoQuoteRequest {
   customer_message: string;
   ai_config_id?: number | null;
   auto_submit_when_complete: boolean;
+  notify_email?: boolean;
+  email_config_id?: number | null;
   notify_wecom?: boolean;
   wecom_bot_id?: number | null;
   enable_search_context?: boolean;
@@ -228,6 +232,48 @@ export interface WeComTestResult {
   status_code: number | null;
 }
 
+export interface EmailConfigPublic {
+  id: number;
+  name: string;
+  smtp_host: string;
+  smtp_port: number;
+  masked_username: string | null;
+  has_password: boolean;
+  from_email: string;
+  from_name: string | null;
+  recipient_emails: string[];
+  use_tls: boolean;
+  use_ssl: boolean;
+  purpose: string;
+  enabled: boolean;
+  is_default: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface EmailConfigPayload {
+  name?: string;
+  smtp_host?: string;
+  smtp_port?: number;
+  username?: string | null;
+  password?: string | null;
+  from_email?: string;
+  from_name?: string | null;
+  recipient_emails?: string[];
+  use_tls?: boolean;
+  use_ssl?: boolean;
+  purpose?: string;
+  enabled?: boolean;
+  is_default?: boolean;
+}
+
+export interface EmailTestResult {
+  success: boolean;
+  error: string | null;
+  latency_ms: number;
+  status_code: number | null;
+}
+
 export interface SearchApiConfigPublic {
   id: number;
   name: string;
@@ -303,6 +349,8 @@ export interface ManualQuoteTaskUpdate {
   assigned_to?: string | null;
   resolved_price_usd?: number | null;
   resolved_note?: string | null;
+  notify_email?: boolean;
+  email_config_id?: number | null;
   notify_wecom?: boolean;
   wecom_bot_id?: number | null;
 }
@@ -886,6 +934,49 @@ export function setDefaultWeComBot(botId: number): Promise<WeComBotConfigPublic>
 
 export function testWeComBot(botId: number): Promise<WeComTestResult> {
   return request<WeComTestResult>(`/wecom/bots/${botId}/test`, {
+    method: "POST",
+  });
+}
+
+export function listEmailConfigs(
+  apiKeyScope: ApiKeyScope = "admin",
+): Promise<EmailConfigPublic[]> {
+  return request<EmailConfigPublic[]>("/email/configs", {}, apiKeyScope);
+}
+
+export function createEmailConfig(
+  payload: Required<Pick<EmailConfigPayload, "name" | "smtp_host" | "from_email" | "recipient_emails">> & EmailConfigPayload,
+): Promise<EmailConfigPublic> {
+  return request<EmailConfigPublic>("/email/configs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateEmailConfig(
+  configId: number,
+  payload: EmailConfigPayload,
+): Promise<EmailConfigPublic> {
+  return request<EmailConfigPublic>(`/email/configs/${configId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteEmailConfig(configId: number): Promise<{ deleted: boolean }> {
+  return request<{ deleted: boolean }>(`/email/configs/${configId}`, {
+    method: "DELETE",
+  });
+}
+
+export function setDefaultEmailConfig(configId: number): Promise<EmailConfigPublic> {
+  return request<EmailConfigPublic>(`/email/configs/${configId}/set-default`, {
+    method: "POST",
+  });
+}
+
+export function testEmailConfig(configId: number): Promise<EmailTestResult> {
+  return request<EmailTestResult>(`/email/configs/${configId}/test`, {
     method: "POST",
   });
 }

@@ -16,6 +16,8 @@ class ZoneQuoteWithNotifyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     quote: ZoneQuoteRequest
+    notify_email: bool = False
+    email_config_id: int | None = None
     notify_wecom: bool = False
     wecom_bot_id: int | None = None
 
@@ -30,10 +32,12 @@ def calculate_zone_quote(
     payload: ZoneQuoteWithNotifyRequest | ZoneQuoteRequest,
     db: Session = Depends(get_db),
 ) -> ZoneQuoteResult:
-    quote_payload, notify_wecom, wecom_bot_id = _normalize_zone_payload(payload)
+    quote_payload, notify_email, email_config_id, notify_wecom, wecom_bot_id = _normalize_zone_payload(payload)
     return calculate_zone_quote_service(
         db,
         quote_payload,
+        notify_email=notify_email,
+        email_config_id=email_config_id,
         notify_wecom=notify_wecom,
         wecom_bot_id=wecom_bot_id,
     )
@@ -41,7 +45,7 @@ def calculate_zone_quote(
 
 def _normalize_zone_payload(
     payload: ZoneQuoteWithNotifyRequest | ZoneQuoteRequest,
-) -> tuple[ZoneQuoteRequest, bool, int | None]:
+) -> tuple[ZoneQuoteRequest, bool, int | None, bool, int | None]:
     if isinstance(payload, ZoneQuoteWithNotifyRequest):
-        return payload.quote, payload.notify_wecom, payload.wecom_bot_id
-    return payload, False, None
+        return payload.quote, payload.notify_email, payload.email_config_id, payload.notify_wecom, payload.wecom_bot_id
+    return payload, False, None, False, None

@@ -33,17 +33,31 @@ def calculate_zone_quote(
     db: Session,
     payload: ZoneQuoteRequest,
     *,
+    notify_email: bool = False,
+    email_config_id: int | None = None,
     notify_wecom: bool = False,
     wecom_bot_id: int | None = None,
 ) -> ZoneQuoteResult:
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
     result = apply_learned_quote_if_available(db, payload, result)
-    record_zone_quote_side_effects(db, payload, result, manual_wecom_bot_id=wecom_bot_id)
-    if notify_wecom and not result.manual_review_required:
-        try_wecom_notify(
+    record_zone_quote_side_effects(
+        db,
+        payload,
+        result,
+        manual_email_config_id=email_config_id,
+        manual_wecom_bot_id=wecom_bot_id,
+    )
+    if (notify_email or notify_wecom) and not result.manual_review_required:
+        try_notification(
             "quote_success",
-            lambda: notify_quote_success(db, result=result, request=payload, bot_id=wecom_bot_id),
+            lambda: notify_quote_success(
+                db,
+                result=result,
+                request=payload,
+                bot_id=wecom_bot_id,
+                email_config_id=email_config_id,
+            ),
             result.quote_id,
         )
     return result
@@ -74,6 +88,7 @@ def record_zone_quote_side_effects(
     payload: ZoneQuoteRequest,
     result: ZoneQuoteResult,
     *,
+    manual_email_config_id: int | None = None,
     manual_wecom_bot_id: int | None = None,
 ) -> None:
     try:
@@ -91,18 +106,27 @@ def record_zone_quote_side_effects(
         logger.exception("Failed to create manual quote task.", extra={"quote_id": result.quote_id})
         db.rollback()
 
-    try_wecom_notify(
+    try_notification(
         "manual_required",
-        lambda: notify_manual_required(db, result=result, request=payload, bot_id=manual_wecom_bot_id),
+        lambda: notify_manual_required(
+            db,
+            result=result,
+            request=payload,
+            bot_id=manual_wecom_bot_id,
+            email_config_id=manual_email_config_id,
+        ),
         result.quote_id,
     )
 
 
-def try_wecom_notify(label: str, callback, quote_id: str) -> None:
+def try_notification(label: str, callback, quote_id: str) -> None:
     try:
         callback()
     except Exception:
-        logger.exception("WeCom notification side effect failed.", extra={"label": label, "quote_id": quote_id})
+        logger.exception("Notification side effect failed.", extra={"label": label, "quote_id": quote_id})
+
+
+try_wecom_notify = try_notification
 
 
 def _result_from_learned_rule(

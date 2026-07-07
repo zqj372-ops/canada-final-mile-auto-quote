@@ -12,13 +12,13 @@ import {
 import AIQuotePage from "./pages/AIQuotePage";
 import AISettingsPage from "./pages/AISettingsPage";
 import AuditPage from "./pages/AuditPage";
+import EmailSettingsPage from "./pages/EmailSettingsPage";
 import LearningCandidatesPage from "./pages/LearningCandidatesPage";
 import ManualTasksPage from "./pages/ManualTasksPage";
 import PricingSettingsPage from "./pages/PricingSettingsPage";
 import QuotePage from "./pages/QuotePage";
 import QuoteSettingsPage from "./pages/QuoteSettingsPage";
 import SearchSettingsPage from "./pages/SearchSettingsPage";
-import WeComSettingsPage from "./pages/WeComSettingsPage";
 
 type RoutePath =
   | "/quote"
@@ -31,7 +31,7 @@ type RoutePath =
   | "/settings/pricing"
   | "/settings/ai"
   | "/settings/search"
-  | "/settings/wecom";
+  | "/settings/email";
 const APP_BASE_PATH = normalizeBasePath(import.meta.env.VITE_APP_BASE_PATH || "/");
 
 const adminRoutes: Array<{ path: RoutePath; label: string; description: string; group: "workbench" | "settings" }> = [
@@ -44,7 +44,7 @@ const adminRoutes: Array<{ path: RoutePath; label: string; description: string; 
   { path: "/settings/pricing", label: "价格配置", description: "价格", group: "settings" },
   { path: "/settings/ai", label: "AI 模型", description: "模型", group: "settings" },
   { path: "/settings/search", label: "搜索 API", description: "地址", group: "settings" },
-  { path: "/settings/wecom", label: "企业微信", description: "通知", group: "settings" },
+  { path: "/settings/email", label: "邮件通知", description: "通知", group: "settings" },
   { path: "/quote", label: "前台报价", description: "销售", group: "settings" },
 ];
 
@@ -111,8 +111,8 @@ export default function App() {
     if (path === "/settings/search") {
       return <SearchSettingsPage />;
     }
-    if (path === "/settings/wecom") {
-      return <WeComSettingsPage />;
+    if (path === "/settings/email") {
+      return <EmailSettingsPage />;
     }
     return <QuotePage adminHref={withBasePath("/admin")} />;
   }, [path]);
@@ -397,8 +397,8 @@ function normalizePath(pathname: string): RoutePath {
   if (strippedPath === "/settings/search") {
     return "/settings/search";
   }
-  if (strippedPath === "/settings/wecom") {
-    return "/settings/wecom";
+  if (strippedPath === "/settings/wecom" || strippedPath === "/settings/email") {
+    return "/settings/email";
   }
   return "/quote";
 }
@@ -533,7 +533,7 @@ function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
     { path: "/settings/pricing", title: "价格配置", value: "Zone / Fuel" },
     { path: "/settings/ai", title: "AI 模型", value: "字段提取" },
     { path: "/settings/search", title: "搜索 API", value: "地址确认" },
-    { path: "/settings/wecom", title: "企业微信", value: "通知" },
+    { path: "/settings/email", title: "邮件通知", value: "通知" },
   ];
   const quoteHistoryRows =
     summary?.recent_audits?.length
