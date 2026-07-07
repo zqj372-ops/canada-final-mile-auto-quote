@@ -71,6 +71,32 @@ class QuoteRuleConfigRepository:
 
         return defaults.model_copy(update=values)
 
+    def save_zone_pricing_config(self, config: ZonePricingConfig) -> ZonePricingConfig:
+        descriptions = {
+            "fuel_percent": "Fuel surcharge percent applied to zone base price.",
+            "residential_fee_usd": "Residential delivery accessorial fee.",
+            "liftgate_fee_usd": "Liftgate accessorial fee.",
+            "pallet_jack_fee_usd": "Pallet jack accessorial fee.",
+            "appointment_fee_usd": "Appointment delivery accessorial fee.",
+            "detention_half_hour_fee_usd": "Detention fee per billable half hour.",
+            "detention_free_minutes": "Free detention minutes before billing starts.",
+        }
+        for key, value in config.model_dump().items():
+            record = self.session.get(QuoteRuleConfig, key)
+            string_value = str(value)
+            if record is None:
+                record = QuoteRuleConfig(
+                    key=key,
+                    value=string_value,
+                    description=descriptions.get(key),
+                )
+                self.session.add(record)
+            else:
+                record.value = string_value
+                record.description = record.description or descriptions.get(key)
+        self.session.commit()
+        return config
+
     def _parse_value(self, key: str, value: str) -> Decimal | int | None:
         try:
             if key in DECIMAL_KEYS:

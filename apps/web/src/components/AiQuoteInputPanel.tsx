@@ -21,6 +21,16 @@ export default function AiQuoteInputPanel({
   onClear: () => void;
   onImportText: (value: string) => void;
 }) {
+  const formatHints = config.format_hints ?? [];
+  const inputTitle = config.input_title || "AI 智能报价输入";
+  const inputLabel = config.input_label || "请直接粘贴报价信息";
+  const primaryButtonLabel = config.primary_button_label || "生成 AI 报价";
+  const clearButtonLabel = config.clear_button_label || "清空内容";
+  const importButtonLabel = config.import_button_label || "导入 Excel";
+  const sampleInput =
+    config.sample_input ||
+    "170*140*87 409.8kg\n205 Main Street\nNew Norway Alberta Canada\nT0B 3L0";
+
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -36,50 +46,52 @@ export default function AiQuoteInputPanel({
   }
 
   return (
-    <section className="ai-glass-panel flex h-full min-w-0 flex-col p-5">
-      <div className="flex items-start justify-between gap-4">
+    <section className="ai-glass-panel min-w-0 p-4">
+      <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase text-cyan-200">
             AI 报价输入
           </p>
-          <h2 className="mt-2 text-xl font-semibold text-white">{config.input_title}</h2>
+          <h2 className="mt-1 text-lg font-semibold text-white">{inputTitle}</h2>
         </div>
-        <span className="rounded-full border border-cyan-300/40 bg-cyan-300/10 px-3 py-1 text-xs font-semibold text-cyan-100">
+        <span className="rounded-full border border-cyan-300/40 bg-cyan-300/10 px-2.5 py-1 text-xs font-semibold text-cyan-100">
           {statusLabel}
         </span>
       </div>
 
-      <label className="mt-5 flex min-h-0 flex-1 flex-col">
+      <label className="mt-3 block">
         <ChineseFieldLabel
-          label={config.input_label}
+          label={inputLabel}
           hint="尺寸默认 cm，重量默认 kg；原始信息只用于字段识别。"
         />
         <textarea
-          className="ai-textarea mt-3 min-h-80 flex-1"
+          className="ai-textarea mt-2 min-h-64"
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          placeholder={config.sample_input}
+          placeholder={sampleInput}
         />
       </label>
 
-      <div className="mt-4 rounded-md border border-white/10 bg-white/[0.04] p-3">
-        <p className="text-xs font-semibold text-cyan-100">支持格式</p>
+      <details className="ai-format-details mt-2 rounded-md border border-white/10 bg-white/[0.04] p-2">
+        <summary className="cursor-pointer text-xs font-semibold text-cyan-100">
+          支持格式
+        </summary>
         <div className="mt-2 grid gap-1 text-xs leading-5 text-slate-300">
-          {config.format_hints.map((hint) => (
+          {formatHints.map((hint) => (
             <span key={hint}>{hint}</span>
           ))}
         </div>
-      </div>
+      </details>
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+      <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
         <button className="ai-primary-button" type="button" onClick={onSubmit} disabled={isQuoting}>
-          {isQuoting ? "报价中" : config.primary_button_label}
+          {isQuoting ? "报价中" : primaryButtonLabel}
         </button>
         <button className="ai-secondary-button" type="button" onClick={onClear} disabled={isQuoting}>
-          {config.clear_button_label}
+          {clearButtonLabel}
         </button>
         <label className="ai-secondary-button cursor-pointer">
-          {config.import_button_label}
+          {importButtonLabel}
           <input
             className="sr-only"
             type="file"

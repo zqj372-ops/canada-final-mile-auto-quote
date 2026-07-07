@@ -45,6 +45,16 @@ services:
       - api
     ports:
       - "127.0.0.1:${WEB_PORT:-18080}:80"
+    networks:
+      default:
+      freightclaw:
+        aliases:
+          - canada-quote-web
 
 volumes:
   postgres_data:
+
+networks:
+  freightclaw:
+    external: true
+    name: freightclaw-net

@@ -37,12 +37,15 @@ export default function AuditPage() {
         <h1 className="mt-1 text-2xl font-semibold text-slate-950">
           报价审计查询
         </h1>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          用 quote_id 追溯一次报价为什么成功或为什么进入人工池，包括邮编、城市、Zone、托数和后端返回的完整 JSON。
+        </p>
       </header>
 
       <section className="panel p-5">
         <form className="flex flex-col gap-3 md:flex-row md:items-end" onSubmit={handleSubmit}>
           <label className="flex-1">
-            <span className="field-label">quote_id</span>
+            <span className="field-label">报价 ID</span>
             <input
               className="field-input"
               value={quoteId}
@@ -78,56 +81,56 @@ export default function AuditPage() {
               <div>
                 <h3 className="section-title">审计字段</h3>
                 <dl className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <FieldValue label="source_type" value={record.source_type} />
+                  <FieldValue label="报价来源" value={sourceTypeLabel(record.source_type)} />
                   <FieldValue
-                    label="manual_review_required"
-                    value={record.manual_review_required ? "true" : "false"}
+                    label="是否人工复核"
+                    value={record.manual_review_required ? "是" : "否"}
                   />
                   <FieldValue
-                    label="postal_code"
+                    label="邮编"
                     value={formatNullable(record.postal_code)}
                   />
                   <FieldValue
-                    label="postal_prefix"
+                    label="邮编前缀"
                     value={formatNullable(record.postal_prefix)}
                   />
-                  <FieldValue label="city" value={formatNullable(record.city)} />
-                  <FieldValue label="province" value={formatNullable(record.province)} />
-                  <FieldValue label="origin" value={formatNullable(record.origin)} />
-                  <FieldValue label="zone" value={formatNullable(record.zone)} />
+                  <FieldValue label="城市" value={formatNullable(record.city)} />
+                  <FieldValue label="省份" value={formatNullable(record.province)} />
+                  <FieldValue label="始发仓" value={formatNullable(record.origin)} />
+                  <FieldValue label="Zone" value={formatNullable(record.zone)} />
                   <FieldValue
-                    label="billing_pallets"
+                    label="计费托数"
                     value={formatNullable(record.billing_pallets)}
                   />
                   <FieldValue
-                    label="base_price_usd"
+                    label="基础派送费"
                     value={formatMoney(record.base_price_usd)}
                   />
                   <FieldValue
-                    label="total_price_usd"
+                    label="报价合计"
                     value={formatMoney(record.total_price_usd)}
                   />
-                  <FieldValue label="created_at" value={formatDate(record.created_at)} />
+                  <FieldValue label="创建时间" value={formatDate(record.created_at)} />
                 </dl>
               </div>
 
               <div>
                 <h3 className="section-title">风险标签</h3>
                 <div className="mt-3">
-                  <RiskTags tags={record.risk_tags} />
+                  <RiskTags tags={record.risk_tag_labels?.length ? record.risk_tag_labels : record.risk_tags} />
                 </div>
               </div>
             </div>
 
             <div className="grid gap-5">
-              <JsonBlock title="request_json" value={record.request_json} />
-              <JsonBlock title="result_json" value={record.result_json} />
+              <JsonBlock title="请求原文 JSON" value={record.request_json} />
+              <JsonBlock title="报价结果 JSON" value={record.result_json} />
             </div>
           </div>
         </section>
       ) : (
         <section className="panel p-6 text-sm text-slate-600">
-          输入 quote_id 后可查看原始请求、后端结果和落库的关键报价字段。
+          输入报价 ID 后可查看原始请求、后端结果和落库的关键报价字段。
         </section>
       )}
     </div>
@@ -167,6 +170,19 @@ function formatMoney(value: string | number | null): string {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? `$${parsed.toFixed(2)}` : `$${String(value)}`;
+}
+
+function sourceTypeLabel(value: string): string {
+  const labels: Record<string, string> = {
+    zone_matrix: "Zone 价格矩阵",
+    manual_required: "需要人工报价",
+    learned_manual_quote: "人工学习规则",
+    fsa: "FSA 规则",
+    postal_code: "邮编精确规则",
+    city: "城市规则",
+    rate_card: "供应商报价卡",
+  };
+  return labels[value] ? `${labels[value]}（${value}）` : value;
 }
 
 function formatDate(value: string | null): string {

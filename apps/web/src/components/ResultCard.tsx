@@ -101,6 +101,10 @@ export default function ResultCard({ result }: ResultCardProps) {
                 label="billing_pallets"
                 value={formatNullable(result.billing_pallets)}
               />
+              <Metric
+                label="pallet_breakdown"
+                value={formatPalletBreakdown(result.pallet_breakdown)}
+              />
             </div>
           </div>
 
@@ -188,6 +192,22 @@ function formatMoney(value: MoneyValue): string {
   }
 
   return `$${String(value)}`;
+}
+
+function formatPalletBreakdown(breakdown: Record<string, number> | null | undefined): string {
+  if (!breakdown || Object.keys(breakdown).length === 0) {
+    return "-";
+  }
+  const labels: Record<string, string> = {
+    volume_pallets: "体积",
+    weight_pallets: "重量",
+    long_piece_pallets: "超长",
+    wooden_crate_pallets: "木箱",
+    explicit_pallet_count: "显式",
+  };
+  return Object.entries(breakdown)
+    .map(([key, value]) => `${labels[key] || key}:${value}`)
+    .join(" / ");
 }
 
 function formatNullable(value: string | number | null): string {

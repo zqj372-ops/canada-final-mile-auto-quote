@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,6 +19,28 @@ class ManualQuoteTaskRepository:
             risk_tags=result.risk_tags,
             request_json=request.model_dump(mode="json"),
             result_json=result.model_dump(mode="json"),
+            status="pending",
+        )
+        self.session.add(record)
+        self.session.commit()
+        self.session.refresh(record)
+        return record
+
+    def create_ai_review_task(
+        self,
+        *,
+        quote_id: str,
+        reason: str,
+        risk_tags: list[str],
+        request_json: dict[str, Any],
+        result_json: dict[str, Any],
+    ) -> ManualQuoteTask:
+        record = ManualQuoteTask(
+            quote_id=quote_id,
+            reason=reason,
+            risk_tags=risk_tags,
+            request_json=request_json,
+            result_json=result_json,
             status="pending",
         )
         self.session.add(record)

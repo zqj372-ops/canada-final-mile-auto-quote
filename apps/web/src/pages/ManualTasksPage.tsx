@@ -10,6 +10,7 @@ import {
 import RiskTags from "../components/RiskTags";
 
 type TaskFilter = "pending" | "resolved" | "all";
+type TaskStatus = "pending" | "in_progress" | "resolved" | "cancelled";
 
 interface TaskDraft {
   status: string;
@@ -72,6 +73,11 @@ export default function ManualTasksPage() {
     setSavingTaskId(task.id);
     setError(null);
     setNotice(null);
+    if (draft.status === "resolved" && !draft.resolved_price_usd.trim()) {
+      setError("标记为已解决时必须填写人工确认价格，系统会基于这条结果生成 Hermes 待审核候选。");
+      setSavingTaskId(null);
+      return;
+    }
 
     try {
       const payload: ManualQuoteTaskUpdate = {
@@ -122,6 +128,9 @@ export default function ManualTasksPage() {
           <h1 className="mt-1 text-2xl font-semibold text-slate-950">
             人工确认池
           </h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            只处理无法自动命中价格表的报价。任务标记为已解决并填写金额后，系统会生成 Hermes 待审核候选；批准后才会复用。
+          </p>
         </div>
         <button className="btn-secondary" type="button" onClick={() => void loadTasks()}>
           刷新任务
@@ -142,7 +151,7 @@ export default function ManualTasksPage() {
                 }
                 onClick={() => setFilter(item)}
               >
-                {item}
+                {taskFilterLabel(item)}
               </button>
             ))}
           </div>
@@ -198,34 +207,39 @@ export default function ManualTasksPage() {
                             ? "bg-emerald-50 text-emerald-800"
                             : "bg-amber-50 text-amber-900"
                         }`}
-                      >
-                        {task.status}
+                          >
+                        {taskStatusLabel(task.status)}
                       </span>
                     </div>
 
                     <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <FieldValue label="reason" value={task.reason} />
-                      <FieldValue label="assigned_to" value={task.assigned_to || "未分配"} />
+                      <FieldValue label="需人工原因" value={task.reason_zh || task.reason} />
+                      <FieldValue label="处理人" value={task.assigned_to || "未分配"} />
                       <FieldValue
-                        label="resolved_price_usd"
+                        label="人工确认金额"
                         value={formatMoney(task.resolved_price_usd)}
                       />
-                      <FieldValue label="created_at" value={formatDate(task.created_at)} />
-                      <FieldValue label="updated_at" value={formatDate(task.updated_at)} />
+                      <FieldValue label="创建时间" value={formatDate(task.created_at)} />
+                      <FieldValue label="更新时间" value={formatDate(task.updated_at)} />
                       <div>
-                        <dt className="metric-label">risk_tags</dt>
+                        <dt className="metric-label">风险标签</dt>
                         <dd className="mt-2">
-                          <RiskTags tags={task.risk_tags} />
+                          <RiskTags tags={task.risk_tag_labels?.length ? task.risk_tag_labels : task.risk_tags} />
                         </dd>
                       </div>
                     </dl>
+
+                    <InquiryDetails task={task} />
                   </div>
 
                   <div className="rounded-md border border-slate-200 p-4">
                     <h3 className="section-title">处理任务</h3>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">
+                      已解决任务必须填写人工确认金额；保存后只生成 Hermes 候选，不会直接影响报价。
+                    </p>
                     <div className="mt-3 grid gap-3">
                       <label>
-                        <span className="field-label">status</span>
+                        <span className="field-label">处理状态</span>
                         <select
                           className="field-input"
                           value={draft.status}
@@ -233,14 +247,15 @@ export default function ManualTasksPage() {
                             updateDraft(task.id, "status", event.target.value)
                           }
                         >
-                          <option value="pending">pending</option>
-                          <option value="in_progress">in_progress</option>
-                          <option value="resolved">resolved</option>
-                          <option value="cancelled">cancelled</option>
+                          {(["pending", "in_progress", "resolved", "cancelled"] as TaskStatus[]).map((status) => (
+                            <option key={status} value={status}>
+                              {taskStatusLabel(status)}
+                            </option>
+                          ))}
                         </select>
                       </label>
                       <label>
-                        <span className="field-label">assigned_to</span>
+                        <span className="field-label">处理人</span>
                         <input
                           className="field-input"
                           value={draft.assigned_to}
@@ -250,7 +265,7 @@ export default function ManualTasksPage() {
                         />
                       </label>
                       <label>
-                        <span className="field-label">resolved_price_usd</span>
+                        <span className="field-label">人工确认金额 USD</span>
                         <input
                           className="field-input"
                           type="number"
@@ -266,11 +281,11 @@ export default function ManualTasksPage() {
                           }
                         />
                         <p className="field-hint">
-                          仅用于人工处理结果，不会改写 Quote Engine 自动报价。
+                          仅用于人工处理结果；已解决时必填，不会改写 Zone 价格矩阵。
                         </p>
                       </label>
                       <label>
-                        <span className="field-label">resolved_note</span>
+                        <span className="field-label">处理备注</span>
                         <textarea
                           className="field-input min-h-24"
                           value={draft.resolved_note}
@@ -292,7 +307,7 @@ export default function ManualTasksPage() {
                           </span>
                         </label>
                         <label>
-                          <span className="field-label">wecom_bot_id</span>
+                          <span className="field-label">企业微信机器人</span>
                           <select
                             className="field-input"
                             value={selectedWecomBotId}
@@ -329,6 +344,90 @@ export default function ManualTasksPage() {
   );
 }
 
+function InquiryDetails({ task }: { task: ManualQuoteTask }) {
+  const details = buildInquiryDetails(task);
+
+  return (
+    <section className="mt-5 rounded-md border border-blue-100 bg-blue-50/40 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="section-title">询价明细</h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            展示客户原始输入、AI/规则解析字段和后端报价结果，方便人工确认。
+          </p>
+        </div>
+        {details.quoteSource && (
+          <span className="inline-flex rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-blue-800 ring-1 ring-blue-200">
+            {details.quoteSource}
+          </span>
+        )}
+      </div>
+
+      {details.customerMessage && (
+        <div className="mt-4 rounded-md border border-slate-200 bg-white p-3">
+          <p className="field-label">客户原始询价</p>
+          <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
+            {details.customerMessage}
+          </pre>
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-3">
+        <DetailGroup title="货物信息" items={details.cargoItems} />
+        <DetailGroup title="地址信息" items={details.addressItems} />
+        <DetailGroup title="报价/服务信息" items={details.serviceItems} />
+      </div>
+
+      {details.missingFields.length > 0 && (
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+          <p className="field-label text-amber-900">缺失字段</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {details.missingFields.map((field) => (
+              <span key={field} className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-amber-900">
+                {fieldLabel(field)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <JsonDetails title="请求 JSON" value={task.request_json} />
+        <JsonDetails title="结果 JSON" value={task.result_json} />
+      </div>
+    </section>
+  );
+}
+
+function DetailGroup({ title, items }: { title: string; items: Array<{ label: string; value: string }> }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-3">
+      <h4 className="text-sm font-semibold text-slate-950">{title}</h4>
+      <dl className="mt-3 grid gap-2">
+        {items.map((item) => (
+          <div key={item.label} className="grid grid-cols-[6rem_1fr] gap-3 text-sm">
+            <dt className="text-slate-500">{item.label}</dt>
+            <dd className="break-words font-medium text-slate-900">{item.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+function JsonDetails({ title, value }: { title: string; value: unknown }) {
+  return (
+    <details className="rounded-md border border-slate-200 bg-white">
+      <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-800">
+        {title}
+      </summary>
+      <pre className="max-h-72 overflow-auto border-t border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-100">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </details>
+  );
+}
+
 function draftFromTask(task: ManualQuoteTask): TaskDraft {
   return {
     status: task.status || "pending",
@@ -362,6 +461,259 @@ function optionalNumber(value: string): number | null {
     throw new Error("resolved_price_usd 必须是大于等于 0 的数字");
   }
   return parsed;
+}
+
+function taskFilterLabel(value: TaskFilter): string {
+  const labels: Record<TaskFilter, string> = {
+    pending: "待处理",
+    resolved: "已解决",
+    all: "全部",
+  };
+  return labels[value];
+}
+
+function taskStatusLabel(value: string): string {
+  const labels: Record<string, string> = {
+    pending: "待处理",
+    in_progress: "处理中",
+    resolved: "已解决",
+    cancelled: "已取消",
+  };
+  return labels[value] ?? value;
+}
+
+type JsonRecord = Record<string, unknown>;
+
+function buildInquiryDetails(task: ManualQuoteTask): {
+  customerMessage: string | null;
+  quoteSource: string | null;
+  missingFields: string[];
+  cargoItems: Array<{ label: string; value: string }>;
+  addressItems: Array<{ label: string; value: string }>;
+  serviceItems: Array<{ label: string; value: string }>;
+} {
+  const request = asRecord(task.request_json);
+  const result = asRecord(task.result_json);
+  const extraction = asRecord(result?.extraction);
+  const palletBreakdown = asRecord(result?.pallet_breakdown);
+  const accessorials = asRecord(result?.accessorials);
+  const source = extraction ?? request ?? {};
+  const resultRecord = result ?? {};
+  const customerMessage = stringValue(request?.customer_message);
+  const cbm = firstValue(source.cbm, request?.cbm);
+  const weightKg = firstValue(source.weight_kg, request?.weight_kg);
+
+  const cargoItems = [
+    detailItem("件数", firstValue(source.piece_count, request?.piece_count)),
+    detailItem("总体积 CBM", cbm, formatNumber),
+    detailItem("总重量 KG", weightKg, formatNumber),
+    detailItem("密度 KG/CBM", calculateDensity(cbm, weightKg)),
+    detailItem("最大单边 cm", firstValue(source.longest_side_cm, request?.longest_side_cm), formatNumber),
+    detailItem("包装类型", packagingLabel(stringValue(firstValue(source.packaging_type, request?.packaging_type)))),
+    detailItem("显式托数", firstValue(source.explicit_pallet_count, request?.explicit_pallet_count)),
+    detailItem("计费托数", resultRecord.billing_pallets),
+    detailItem("托数拆分", formatPalletBreakdown(palletBreakdown)),
+  ];
+
+  const addressItems = [
+    detailItem("地址", firstValue(source.address_line, request?.address_line)),
+    detailItem("城市", firstValue(source.city, request?.city, resultRecord.city)),
+    detailItem("省份", firstValue(source.province, request?.province, resultRecord.province)),
+    detailItem("邮编", firstValue(source.postal_code, request?.postal_code, resultRecord.postal_code)),
+    detailItem("推荐城市", resultRecord.preferred_city),
+    detailItem("邮编前缀", resultRecord.postal_prefix),
+    detailItem("始发仓", resultRecord.origin),
+    detailItem("Zone", resultRecord.zone),
+  ];
+
+  const serviceItems = [
+    detailItem("地址类型", addressTypeLabel(stringValue(firstValue(source.address_type, request?.address_type)))),
+    detailItem("是否可堆叠", booleanLabel(firstValue(source.is_stackable, request?.is_stackable))),
+    detailItem("需要尾板", booleanLabel(firstValue(source.requires_liftgate, request?.requires_liftgate))),
+    detailItem("需要手叉车", booleanLabel(firstValue(source.requires_pallet_jack, request?.requires_pallet_jack))),
+    detailItem("需要预约", booleanLabel(firstValue(source.requires_appointment, request?.requires_appointment))),
+    detailItem("等待时间", appendUnit(firstValue(source.detention_minutes, request?.detention_minutes), "分钟")),
+    detailItem("基础费用", formatMoneyLike(resultRecord.base_price_usd)),
+    detailItem("燃油", formatMoneyLike(resultRecord.fuel_usd)),
+    detailItem("附加费", formatAccessorials(accessorials)),
+    detailItem("合计", formatMoneyLike(resultRecord.total_price_usd)),
+  ];
+
+  return {
+    customerMessage,
+    quoteSource: sourceTypeLabel(stringValue(resultRecord.source_type)),
+    missingFields: arrayOfStrings(resultRecord.missing_fields),
+    cargoItems,
+    addressItems,
+    serviceItems,
+  };
+}
+
+function detailItem(
+  label: string,
+  value: unknown,
+  formatter: (value: unknown) => string = displayValue,
+): { label: string; value: string } {
+  return { label, value: formatter(value) };
+}
+
+function firstValue(...values: unknown[]): unknown {
+  return values.find((value) => value !== null && value !== undefined && value !== "");
+}
+
+function asRecord(value: unknown): JsonRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as JsonRecord;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function arrayOfStrings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item)).filter((item) => item.trim())
+    : [];
+}
+
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") {
+    return "未返回";
+  }
+  if (typeof value === "boolean") {
+    return booleanLabel(value);
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "未返回";
+  }
+  if (typeof value === "string") {
+    return value.trim() || "未返回";
+  }
+  return JSON.stringify(value);
+}
+
+function formatNumber(value: unknown): string {
+  if (value === null || value === undefined || value === "") {
+    return "未返回";
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed.toFixed(parsed % 1 === 0 ? 0 : 3).replace(/\.?0+$/, "") : displayValue(value);
+}
+
+function calculateDensity(cbm: unknown, weightKg: unknown): string {
+  const cbmNumber = Number(cbm);
+  const weightNumber = Number(weightKg);
+  if (!Number.isFinite(cbmNumber) || !Number.isFinite(weightNumber) || cbmNumber <= 0) {
+    return "未返回";
+  }
+  return `${(weightNumber / cbmNumber).toFixed(1)}`;
+}
+
+function appendUnit(value: unknown, unit: string): string {
+  const formatted = displayValue(value);
+  return formatted === "未返回" ? formatted : `${formatted} ${unit}`;
+}
+
+function booleanLabel(value: unknown): string {
+  if (value === true) {
+    return "是";
+  }
+  if (value === false) {
+    return "否";
+  }
+  return "待确认";
+}
+
+function packagingLabel(value: string | null): string {
+  const labels: Record<string, string> = {
+    carton: "纸箱",
+    wooden_crate: "木箱",
+    pallet: "托盘",
+    woven_bag: "编织袋",
+    flexible_packaging: "软包装",
+    unknown: "待确认",
+  };
+  return value ? labels[value] ?? value : "未返回";
+}
+
+function addressTypeLabel(value: string | null): string {
+  const labels: Record<string, string> = {
+    commercial: "商业地址",
+    residential: "住宅地址",
+    private: "私人地址",
+    rural_residential: "偏远住宅",
+  };
+  return value ? labels[value] ?? value : "待确认";
+}
+
+function sourceTypeLabel(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const labels: Record<string, string> = {
+    zone_matrix: "Zone 价格矩阵",
+    manual_required: "需要人工报价",
+    learned_manual_quote: "人工学习规则",
+  };
+  return labels[value] ? `${labels[value]} / ${value}` : value;
+}
+
+function fieldLabel(value: string): string {
+  const labels: Record<string, string> = {
+    address_line: "地址",
+    postal_code: "邮编",
+    city: "城市",
+    province: "省份",
+    cbm: "体积 CBM",
+    weight_kg: "重量 KG",
+    piece_count: "件数",
+    packaging_type: "包装类型",
+    address_type: "地址类型",
+  };
+  return labels[value] ?? value;
+}
+
+function formatPalletBreakdown(value: JsonRecord | null): string {
+  if (!value || Object.keys(value).length === 0) {
+    return "未返回";
+  }
+  const labels: Record<string, string> = {
+    cbm_pallets: "体积",
+    weight_pallets: "重量",
+    oversized_pallets: "超长",
+    wooden_crate_pallets: "木箱",
+    explicit_pallet_count: "显式",
+    billing_pallets: "计费",
+  };
+  return Object.entries(value)
+    .map(([key, entryValue]) => `${labels[key] ?? key}: ${displayValue(entryValue)}`)
+    .join(" / ");
+}
+
+function formatAccessorials(value: JsonRecord | null): string {
+  if (!value || Object.keys(value).length === 0) {
+    return "无";
+  }
+  const labels: Record<string, string> = {
+    residential_fee_usd: "住宅",
+    liftgate_fee_usd: "尾板",
+    pallet_jack_fee_usd: "手叉车",
+    appointment_fee_usd: "预约",
+    detention_fee_usd: "等待",
+  };
+  return Object.entries(value)
+    .map(([key, entryValue]) => `${labels[key] ?? key}: ${formatMoneyLike(entryValue)}`)
+    .join(" / ");
+}
+
+function formatMoneyLike(value: unknown): string {
+  if (value === null || value === undefined || value === "") {
+    return "未返回";
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? `$${parsed.toFixed(2)}` : displayValue(value);
 }
 
 function formatDate(value: string | null): string {

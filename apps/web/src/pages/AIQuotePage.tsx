@@ -176,8 +176,8 @@ export default function AIQuotePage() {
                   checked={enableSearchContext}
                   onChange={(event) => setEnableSearchContext(event.target.checked)}
                 />
-                <span className="text-sm font-medium text-slate-800">
-                  引用搜索结果确认地址情况和市场行情
+              <span className="text-sm font-medium text-slate-800">
+                  引用搜索结果确认地址情况
                 </span>
               </label>
               <label>
@@ -197,7 +197,7 @@ export default function AIQuotePage() {
                   ))}
                 </select>
                 <p className="field-hint">
-                  搜索结果只用于风险备注和人工复核参考，不允许改变 Quote Engine 的报价金额。
+                  搜索结果只用于地址确认和人工复核参考，不允许改变 Quote Engine 的报价金额。
                 </p>
               </label>
             </fieldset>
@@ -332,9 +332,8 @@ export default function AIQuotePage() {
                   <p className="mt-1 text-sm leading-6 text-slate-600">
                     {result.search_context.note}
                   </p>
-                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <div className="mt-4 grid gap-4">
                     <SearchEvidenceBlock title="地址情况" evidence={result.search_context.address_research} />
-                    <SearchEvidenceBlock title="行情参考" evidence={result.search_context.market_research} />
                   </div>
                 </section>
               )}

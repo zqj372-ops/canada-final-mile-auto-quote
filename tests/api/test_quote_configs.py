@@ -119,3 +119,80 @@ def test_sales_cannot_manage_search_configs(monkeypatch: pytest.MonkeyPatch) -> 
     response = client.get("/search-configs", headers={"X-API-Key": SALES_KEY})
 
     assert response.status_code == 403
+
+
+def test_admin_can_manage_zone_pricing_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    read_response = client.get("/quote-configs/zone-pricing", headers={"X-API-Key": ADMIN_KEY})
+    update_response = client.put(
+        "/quote-configs/zone-pricing",
+        json={
+            "fuel_percent": "18.5",
+            "residential_fee_usd": "55",
+            "liftgate_fee_usd": "60",
+            "pallet_jack_fee_usd": "50",
+            "appointment_fee_usd": "45",
+            "detention_half_hour_fee_usd": "40",
+            "detention_free_minutes": 20,
+        },
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    read_back = client.get("/quote-configs/zone-pricing", headers={"X-API-Key": ADMIN_KEY})
+
+    assert read_response.status_code == 200
+    assert read_response.json()["fuel_percent"] == "35"
+    assert update_response.status_code == 200
+    assert read_back.json()["fuel_percent"] == "18.5"
+    assert read_back.json()["detention_free_minutes"] == 20
+
+
+def test_admin_can_upsert_zone_price_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    first = client.post(
+        "/quote-configs/zone-price-matrix",
+        json={
+            "origin": "Toronto",
+            "zone": 3,
+            "billing_pallets": 2,
+            "base_price_usd": "250.00",
+            "source": "unit-test",
+            "last_updated": "2026-07-06",
+        },
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    second = client.post(
+        "/quote-configs/zone-price-matrix",
+        json={
+            "origin": "toronto",
+            "zone": 3,
+            "billing_pallets": 2,
+            "base_price_usd": "260.00",
+            "source": "unit-test-updated",
+        },
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    listing = client.get(
+        "/quote-configs/zone-price-matrix?origin=toronto&zone=3",
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+
+    assert first.status_code == 200
+    assert first.json()["origin"] == "toronto"
+    assert second.status_code == 200
+    assert second.json()["base_price_usd"] == "260.00"
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 1
+    assert listing.json()["records"][0]["source"] == "unit-test-updated"
+
+
+def test_sales_cannot_manage_zone_price_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    response = client.get("/quote-configs/zone-price-matrix", headers={"X-API-Key": SALES_KEY})
+
+    assert response.status_code == 403

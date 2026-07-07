@@ -155,6 +155,47 @@ def test_create_bot_config_does_not_return_plain_webhook_url() -> None:
     assert FAKE_WEBHOOK not in response.text
 
 
+def test_create_aibot_config_does_not_require_webhook_or_return_secret() -> None:
+    client = build_client()
+    secret = "aibot-secret-test-value"
+
+    response = client.post(
+        "/wecom/bots",
+        json={
+            "name": "智能机器人",
+            "bot_type": "wecom_aibot_long_connection",
+            "bot_id": "aibot-test-id-123456",
+            "secret": secret,
+            "purpose": "ai_quote",
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["bot_type"] == "wecom_aibot_long_connection"
+    assert body["masked_webhook_url"] is None
+    assert body["masked_bot_id"] == "aibot-****123456"
+    assert body["has_secret"] is True
+    assert secret not in response.text
+    assert "secret_encrypted" not in body
+
+
+def test_create_aibot_config_requires_secret() -> None:
+    client = build_client()
+
+    response = client.post(
+        "/wecom/bots",
+        json={
+            "name": "智能机器人",
+            "bot_type": "wecom_aibot_long_connection",
+            "bot_id": "aibot-test-id-123456",
+            "purpose": "ai_quote",
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_list_bots_returns_masked_webhook_url() -> None:
     client = build_client(bot_rows=[{"purpose": "general"}])
 
@@ -193,6 +234,31 @@ def test_wecom_test_webhook_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.status_code == 200
     assert response.json()["success"] is False
     assert response.json()["error"] == "boom"
+
+
+def test_wecom_test_aibot_long_connection_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = build_client()
+    created = client.post(
+        "/wecom/bots",
+        json={
+            "name": "智能机器人",
+            "bot_type": "wecom_aibot_long_connection",
+            "bot_id": "aibot-test-id-123456",
+            "secret": "aibot-secret-test-value",
+            "purpose": "ai_quote",
+        },
+    )
+    assert created.status_code == 201
+
+    monkeypatch.setattr(
+        "apps.api.routes.wecom_configs.WeComAIBotLongConnectionClient.test_connection",
+        lambda _self: WeComSendResult(success=True, latency_ms=25, status_code=None),
+    )
+
+    response = client.post("/wecom/bots/1/test")
+
+    assert response.status_code == 200
+    assert response.json() == {"success": True, "error": None, "latency_ms": 25, "status_code": None}
 
 
 def test_wecom_client_exception_does_not_return_webhook_url(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -55,6 +55,11 @@ export default function QuoteSettingsPage() {
     }
     setError(null);
     setNotice(null);
+    const validationErrors = validateWorkbenchConfig(config);
+    if (validationErrors.length > 0) {
+      setError(formatValidationErrors(validationErrors));
+      return;
+    }
     setIsSaving(true);
     try {
       const saved = await updateQuoteWorkbenchConfig(config);
@@ -72,8 +77,13 @@ export default function QuoteSettingsPage() {
     setError(null);
     setNotice(null);
     try {
-      const parsed = JSON.parse(jsonDraft) as QuoteWorkbenchConfig;
-      setConfig(parsed);
+      const parsed = JSON.parse(jsonDraft) as unknown;
+      const validationErrors = validateWorkbenchConfig(parsed);
+      if (validationErrors.length > 0) {
+        setError(formatValidationErrors(validationErrors));
+        return;
+      }
+      setConfig(parsed as QuoteWorkbenchConfig);
       setNotice("JSON 已载入表单，检查无误后点击保存配置");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "JSON 格式错误");
@@ -165,7 +175,7 @@ export default function QuoteSettingsPage() {
 
       {error && (
         <div
-          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900"
+          className="whitespace-pre-line rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900"
           role="alert"
         >
           {error}
@@ -682,6 +692,253 @@ function splitLines(value: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+type JsonRecord = Record<string, unknown>;
+
+function validateWorkbenchConfig(value: unknown): string[] {
+  const errors: string[] = [];
+  const root = requireRecord(value, "配置", errors);
+  if (!root) {
+    return errors;
+  }
+
+  [
+    ["title", "页面标题"],
+    ["subtitle", "页面副标题"],
+    ["input_title", "输入面板标题"],
+    ["input_label", "输入框标签"],
+    ["primary_button_label", "主按钮"],
+    ["clear_button_label", "清空按钮"],
+    ["import_button_label", "导入按钮"],
+    ["sample_input", "示例输入"],
+  ].forEach(([key, label]) => requireNonEmptyString(root[key], label, errors));
+
+  requireStringArray(root.format_hints, "支持格式提示", errors, { minItems: 1 });
+  requireStringMap(root.status_labels, "状态标签", errors, { minItems: 1 });
+  requireStringMap(root.accessorial_labels, "附加费中文名", errors);
+  requireStringMap(root.backend_risk_tag_labels, "后端风险标签中文名", errors);
+
+  const packagingOptionValues = validateOptions(root.packaging_options, "包装类型选项", errors);
+  const addressTypeOptionValues = validateOptions(root.address_type_options, "地址类型选项", errors);
+  validateOptions(root.service_options, "附加服务选项", errors);
+  validateProvinces(root.provinces, errors);
+  validateParser(root.parser, errors);
+  validateDefaults(root.defaults, packagingOptionValues, addressTypeOptionValues, errors);
+  validateRisks(root.risks, errors);
+  validateCopyTemplate(root.copy_template, errors);
+
+  return errors;
+}
+
+function validateParser(value: unknown, errors: string[]) {
+  const parser = requireRecord(value, "解析规则", errors);
+  if (!parser) {
+    return;
+  }
+  const pattern = requireNonEmptyString(parser.postal_code_pattern, "加拿大邮编正则", errors);
+  if (pattern) {
+    try {
+      new RegExp(pattern);
+    } catch {
+      errors.push("加拿大邮编正则不是有效的正则表达式");
+    }
+  }
+  requireNonEmptyString(parser.default_country, "默认国家", errors);
+  requireBoolean(parser.allow_space_dimension_separator, "允许用空格分隔长宽高重量", errors);
+  requireStringArray(parser.dimension_separators, "尺寸分隔符", errors, { minItems: 1 });
+  requireStringArray(parser.weight_units, "重量单位", errors, { minItems: 1 });
+  requireStringArray(parser.country_aliases, "国家别名", errors);
+}
+
+function validateDefaults(
+  value: unknown,
+  packagingOptionValues: string[],
+  addressTypeOptionValues: string[],
+  errors: string[],
+) {
+  const defaults = requireRecord(value, "默认提交值", errors);
+  if (!defaults) {
+    return;
+  }
+  const packagingType = requireNonEmptyString(defaults.packaging_type, "默认包装类型", errors);
+  if (packagingType && !packagingOptionValues.includes(packagingType)) {
+    errors.push("默认包装类型必须存在于包装类型选项中");
+  }
+  const addressType = requireNonEmptyString(defaults.address_type, "默认地址类型", errors);
+  if (addressType && !addressTypeOptionValues.includes(addressType)) {
+    errors.push("默认地址类型必须存在于地址类型选项中");
+  }
+  if (defaults.is_stackable !== null) {
+    requireBoolean(defaults.is_stackable, "是否可堆叠", errors);
+  }
+  if (defaults.explicit_pallet_count !== null) {
+    requireNumber(defaults.explicit_pallet_count, "显式托盘数", errors, { min: 1, integer: true });
+  }
+  requireBoolean(defaults.requires_liftgate, "默认需要尾板", errors);
+  requireBoolean(defaults.requires_pallet_jack, "默认需要手叉车", errors);
+  requireBoolean(defaults.requires_appointment, "默认需要预约", errors);
+  requireNumber(defaults.detention_minutes, "默认等待时间", errors, { min: 0, integer: true });
+  requireBoolean(defaults.notify_wecom, "默认推送企业微信", errors);
+}
+
+function validateRisks(value: unknown, errors: string[]) {
+  const risks = requireRecord(value, "风险与标签", errors);
+  if (!risks) {
+    return;
+  }
+  requireNumber(risks.dense_density_kg_per_cbm, "重货密度阈值", errors, { min: 0 });
+  requireNumber(risks.light_density_kg_per_cbm, "泡货密度阈值", errors, { min: 0 });
+  requireNumber(risks.oversized_longest_side_cm, "超长边阈值", errors, { min: 0 });
+  requireNumber(risks.heavy_single_piece_kg, "重单件阈值", errors, { min: 0 });
+  requireStringArray(risks.core_city_names, "核心城市名单", errors);
+}
+
+function validateCopyTemplate(value: unknown, errors: string[]) {
+  const copyTemplate = requireRecord(value, "报价话术", errors);
+  if (!copyTemplate) {
+    return;
+  }
+  requireNonEmptyString(copyTemplate.currency_code, "币种显示", errors);
+  requireNumber(copyTemplate.valid_days, "报价有效期", errors, { min: 1, integer: true });
+  requireNonEmptyString(copyTemplate.manual_price_text, "人工复核金额文案", errors);
+  requireStringArray(copyTemplate.included_items, "费用包含", errors, { minItems: 1 });
+  requireStringArray(copyTemplate.excluded_items, "费用不含", errors, { minItems: 1 });
+  requireNonEmptyString(copyTemplate.remark, "报价备注", errors);
+}
+
+function validateOptions(value: unknown, label: string, errors: string[]): string[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    errors.push(`${label}至少需要一项`);
+    return [];
+  }
+  const optionValues: string[] = [];
+  const seen = new Set<string>();
+  value.forEach((item, index) => {
+    const option = requireRecord(item, `${label}第 ${index + 1} 项`, errors);
+    if (!option) {
+      return;
+    }
+    const optionValue = requireNonEmptyString(option.value, `${label}第 ${index + 1} 项值`, errors);
+    requireNonEmptyString(option.label, `${label}第 ${index + 1} 项显示名`, errors);
+    if (!optionValue) {
+      return;
+    }
+    optionValues.push(optionValue);
+    if (seen.has(optionValue)) {
+      errors.push(`${label}存在重复值：${optionValue}`);
+    }
+    seen.add(optionValue);
+  });
+  return optionValues;
+}
+
+function validateProvinces(value: unknown, errors: string[]) {
+  if (!Array.isArray(value) || value.length === 0) {
+    errors.push("省份别名至少需要一项");
+    return;
+  }
+  value.forEach((item, index) => {
+    const province = requireRecord(item, `省份别名第 ${index + 1} 项`, errors);
+    if (!province) {
+      return;
+    }
+    requireNonEmptyString(province.code, `省份别名第 ${index + 1} 项缩写`, errors);
+    requireNonEmptyString(province.name, `省份别名第 ${index + 1} 项名称`, errors);
+    requireStringArray(province.aliases, `省份别名第 ${index + 1} 项别名`, errors);
+  });
+}
+
+function requireRecord(value: unknown, label: string, errors: string[]): JsonRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    errors.push(`${label}必须是对象`);
+    return null;
+  }
+  return value as JsonRecord;
+}
+
+function requireNonEmptyString(value: unknown, label: string, errors: string[]): string | null {
+  if (typeof value !== "string" || !value.trim()) {
+    errors.push(`${label}不能为空`);
+    return null;
+  }
+  return value.trim();
+}
+
+function requireStringArray(
+  value: unknown,
+  label: string,
+  errors: string[],
+  options: { minItems?: number } = {},
+) {
+  if (!Array.isArray(value)) {
+    errors.push(`${label}必须是数组`);
+    return;
+  }
+  const minItems = options.minItems ?? 0;
+  if (value.length < minItems) {
+    errors.push(`${label}至少需要 ${minItems} 项`);
+  }
+  value.forEach((item, index) => {
+    if (typeof item !== "string" || !item.trim()) {
+      errors.push(`${label}第 ${index + 1} 项不能为空`);
+    }
+  });
+}
+
+function requireStringMap(
+  value: unknown,
+  label: string,
+  errors: string[],
+  options: { minItems?: number } = {},
+) {
+  const record = requireRecord(value, label, errors);
+  if (!record) {
+    return;
+  }
+  const entries = Object.entries(record);
+  const minItems = options.minItems ?? 0;
+  if (entries.length < minItems) {
+    errors.push(`${label}至少需要 ${minItems} 项`);
+  }
+  entries.forEach(([key, entryValue]) => {
+    if (!key.trim()) {
+      errors.push(`${label}不能包含空字段名`);
+    }
+    if (typeof entryValue !== "string" || !entryValue.trim()) {
+      errors.push(`${label}.${key || "(空字段)"} 不能为空`);
+    }
+  });
+}
+
+function requireBoolean(value: unknown, label: string, errors: string[]) {
+  if (typeof value !== "boolean") {
+    errors.push(`${label}必须是 true 或 false`);
+  }
+}
+
+function requireNumber(
+  value: unknown,
+  label: string,
+  errors: string[],
+  options: { min?: number; integer?: boolean } = {},
+) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    errors.push(`${label}必须是数字`);
+    return;
+  }
+  if (options.integer && !Number.isInteger(value)) {
+    errors.push(`${label}必须是整数`);
+  }
+  if (options.min !== undefined && value < options.min) {
+    errors.push(`${label}不能小于 ${options.min}`);
+  }
+}
+
+function formatValidationErrors(errors: string[]): string {
+  return `配置校验未通过：\n- ${errors.slice(0, 12).join("\n- ")}${
+    errors.length > 12 ? `\n- 还有 ${errors.length - 12} 个问题未显示` : ""
+  }`;
 }
 
 function toNumber(value: string, min: number): number {

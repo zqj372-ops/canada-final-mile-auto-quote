@@ -17,6 +17,7 @@ FSA 匹配、确定性报价、AI 输出保护做稳，避免任何模型编造�
 - 报价必须由确定性 Quote Engine 计算。
 - AI 只能基于 `quote_result` 解释报价、生成销售备注、提示风险。
 - 未命中价格库时返回 `manual_required`，不输出客户报价金额。
+- Hermes 自学习只生成候选建议；人工审核通过前，不会改写报价规则或自动放行价格。
 
 报价链路：
 
@@ -52,7 +53,7 @@ tests/                             MVP 单元测试
 - 标准化加拿大邮编，例如 `v6v1a1 -> V6V 1A1 -> V6V`。
 - 标准化省份，例如 `Ontario -> ON`、`British Columbia -> BC`。
 - 按 Zone 查表链路报价：
-  `postal_code -> preferred city -> postal_prefix/city/province -> zone/origin -> zone_price_matrix`
+  `postal_code override -> FSA single-zone -> FSA + city_alias/canonical_city -> city fallback -> zone_price_matrix`
 - 按固定优先级匹配报价规则：
   `history_exact_address -> postal_code -> fsa -> city -> rate_card -> distance_fallback -> manual_required`
 - 输出 `source_type`、`confidence`、`matched_rule`、`cost_breakdown`、风险标签和人工审核状态。
@@ -83,7 +84,7 @@ npm install
 npm run dev
 ```
 
-前端默认请求 `http://localhost:8000`。如需修改 API 地址：
+前端默认请求 `/api`；本地 Vite 会代理到 `http://localhost:8000`。如需修改 API 地址：
 
 ```bash
 VITE_API_BASE_URL=http://localhost:8000 npm run dev
@@ -94,6 +95,7 @@ VITE_API_BASE_URL=http://localhost:8000 npm run dev
 - `/quote`：普通 Zone 报价输入。
 - `/ai-quote`：粘贴客户原始消息，由 AI 提取字段，再由 Zone Quote Engine 报价。
 - `/manual-tasks`：处理 `manual_required` 人工确认任务。
+- `/learning-candidates`：Hermes 自学习候选审核，批准后才发布为可复用学习规则。
 - `/audit`：按 `quote_id` 查询报价审计记录。
 - `/settings/quote`：维护 `/quote` 工作台后台配置，包括示例、字段选项、风险阈值和复制话术。
 - `/settings/ai`：维护 OpenAI-compatible 模型配置，支持输入 API Key 自动获取模型列表并导入。
@@ -132,6 +134,35 @@ alembic upgrade head
 如果某个开发库已经由 `init.sql` 初始化到当前结构，可先执行 `alembic stamp head`
 标记版本；之后再用 `alembic upgrade head` 应用新增 migration。
 
+### 参考数据导入
+
+生产和开发库可通过 admin-only 导入接口维护 Zone 参考数据。导入只更新结构化表，
+不会把完整价格表交给 AI，也不会让 AI 参与价格计算。
+
+```bash
+POST /imports/zone-rules
+POST /imports/zone-price-matrix
+POST /imports/postal-code-lookup
+POST /imports/city-aliases
+```
+
+四个接口都接收 `.json` 文件并执行 upsert，返回：
+
+```json
+{
+  "status": "imported",
+  "resource": "zone_lookup_rules",
+  "row_count": 1,
+  "inserted_count": 1,
+  "updated_count": 0,
+  "skipped_count": 0
+}
+```
+
+`zone_lookup_rules` 支持 `canonical_city`、`priority`、`active`。`city_aliases`
+用于把客户输入城市和供应商/邮编库城市统一，例如 `CONCORD -> VAUGHAN`。
+`postal_zone_overrides` 用于完整邮编特殊覆盖，优先级高于 FSA 和城市匹配。
+
 ### API Key 权限
 
 本地开发可在 `.env` 设置：
@@ -156,7 +187,7 @@ PATCH /api-keys/{key_id}
 
 角色权限：
 
-- `admin`：管理 AI 配置、企业微信配置、API Key 和导入校验。
+- `admin`：管理 AI 配置、企业微信配置、API Key 和参考数据导入。
 - `operator`：创建报价、查看审计、查看并处理人工任务。
 - `sales`：创建普通报价和 AI 自动报价。
 - `viewer`：只读审计和人工任务。
@@ -230,7 +261,21 @@ docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod
 ```
 
 返回包含 `source_type`、`postal_prefix`、`origin`、`zone`、`billing_pallets`、
-`base_price_usd`、`fuel_usd`、`accessorials`、`total_price_usd` 和 `matched_rule`。
+`base_price_usd`、`fuel_usd`、`accessorials`、`total_price_usd`、`matched_rule`、
+`matched_by`、`candidate_count` 和 `match_trace`。
+
+Zone 匹配优先级：
+
+```text
+full postal_code override
+-> FSA 下只有一个 origin + zone 时直接命中
+-> FSA + canonical_city / city_alias 命中
+-> 兼容旧数据的 city fallback
+-> manual_required
+```
+
+如果同一 FSA 下存在多个 origin/zone 且城市别名仍无法唯一确定，系统返回
+`manual_required`，不会估算价格。
 
 每次 Zone 报价都会尝试写入 `quote_audit_logs`。如果报价结果是
 `manual_required`，系统会自动创建 `manual_quote_tasks`，供运营人工确认。
@@ -359,6 +404,7 @@ API 会从 PostgreSQL 查询候选 `vendor_rate_rules`，再交给 Quote Engine 
 ## 资料入口
 
 - 资料索引：`docs/reference-index.md`
+- Hermes 自学习边界：`docs/HERMES_LEARNING.md`
 - 实时报价 SOP：`reference/canada-final-mile/SOP_QUICK.md`
 - 规则参数：`reference/canada-final-mile/RULES.yaml`
 - 输出模板：`reference/canada-final-mile/QUOTE_TEMPLATE.md`

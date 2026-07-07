@@ -65,7 +65,11 @@ class SearchApiConfigRepository:
 
     def get_default_config(self) -> SearchApiConfig | None:
         statement = select(SearchApiConfig).where(SearchApiConfig.is_default.is_(True), SearchApiConfig.enabled.is_(True))
-        return self.session.scalars(statement.order_by(SearchApiConfig.id.asc())).first()
+        record = self.session.scalars(statement.order_by(SearchApiConfig.id.asc())).first()
+        if record is not None:
+            return record
+        fallback_statement = select(SearchApiConfig).where(SearchApiConfig.enabled.is_(True)).order_by(SearchApiConfig.id.asc())
+        return self.session.scalars(fallback_statement).first()
 
     def set_default_config(self, config_id: int) -> SearchApiConfig | None:
         record = self.get_config(config_id)

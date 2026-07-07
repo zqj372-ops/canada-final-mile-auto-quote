@@ -2,7 +2,7 @@
   "description": "Zone 邮编前缀 城市 省份 始发仓 查询表",
   "description_en": "Canada Zone Lookup Table - Postal Prefix, City, Province, Origin",
   "source": "Statistics Canada National Address Register (July 2025) + 佳邮国际2026年商业地址报价表",
-  "total_records": 1442,
+  "total_records": 1483,
   "last_updated": "2026-06-06T00:00",
   "data": {
     "by_postal_prefix": {
@@ -10228,6 +10228,18 @@
           "origin": "多伦多",
           "match_level": "L1",
           "note": ""
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5A",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
         }
       ],
       "T7A": [
@@ -14444,6 +14456,566 @@
           "origin": "多伦多",
           "match_level": "L1.5",
           "note": "L1.5 Tavily兜底修正：James Snow Business Park / 6440 Fifth Line，近邻锚点 L4T MISSISSAUGA Zone1（<=10km）"
+        }
+      ],
+      "S4S": [
+        {
+          "zone": 5,
+          "postal_prefix": "S4S",
+          "city": "REGINA",
+          "province": "SK",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Regina S4S 按 Calgary Zone 5，避免回退到 S4M Zone14",
+          "canonical_city": "REGINA",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "S7K": [
+        {
+          "zone": 5,
+          "postal_prefix": "S7K",
+          "city": "SASKATOON",
+          "province": "SK",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Saskatoon S7K 按 Calgary Zone 5，避免回退到 S7H Toronto Zone14",
+          "canonical_city": "SASKATOON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5B": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5B",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5C": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5C",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5E": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5E",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5G": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5G",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5H": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5H",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5J": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5J",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5K": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5K",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5L": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5L",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5M": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5M",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5N": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5N",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5P": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5P",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5R": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5R",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5S": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5S",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5T": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5T",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5V": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5V",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5W": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5W",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5X": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5X",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5Y": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5Y",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T5Z": [
+        {
+          "zone": 9,
+          "postal_prefix": "T5Z",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6A": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6A",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6B": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6B",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6C": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6C",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6E": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6E",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6G": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6G",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6H": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6H",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6J": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6J",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6K": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6K",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6L": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6L",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6M": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6M",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6N": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6N",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6P": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6P",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6R": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6R",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6S": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6S",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6T": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6T",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6V": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6V",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6W": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6W",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6X": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6X",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        }
+      ],
+      "T6Y": [
+        {
+          "zone": 9,
+          "postal_prefix": "T6Y",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
         }
       ]
     },
@@ -24197,6 +24769,474 @@
           "origin": "多伦多",
           "match_level": "L1",
           "note": ""
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5A",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5B",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5C",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5E",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5G",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5H",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5J",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5K",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5L",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5M",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5N",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5P",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5R",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5S",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5T",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5V",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5W",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5X",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5Y",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5Z",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6A",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6B",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6C",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6E",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6G",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6H",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6J",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6K",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6L",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6M",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6N",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6P",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6R",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6S",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6T",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6V",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6W",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6X",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6Y",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
         }
       ],
       "DRAYTON VALLEY|AB": [
@@ -28490,6 +29530,18 @@
           "origin": "多伦多",
           "match_level": "L1",
           "note": ""
+        },
+        {
+          "zone": 5,
+          "postal_prefix": "S4S",
+          "city": "REGINA",
+          "province": "SK",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Regina S4S 按 Calgary Zone 5，避免回退到 S4M Zone14",
+          "canonical_city": "REGINA",
+          "priority": 10,
+          "active": true
         }
       ],
       "SASKATOON|SK": [
@@ -28501,6 +29553,18 @@
           "origin": "多伦多",
           "match_level": "L1",
           "note": ""
+        },
+        {
+          "zone": 5,
+          "postal_prefix": "S7K",
+          "city": "SASKATOON",
+          "province": "SK",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Saskatoon S7K 按 Calgary Zone 5，避免回退到 S7H Toronto Zone14",
+          "canonical_city": "SASKATOON",
+          "priority": 10,
+          "active": true
         }
       ],
       "LLOYDMINSTER|SK": [
@@ -32461,6 +33525,30 @@
           "origin": "卡尔加里",
           "match_level": "L2",
           "note": "L2锚点V4T WESTBANK=Zone5 (BC省统一); 195b Street Fleetwood区"
+        },
+        {
+          "zone": 5,
+          "postal_prefix": "S4S",
+          "city": "REGINA",
+          "province": "SK",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Regina S4S 按 Calgary Zone 5，避免回退到 S4M Zone14",
+          "canonical_city": "REGINA",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 5,
+          "postal_prefix": "S7K",
+          "city": "SASKATOON",
+          "province": "SK",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Saskatoon S7K 按 Calgary Zone 5，避免回退到 S7H Toronto Zone14",
+          "canonical_city": "SASKATOON",
+          "priority": 10,
+          "active": true
         }
       ],
       "6": [
@@ -39192,6 +40280,474 @@
           "origin": "卡尔加里",
           "match_level": "L2",
           "note": "⚠️修正：原Zone 10 (T0E GRANDE CACHE锚点错) → Zone 9 (T7A DRAYTON VALLEY正确锚点); West Cove距Drayton Valley ~130km远小于Grande Cache ~480km"
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5A",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5B",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5C",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5E",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5G",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5H",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5J",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5K",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5L",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5M",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5N",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5P",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5R",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5S",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5T",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5V",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5W",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5X",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5Y",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5Z",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6A",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6B",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6C",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6E",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6G",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6H",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6J",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6K",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6L",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6M",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6N",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6P",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6R",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6S",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6T",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6V",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6W",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6X",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6Y",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
         }
       ],
       "10": [
@@ -45872,6 +47428,474 @@
           "postal_prefix": "T1H",
           "city": "LETHBRIDGE COUNTY",
           "origin": "多伦多"
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5A",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5B",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5C",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5E",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5G",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5H",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5J",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5K",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5L",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5M",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5N",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5P",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5R",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5S",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5T",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5V",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5W",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5X",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5Y",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T5Z",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6A",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6B",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6C",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6E",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6G",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6H",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6J",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6K",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6L",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6M",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6N",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6P",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6R",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6S",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6T",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6V",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6W",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6X",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 9,
+          "postal_prefix": "T6Y",
+          "city": "EDMONTON",
+          "province": "AB",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+          "canonical_city": "EDMONTON",
+          "priority": 10,
+          "active": true
         }
       ],
       "BC": [
@@ -46698,6 +48722,29 @@
           "postal_prefix": "S0E",
           "city": "HUDSON BAY",
           "origin": "多伦多"
+        },
+        {
+          "zone": 5,
+          "postal_prefix": "S4S",
+          "city": "REGINA",
+          "province": "SK",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Regina S4S 按 Calgary Zone 5，避免回退到 S4M Zone14",
+          "canonical_city": "REGINA",
+          "priority": 10,
+          "active": true
+        },
+        {
+          "zone": 5,
+          "postal_prefix": "S7K",
+          "city": "SASKATOON",
+          "origin": "卡尔加里",
+          "match_level": "manual_correction",
+          "note": "人工修正：Saskatoon S7K 按 Calgary Zone 5，避免回退到 S7H Toronto Zone14",
+          "canonical_city": "SASKATOON",
+          "priority": 10,
+          "active": true
         }
       ],
       "MB": [
@@ -63282,6 +65329,498 @@
       "origin": "多伦多",
       "match_level": "L1.5",
       "note": "L1.5 Tavily兜底修正：James Snow Business Park / 6440 Fifth Line，近邻锚点 L4T MISSISSAUGA Zone1（<=10km）"
+    },
+    {
+      "zone": 5,
+      "postal_prefix": "S4S",
+      "city": "REGINA",
+      "province": "SK",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Regina S4S 按 Calgary Zone 5，避免回退到 S4M Zone14",
+      "canonical_city": "REGINA",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 5,
+      "postal_prefix": "S7K",
+      "city": "SASKATOON",
+      "province": "SK",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Saskatoon S7K 按 Calgary Zone 5，避免回退到 S7H Toronto Zone14",
+      "canonical_city": "SASKATOON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5A",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5B",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5C",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5E",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5G",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5H",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5J",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5K",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5L",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5M",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5N",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5P",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5R",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5S",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5T",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5V",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5W",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5X",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5Y",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T5Z",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6A",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6B",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6C",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6E",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6G",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6H",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6J",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6K",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6L",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6M",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6N",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6P",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6R",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6S",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6T",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6V",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6W",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6X",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
+    },
+    {
+      "zone": 9,
+      "postal_prefix": "T6Y",
+      "city": "EDMONTON",
+      "province": "AB",
+      "origin": "卡尔加里",
+      "match_level": "manual_correction",
+      "note": "人工修正：Edmonton AB 市区 T5/T6 FSA 按 Calgary Zone 9，避免 T6/T5 锚点缺失或旧 Toronto origin 污染",
+      "canonical_city": "EDMONTON",
+      "priority": 10,
+      "active": true
     }
   ]
 }

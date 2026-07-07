@@ -5,7 +5,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from apps.api.db.models import ManualQuoteTask, WeComBotConfig
-from apps.api.db.repositories.wecom_bot_config_repository import WeComBotConfigRepository
+from apps.api.db.repositories.wecom_bot_config_repository import GROUP_WEBHOOK_BOT_TYPE, WeComBotConfigRepository
 from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult
 from packages.wecom.bot_client import WeComBotClient, WeComSendResult
 from packages.wecom.templates import (
@@ -105,7 +105,21 @@ def _send_with_bot(
     *,
     markdown: str,
 ) -> WeComSendResult:
+    if bot.bot_type != GROUP_WEBHOOK_BOT_TYPE:
+        result = WeComSendResult(
+            success=False,
+            error="WeComAIBotLongConnectionRequiresActiveWorker",
+            latency_ms=0,
+            status_code=None,
+        )
+        logger.warning(
+            "WeCom bot notification skipped for non-webhook bot.",
+            extra={"bot_id": bot.id, "purpose": bot.purpose, "bot_type": bot.bot_type},
+        )
+        return result
     webhook_url = repository.decrypt_webhook_url(bot)
+    if not webhook_url:
+        return WeComSendResult(success=False, error="WeComWebhookUrlMissing", latency_ms=0, status_code=None)
     client = WeComBotClient(webhook_url)
     try:
         result = client.send_markdown(markdown)
@@ -124,7 +138,19 @@ def _send_with_bot(
 
 
 def _send_manual_required_at_all(repository: WeComBotConfigRepository, bot: WeComBotConfig) -> None:
+    if bot.bot_type != GROUP_WEBHOOK_BOT_TYPE:
+        logger.warning(
+            "WeCom bot @all reminder skipped for non-webhook bot.",
+            extra={"bot_id": bot.id, "purpose": bot.purpose, "bot_type": bot.bot_type},
+        )
+        return
     webhook_url = repository.decrypt_webhook_url(bot)
+    if not webhook_url:
+        logger.warning(
+            "WeCom bot @all reminder skipped because webhook URL is missing.",
+            extra={"bot_id": bot.id, "purpose": bot.purpose},
+        )
+        return
     try:
         result = WeComBotClient(webhook_url).send_text(MANUAL_REQUIRED_AT_ALL_TEXT, mentioned_list=["@all"])
     except Exception as exc:

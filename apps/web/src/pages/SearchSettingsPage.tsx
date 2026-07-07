@@ -60,6 +60,10 @@ export default function SearchSettingsPage() {
     event.preventDefault();
     setError(null);
     setNotice(null);
+    if (!form.enabled && form.is_default) {
+      setError("禁用的搜索配置不能设为默认，请先启用或取消默认。");
+      return;
+    }
     setIsSaving(true);
     try {
       const payload = buildPayload(form);
@@ -84,6 +88,9 @@ export default function SearchSettingsPage() {
   }
 
   async function handleDelete(config: SearchApiConfigPublic) {
+    if (!window.confirm(`确认删除搜索配置「${config.name}」吗？`)) {
+      return;
+    }
     setError(null);
     setNotice(null);
     try {
@@ -101,6 +108,10 @@ export default function SearchSettingsPage() {
   async function handleSetDefault(config: SearchApiConfigPublic) {
     setError(null);
     setNotice(null);
+    if (!config.enabled) {
+      setError("禁用的搜索配置不能设为默认，请先启用后再设置。");
+      return;
+    }
     try {
       await setDefaultSearchConfig(config.id);
       setNotice(`${config.name} 已设为默认搜索配置`);
@@ -143,7 +154,16 @@ export default function SearchSettingsPage() {
   }
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => {
+      const next = { ...current, [key]: value };
+      if (key === "enabled" && value === false) {
+        next.is_default = false;
+      }
+      if (key === "is_default" && value === true && !next.enabled) {
+        return current;
+      }
+      return next;
+    });
   }
 
   return (
@@ -154,7 +174,7 @@ export default function SearchSettingsPage() {
           搜索 API 配置
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-          用于 AI 自动报价时查询地址情况和市场行情参考。搜索结果只能生成风险备注，不能决定或修改报价金额。
+          用于 AI 自动报价时查询地址情况。搜索结果只能作为人工复核参考，不能决定或修改报价金额。
         </p>
       </header>
 
@@ -220,7 +240,7 @@ export default function SearchSettingsPage() {
             </label>
             <div className="grid gap-3 sm:grid-cols-2">
               <CheckboxField label="enabled" checked={form.enabled} onChange={(value) => update("enabled", value)} />
-              <CheckboxField label="is_default" checked={form.is_default} onChange={(value) => update("is_default", value)} />
+              <CheckboxField label="is_default" checked={form.is_default} onChange={(value) => update("is_default", value)} disabled={!form.enabled} />
             </div>
             <button className="btn-primary" type="submit" disabled={isSaving}>
               {isSaving ? "保存中..." : form.id ? "保存配置" : "新增配置"}
@@ -281,7 +301,7 @@ export default function SearchSettingsPage() {
                         className="btn-secondary"
                         type="button"
                         onClick={() => void handleSetDefault(config)}
-                        disabled={config.is_default}
+                        disabled={config.is_default || !config.enabled}
                       >
                         设为默认
                       </button>
@@ -339,10 +359,12 @@ function CheckboxField({
   label,
   checked,
   onChange,
+  disabled = false,
 }: {
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <label className="flex min-h-11 items-center gap-3 rounded-md border border-slate-200 px-3 py-2">
@@ -350,6 +372,7 @@ function CheckboxField({
         className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
       />
       <span className="text-sm font-medium text-slate-800">{label}</span>

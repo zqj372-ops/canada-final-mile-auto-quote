@@ -7,11 +7,15 @@ from packages.quote_engine.pricing import money
 from packages.quote_engine.zone_config import ZonePricingConfig
 from packages.quote_engine.zone_lookup import (
     get_province_from_postal_code,
-    lookup_zone_by_postal_prefix_city_province,
+    lookup_zone,
+    lookup_zone_by_city_province,
+    lookup_zone_by_postal_family_province,
     origin_label,
 )
 from packages.quote_engine.zone_models import (
+    CityAliasRecord,
     PostalCodeCityRecord,
+    PostalZoneOverrideRecord,
     ZoneLookupRuleRecord,
     ZonePriceRecord,
     ZoneQuoteRequest,
@@ -25,7 +29,19 @@ class ZoneDataProvider(Protocol):
     def get_preferred_city(self, postal_code: str) -> PostalCodeCityRecord | None:
         ...
 
+    def get_postal_zone_override(self, postal_code: str) -> PostalZoneOverrideRecord | None:
+        ...
+
+    def list_city_aliases(self, province: str | None) -> list[CityAliasRecord]:
+        ...
+
     def list_zone_rules(self, postal_prefix: str) -> list[ZoneLookupRuleRecord]:
+        ...
+
+    def list_city_zone_rules(self, city: str, province: str | None) -> list[ZoneLookupRuleRecord]:
+        ...
+
+    def list_postal_family_zone_rules(self, postal_prefix: str, province: str | None) -> list[ZoneLookupRuleRecord]:
         ...
 
     def get_zone_price(self, origin: str, zone: int, billing_pallets: int) -> ZonePriceRecord | None:
@@ -40,26 +56,20 @@ class ZoneQuoteEngine:
     def quote(self, request: ZoneQuoteRequest) -> ZoneQuoteResult:
         postal_prefix = extract_fsa(request.postal_code)
         if not postal_prefix:
-            return self._manual(request, "Postal prefix could not be extracted.", ("postal_prefix_missing",))
+            return self._manual(
+                request,
+                "无法从邮编中识别加拿大 FSA/邮编前缀。",
+                ("postal_prefix_missing",),
+                matched_by="postal_prefix_missing",
+                candidate_count=0,
+                match_trace={"postal_code": request.postal_code, "matched_by": "postal_prefix_missing"},
+            )
 
         preferred_record = self.provider.get_preferred_city(request.postal_code)
         preferred_city = preferred_record.preferred_city if preferred_record else None
-        province = request.province or (preferred_record.province if preferred_record else None)
+        province = (preferred_record.province if preferred_record else None) or request.province
         province = province or get_province_from_postal_code(request.postal_code)
-        city = request.city or preferred_city
-
-        zone_rules = self.provider.list_zone_rules(postal_prefix)
-        zone_decision = lookup_zone_by_postal_prefix_city_province(postal_prefix, city, province, zone_rules)
-        if zone_decision.manual_required or zone_decision.origin is None or zone_decision.zone is None:
-            return self._manual(
-                request,
-                zone_decision.matched_rule,
-                zone_decision.risk_tags,
-                preferred_city=preferred_city,
-                postal_prefix=postal_prefix,
-                city=city,
-                province=province,
-            )
+        city = preferred_city or request.city
 
         pallet_result = calculate_billing_pallets(
             cbm=request.cbm,
@@ -70,10 +80,72 @@ class ZoneQuoteEngine:
             explicit_pallet_count=request.explicit_pallet_count,
             is_stackable=request.is_stackable,
         )
+        zone_rules = self.provider.list_zone_rules(postal_prefix)
+        zone_decision = lookup_zone(
+            postal_code=request.postal_code,
+            postal_prefix=postal_prefix,
+            input_city=request.city,
+            preferred_city=preferred_city,
+            province=province,
+            rules=zone_rules,
+            aliases=self.provider.list_city_aliases(province),
+            override=self.provider.get_postal_zone_override(request.postal_code),
+        )
+        if (
+            zone_decision.manual_required
+            and zone_decision.matched_by in {"zone_not_found", "province_not_found", "city_not_found"}
+            and city
+            and province
+        ):
+            city_zone_rules = self.provider.list_city_zone_rules(city, province)
+            city_zone_decision = lookup_zone_by_city_province(
+                city=city,
+                province=province,
+                rules=city_zone_rules,
+                requested_postal_prefix=postal_prefix,
+            )
+            if not city_zone_decision.manual_required:
+                zone_decision = city_zone_decision
+            else:
+                zone_decision = city_zone_decision
+        if (
+            zone_decision.manual_required
+            and zone_decision.matched_by
+            in {
+                "zone_not_found",
+                "province_not_found",
+                "city_not_found",
+                "city_fallback_not_found",
+                "city_fallback_expected_origin_not_found",
+            }
+            and province
+        ):
+            postal_family_rules = self.provider.list_postal_family_zone_rules(postal_prefix, province)
+            postal_family_decision = lookup_zone_by_postal_family_province(
+                postal_prefix=postal_prefix,
+                province=province,
+                rules=postal_family_rules,
+            )
+            zone_decision = postal_family_decision
+        if zone_decision.manual_required or zone_decision.origin is None or zone_decision.zone is None:
+            return self._manual(
+                request,
+                zone_decision.matched_rule,
+                [*zone_decision.risk_tags, *pallet_result.risk_tags],
+                preferred_city=preferred_city,
+                postal_prefix=postal_prefix,
+                city=city,
+                province=province,
+                billing_pallets=pallet_result.billing_pallets,
+                pallet_breakdown=pallet_result.components,
+                internal_note=_manual_note_with_pallets(pallet_result.billing_pallets),
+                zone_decision=zone_decision,
+            )
+
         if pallet_result.manual_review_required or pallet_result.billing_pallets is None:
             return self._manual(
                 request,
-                pallet_result.internal_note or "Billing pallets require manual review.",
+                pallet_result.internal_note or "计费托数需要人工确认。",
                 pallet_result.risk_tags,
                 preferred_city=preferred_city,
                 postal_prefix=postal_prefix,
@@ -81,6 +153,8 @@ class ZoneQuoteEngine:
                 province=province,
                 origin=zone_decision.origin,
                 zone=zone_decision.zone,
+                pallet_breakdown=pallet_result.components,
+                zone_decision=zone_decision,
             )
 
         price_record = self.provider.get_zone_price(
@@ -92,8 +166,8 @@ class ZoneQuoteEngine:
             return self._manual(
                 request,
                 (
-                    f"No zone matrix price for {zone_decision.origin} Zone {zone_decision.zone} "
-                    f"+ {pallet_result.billing_pallets} pallets."
+                    f"Zone 价格矩阵缺少价格：{zone_decision.origin} Zone {zone_decision.zone} "
+                    f"+ {pallet_result.billing_pallets} 托。"
                 ),
                 ("zone_price_not_found",),
                 preferred_city=preferred_city,
@@ -103,6 +177,9 @@ class ZoneQuoteEngine:
                 origin=zone_decision.origin,
                 zone=zone_decision.zone,
                 billing_pallets=pallet_result.billing_pallets,
+                pallet_breakdown=pallet_result.components,
+                internal_note=_manual_note_with_pallets(pallet_result.billing_pallets),
+                zone_decision=zone_decision,
             )
 
         pricing = calculate_zone_price(
@@ -131,6 +208,7 @@ class ZoneQuoteEngine:
             origin=zone_decision.origin,
             zone=zone_decision.zone,
             billing_pallets=pallet_result.billing_pallets,
+            pallet_breakdown=pallet_result.components,
             base_price_usd=money(price_record.base_price_usd),
             fuel_usd=pricing.fuel_usd,
             accessorials=pricing.accessorials,
@@ -138,6 +216,9 @@ class ZoneQuoteEngine:
             risk_tags=sorted(set(risk_tags)),
             manual_review_required=False,
             matched_rule=matched_rule,
+            matched_by=zone_decision.matched_by,
+            candidate_count=zone_decision.candidate_count,
+            match_trace=zone_decision.match_trace,
             internal_note="Base price came from zone_price_matrix. AI may explain but must not change price.",
         )
         result.sales_note = build_zone_sales_note(request, result)
@@ -156,7 +237,17 @@ class ZoneQuoteEngine:
         origin: str | None = None,
         zone: int | None = None,
         billing_pallets: int | None = None,
+        pallet_breakdown: dict[str, int] | None = None,
+        internal_note: str | None = None,
+        matched_by: str | None = None,
+        candidate_count: int = 0,
+        match_trace: dict[str, object] | None = None,
+        zone_decision: object | None = None,
     ) -> ZoneQuoteResult:
+        if zone_decision is not None:
+            matched_by = getattr(zone_decision, "matched_by", matched_by)
+            candidate_count = getattr(zone_decision, "candidate_count", candidate_count)
+            match_trace = getattr(zone_decision, "match_trace", match_trace)
         return ZoneQuoteResult(
             source_type=ZoneQuoteSourceType.MANUAL_REQUIRED,
             confidence=0,
@@ -168,57 +259,54 @@ class ZoneQuoteEngine:
             origin=origin,
             zone=zone,
             billing_pallets=billing_pallets,
+            pallet_breakdown=pallet_breakdown or {},
             risk_tags=sorted(set(risk_tags)),
             manual_review_required=True,
             matched_rule=matched_rule,
-            sales_note="Manual review required before sharing a price.",
-            internal_note="Zone quote could not be completed from deterministic lookup tables.",
+            matched_by=matched_by,
+            candidate_count=candidate_count,
+            match_trace=match_trace or {},
+            sales_note="需要人工复核后才能向客户发送报价。",
+            internal_note=internal_note or "确定性 Zone 查表报价未能完成，不能自动生成价格。",
         )
 
 
 def build_zone_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult) -> str:
     amount = _format_money(result.total_price_usd)
-    address_type = {
-        "commercial": "商业地址",
-        "residential": "私人住宅地址",
-        "private": "私人住宅地址",
-        "rural_residential": "农村住宅地址",
-    }[request.address_type.value]
-    service_line = (
-        "商业地址（不含住宅附加费）"
-        if request.address_type.value == "commercial"
-        else "私人地址（含住宅附加费 +50USD/票）"
-    )
-    cargo_parts = [
-        request.packaging_type,
-        f"{request.cbm} CBM",
-        f"{request.weight_kg} KG",
-        f"{request.piece_count}件",
-    ]
+    density = _format_density(request.weight_kg, request.cbm)
+    cargo_line = f"共{request.piece_count}件，{request.cbm} CBM，{request.weight_kg} KG"
+    if result.billing_pallets is not None:
+        cargo_line += f"，计费{result.billing_pallets}托"
+    if density:
+        cargo_line += f"，密度{density} KG/CBM"
     if request.longest_side_cm is not None:
-        cargo_parts.append(f"最长边{request.longest_side_cm}CM")
+        cargo_line += f"，最长边{request.longest_side_cm}CM"
 
     return "\n".join(
         [
-            f"地址：{request.address_line or ''}".rstrip(),
-            f"地址类型：{address_type}",
-            f"货物：{' / '.join(cargo_parts)}",
-            f"报价：${amount} USD {origin_label(result.origin)}派送（Zone {result.zone}）",
-            "",
-            "服务条款：",
-            "- 送货到门口路边，不含其他任何操作",
-            f"- {service_line}",
-            "",
-            "尾板费用：",
-            "- 收货方无卸货平台需司机卸货至地面：+$50/票",
-            "- 尾板承重500KG/板，>500KG及超长货物由收货人自卸",
-            "- 需司机手叉车配合：另+$50USD",
-            "- 免费等待30分钟，超过按$35USD/半小时计（不满半小时按半小时算）",
-            "",
-            "- 价格为预估，最终以供应商实测地址及卡车准入情况为准",
-            "- 如下单后需填写对应单号引用此报价",
+            "加拿大尾端派送报价：",
+            f"目的地：{_destination_line(request, result)}",
+            f"货物总计：{cargo_line}",
+            f"报价：USD {amount}（{origin_label(result.origin)}派送）",
+            "注：不带尾板，自卸货",
+            "- 送货到门口路边，不含其他操作",
+            "- 无卸货平台需尾板 +50USD/票",
+            "- 需手叉车配合 +50USD/票",
+            "- 免费等待30分钟，超时35USD/半小时",
+            "- 价格以供应商实测地址及卡车准入情况为准",
+            "- 下单引用单号，未引用加收50人民币/票服务费",
         ]
     )
+
+
+def _destination_line(request: ZoneQuoteRequest, result: ZoneQuoteResult) -> str:
+    parts = [
+        request.address_line,
+        result.city or request.city,
+        result.province or request.province,
+        result.postal_code or request.postal_code,
+    ]
+    return ", ".join(str(part) for part in parts if part)
 
 
 def _request_risk_tags(request: ZoneQuoteRequest) -> list[str]:
@@ -234,6 +322,12 @@ def _request_risk_tags(request: ZoneQuoteRequest) -> list[str]:
     return tags
 
 
+def _manual_note_with_pallets(billing_pallets: int | None) -> str:
+    if billing_pallets is None:
+        return "确定性 Zone 查表报价未能完成，且计费托数需要人工确认，不能自动生成价格。"
+    return f"已按托数规则估算计费托数为 {billing_pallets} 托；但价格表/Zone 未命中，不能自动生成金额。"
+
+
 def _format_money(value: Decimal | None) -> str:
     if value is None:
         return ""
@@ -241,3 +335,10 @@ def _format_money(value: Decimal | None) -> str:
     if value == value.to_integral_value():
         return str(value.quantize(Decimal("1")))
     return f"{value:.2f}"
+
+
+def _format_density(weight_kg: Decimal, cbm: Decimal) -> str:
+    if cbm <= 0:
+        return ""
+    density = weight_kg / cbm
+    return f"{density.quantize(Decimal('0.1'))}"

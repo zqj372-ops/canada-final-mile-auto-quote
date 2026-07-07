@@ -5,6 +5,7 @@ from math import ceil
 
 FLEXIBLE_PACKAGING = {"编织袋", "柔性包装", "woven bag", "flexible packaging", "bag"}
 WOODEN_CRATE = {"木箱", "crate", "wooden crate"}
+HARD_LONG_PIECE_THRESHOLD_CM = Decimal("240")
 
 
 @dataclass(frozen=True)
@@ -38,7 +39,9 @@ def calculate_billing_pallets(
 
     volume_pallets = max(1, ceil(cbm / Decimal("2"))) if cbm > 0 else 0
     weight_pallets = max(1, ceil(weight_kg / Decimal("500"))) if weight_kg > 0 else 0
-    is_long_piece = bool(longest_side_cm is not None and longest_side_cm > Decimal("120"))
+    is_long_piece = bool(
+        longest_side_cm is not None and longest_side_cm >= HARD_LONG_PIECE_THRESHOLD_CM
+    )
     long_piece_pallets = piece_count * 2 if is_long_piece else 0
 
     wooden_crate_pallets = 0
@@ -64,4 +67,3 @@ def calculate_billing_pallets(
         )
 
     return PalletCalculationResult(billing_pallets=billing_pallets, components=components)
-

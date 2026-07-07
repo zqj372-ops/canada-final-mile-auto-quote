@@ -6,7 +6,7 @@ from apps.api.auth import ADMIN_ROLES, require_roles
 from apps.api.db.models import WeComBotConfig
 from apps.api.db.repositories.wecom_bot_config_repository import WeComBotConfigRepository
 from apps.api.db.session import get_db
-from packages.wecom.bot_client import WeComBotClient
+from packages.wecom.bot_client import WeComAIBotLongConnectionClient, WeComBotClient
 
 
 router = APIRouter(prefix="/wecom/bots", tags=["wecom"], dependencies=[Depends(require_roles(*ADMIN_ROLES))])
@@ -16,7 +16,9 @@ class WeComBotConfigCreate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
     name: str = Field(min_length=1, max_length=128)
-    webhook_url: str = Field(min_length=1)
+    webhook_url: str | None = Field(default=None, min_length=1)
+    bot_id: str | None = Field(default=None, min_length=1, max_length=128)
+    secret: str | None = Field(default=None, min_length=1)
     bot_type: str = "group_webhook"
     purpose: str = "general"
     enabled: bool = True
@@ -29,6 +31,8 @@ class WeComBotConfigUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=128)
     webhook_url: str | None = Field(default=None, min_length=1)
+    bot_id: str | None = Field(default=None, min_length=1, max_length=128)
+    secret: str | None = Field(default=None, min_length=1)
     bot_type: str | None = None
     purpose: str | None = None
     enabled: bool | None = None
@@ -98,7 +102,16 @@ def test_wecom_bot(bot_id: int, db: Session = Depends(get_db)) -> dict[str, obje
     record = _get_bot_or_404(repository, bot_id)
     if not record.enabled:
         return {"success": False, "error": "WeCom bot config is disabled.", "latency_ms": 0, "status_code": None}
-    result = WeComBotClient(repository.decrypt_webhook_url(record)).test_webhook()
+    if record.bot_type == "wecom_aibot_long_connection":
+        secret = repository.decrypt_secret_value(record)
+        if not record.bot_id or not secret:
+            return {"success": False, "error": "WeCom AIBot credentials are incomplete.", "latency_ms": 0, "status_code": None}
+        result = WeComAIBotLongConnectionClient(record.bot_id, secret).test_connection()
+        return result.model_dump()
+    webhook_url = repository.decrypt_webhook_url(record)
+    if not webhook_url:
+        return {"success": False, "error": "WeCom webhook URL is not configured.", "latency_ms": 0, "status_code": None}
+    result = WeComBotClient(webhook_url).test_webhook()
     return result.model_dump()
 
 

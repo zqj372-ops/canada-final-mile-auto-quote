@@ -59,6 +59,7 @@ export interface ZoneQuoteResult {
   origin: string | null;
   zone: number | null;
   billing_pallets: number | null;
+  pallet_breakdown: Record<string, number>;
   base_price_usd: MoneyValue;
   fuel_usd: MoneyValue;
   accessorials: Record<string, MoneyValue>;
@@ -66,6 +67,9 @@ export interface ZoneQuoteResult {
   risk_tags: string[];
   manual_review_required: boolean;
   matched_rule: string;
+  matched_by: string | null;
+  candidate_count: number;
+  match_trace: Record<string, JsonValue>;
   sales_note: string | null;
   internal_note: string | null;
 }
@@ -194,6 +198,8 @@ export interface WeComBotConfigPublic {
   id: number;
   name: string;
   masked_webhook_url: string | null;
+  masked_bot_id: string | null;
+  has_secret: boolean;
   bot_type: string;
   purpose: string;
   enabled: boolean;
@@ -206,6 +212,8 @@ export interface WeComBotConfigPublic {
 export interface WeComBotConfigPayload {
   name?: string;
   webhook_url?: string | null;
+  bot_id?: string | null;
+  secret?: string | null;
   bot_type?: string;
   purpose?: string;
   enabled?: boolean;
@@ -261,6 +269,7 @@ export interface SearchResultItem {
 export interface SearchEvidence {
   query: string;
   answer: string | null;
+  summary_zh?: string | null;
   results: SearchResultItem[];
   error: string | null;
 }
@@ -276,7 +285,9 @@ export interface ManualQuoteTask {
   id: number;
   quote_id: string;
   reason: string;
+  reason_zh?: string | null;
   risk_tags: string[];
+  risk_tag_labels?: string[];
   request_json: JsonValue;
   result_json: JsonValue;
   status: string;
@@ -313,7 +324,110 @@ export interface QuoteAuditLog {
   total_price_usd: MoneyValue;
   manual_review_required: boolean;
   risk_tags: string[];
+  risk_tag_labels?: string[];
   created_at: string | null;
+}
+
+export interface RiskTagCount {
+  tag: string;
+  label?: string;
+  count: number;
+}
+
+export interface QuoteErrorSummary {
+  window_label?: string;
+  window_started_at?: string;
+  daily_total_audit_count?: number;
+  daily_successful_quote_count?: number;
+  daily_manual_required_audit_count?: number;
+  daily_created_manual_task_count?: number;
+  daily_pending_manual_task_count?: number;
+  daily_ai_issue_task_count?: number;
+  daily_risk_tag_counts?: RiskTagCount[];
+  total_audit_count: number;
+  successful_quote_count: number;
+  manual_required_audit_count: number;
+  pending_manual_task_count: number;
+  resolved_manual_task_count: number;
+  ai_issue_task_count: number;
+  active_learning_rule_count?: number;
+  pending_learning_candidate_count?: number;
+  approved_learning_candidate_count?: number;
+  rejected_learning_candidate_count?: number;
+  learning_rule_usage_count?: number;
+  risk_tag_counts: RiskTagCount[];
+  recent_manual_tasks: ManualQuoteTask[];
+  recent_audits?: QuoteAuditLog[];
+  recent_manual_audits: QuoteAuditLog[];
+  recent_learning_rules?: LearnedQuoteRule[];
+  recent_learning_candidates?: HermesLearningCandidate[];
+}
+
+export interface LearnedQuoteRule {
+  id: number;
+  source_task_id: number | null;
+  quote_id: string | null;
+  scope: string;
+  postal_code: string | null;
+  postal_prefix: string | null;
+  city: string | null;
+  province: string | null;
+  origin: string | null;
+  zone: number | null;
+  billing_pallets: number;
+  total_price_usd: MoneyValue;
+  base_price_usd: MoneyValue;
+  confidence: number;
+  status: string;
+  usage_count: number;
+  note: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  last_used_at: string | null;
+}
+
+export interface HermesLearningCandidate {
+  id: number;
+  source_task_id: number | null;
+  quote_id: string | null;
+  candidate_type: string;
+  scope: string;
+  postal_code: string | null;
+  postal_prefix: string | null;
+  city: string | null;
+  province: string | null;
+  origin: string | null;
+  zone: number | null;
+  billing_pallets: number;
+  resolved_total_price_usd: MoneyValue;
+  resolved_base_price_usd: MoneyValue;
+  confidence: number;
+  support_count: number;
+  status: string;
+  duplicate_key: string;
+  proposal_json: JsonValue;
+  evidence_json: JsonValue;
+  risk_tags: string[];
+  review_note: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  promoted_rule_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface HermesCandidateReviewPayload {
+  review_note?: string | null;
+}
+
+export interface HermesApproveResponse {
+  candidate: HermesLearningCandidate;
+  learned_rule: LearnedQuoteRule;
+}
+
+export interface LearnedRuleUpdatePayload {
+  status: string;
+  note?: string | null;
 }
 
 export interface WorkbenchOption {
@@ -388,8 +502,47 @@ export interface QuoteWorkbenchConfig {
   copy_template: WorkbenchCopyTemplateConfig;
 }
 
+export interface ZonePricingConfig {
+  fuel_percent: MoneyValue;
+  residential_fee_usd: MoneyValue;
+  liftgate_fee_usd: MoneyValue;
+  pallet_jack_fee_usd: MoneyValue;
+  appointment_fee_usd: MoneyValue;
+  detention_half_hour_fee_usd: MoneyValue;
+  detention_free_minutes: number;
+}
+
+export interface ZonePriceMatrixRecord {
+  id: number;
+  origin: string;
+  zone: number;
+  billing_pallets: number;
+  base_price_usd: MoneyValue;
+  source: string | null;
+  last_updated: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ZonePriceMatrixListResponse {
+  records: ZonePriceMatrixRecord[];
+  total: number;
+  origins: string[];
+  zones: number[];
+  billing_pallets: number[];
+}
+
+export interface ZonePriceMatrixPayload {
+  origin: string;
+  zone: number;
+  billing_pallets: number;
+  base_price_usd: MoneyValue;
+  source?: string | null;
+  last_updated?: string | null;
+}
+
 const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"
+  import.meta.env.VITE_API_BASE_URL || "/api"
 ).replace(/\/$/, "");
 export type ApiKeyScope = "quote" | "admin";
 
@@ -437,12 +590,12 @@ async function request<T>(
 
 function formatApiError(data: unknown, fallback: string): string {
   if (typeof data === "string" && data.trim()) {
-    return data;
+    return sanitizeErrorText(data, fallback);
   }
   if (data && typeof data === "object" && "detail" in data) {
     const detail = (data as { detail: unknown }).detail;
     if (typeof detail === "string") {
-      return detail;
+      return sanitizeErrorText(detail, fallback);
     }
     if (Array.isArray(detail)) {
       return detail
@@ -458,6 +611,21 @@ function formatApiError(data: unknown, fallback: string): string {
     return JSON.stringify(detail);
   }
   return fallback || "Request failed";
+}
+
+function sanitizeErrorText(value: string, fallback: string): string {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (/<html[\s>]/i.test(compact) || /<!doctype html/i.test(compact)) {
+    const title = compact.match(/<title>(.*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim();
+    if (title) {
+      return `外部服务返回错误：${title}`;
+    }
+    return fallback || "外部服务返回 HTML 错误页";
+  }
+  if (/^error code:\s*502/i.test(compact)) {
+    return "外部服务或反向代理暂时返回 502，请稍后重试或进入人工复核。";
+  }
+  return compact.length > 500 ? `${compact.slice(0, 500)}...` : compact;
 }
 
 export function calculateZoneQuote(
@@ -501,6 +669,64 @@ export function getQuoteAudit(quoteId: string): Promise<QuoteAuditLog> {
   return request<QuoteAuditLog>(`/quotes/audit/${encodeURIComponent(quoteId)}`);
 }
 
+export function getQuoteErrorSummary(limit = 20): Promise<QuoteErrorSummary> {
+  return request<QuoteErrorSummary>(`/quotes/error-summary?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function listHermesLearningCandidates(params: {
+  status?: string;
+  postal_prefix?: string;
+  city?: string;
+  province?: string;
+  billing_pallets?: number | "";
+  limit?: number;
+} = {}): Promise<HermesLearningCandidate[]> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      search.set(key, String(value));
+    }
+  });
+  const query = search.toString();
+  return request<HermesLearningCandidate[]>(
+    `/quotes/learning-candidates${query ? `?${query}` : ""}`,
+  );
+}
+
+export function getHermesLearningCandidate(candidateId: number): Promise<HermesLearningCandidate> {
+  return request<HermesLearningCandidate>(`/quotes/learning-candidates/${candidateId}`);
+}
+
+export function approveHermesLearningCandidate(
+  candidateId: number,
+  payload: HermesCandidateReviewPayload,
+): Promise<HermesApproveResponse> {
+  return request<HermesApproveResponse>(`/quotes/learning-candidates/${candidateId}/approve`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function rejectHermesLearningCandidate(
+  candidateId: number,
+  payload: HermesCandidateReviewPayload,
+): Promise<HermesLearningCandidate> {
+  return request<HermesLearningCandidate>(`/quotes/learning-candidates/${candidateId}/reject`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateLearnedQuoteRule(
+  ruleId: number,
+  payload: LearnedRuleUpdatePayload,
+): Promise<LearnedQuoteRule> {
+  return request<LearnedQuoteRule>(`/quotes/learned-rules/${ruleId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function getQuoteWorkbenchConfig(
   apiKeyScope: ApiKeyScope = "admin",
 ): Promise<QuoteWorkbenchConfig> {
@@ -512,6 +738,57 @@ export function updateQuoteWorkbenchConfig(
 ): Promise<QuoteWorkbenchConfig> {
   return request<QuoteWorkbenchConfig>("/quote-configs/workbench", {
     method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getZonePricingConfig(): Promise<ZonePricingConfig> {
+  return request<ZonePricingConfig>("/quote-configs/zone-pricing");
+}
+
+export function updateZonePricingConfig(
+  payload: ZonePricingConfig,
+): Promise<ZonePricingConfig> {
+  return request<ZonePricingConfig>("/quote-configs/zone-pricing", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function listZonePriceMatrix(params: {
+  origin?: string;
+  zone?: number | "";
+  billing_pallets?: number | "";
+  limit?: number;
+  offset?: number;
+} = {}): Promise<ZonePriceMatrixListResponse> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      search.set(key, String(value));
+    }
+  });
+  const query = search.toString();
+  return request<ZonePriceMatrixListResponse>(
+    `/quote-configs/zone-price-matrix${query ? `?${query}` : ""}`,
+  );
+}
+
+export function upsertZonePriceMatrix(
+  payload: ZonePriceMatrixPayload,
+): Promise<ZonePriceMatrixRecord> {
+  return request<ZonePriceMatrixRecord>("/quote-configs/zone-price-matrix", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateZonePriceMatrix(
+  recordId: number,
+  payload: Partial<Pick<ZonePriceMatrixPayload, "base_price_usd" | "source" | "last_updated">>,
+): Promise<ZonePriceMatrixRecord> {
+  return request<ZonePriceMatrixRecord>(`/quote-configs/zone-price-matrix/${recordId}`, {
+    method: "PATCH",
     body: JSON.stringify(payload),
   });
 }
@@ -577,7 +854,7 @@ export function listWeComBots(
 }
 
 export function createWeComBot(
-  payload: Required<Pick<WeComBotConfigPayload, "name" | "webhook_url">> & WeComBotConfigPayload,
+  payload: Required<Pick<WeComBotConfigPayload, "name">> & WeComBotConfigPayload,
 ): Promise<WeComBotConfigPublic> {
   return request<WeComBotConfigPublic>("/wecom/bots", {
     method: "POST",

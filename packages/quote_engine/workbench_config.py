@@ -176,8 +176,14 @@ class QuoteWorkbenchConfig(BaseModel):
             "manual_required": "需要人工确认",
             "zone_not_found": "未命中邮编分区",
             "zone_price_not_found": "未命中 Zone 价格矩阵",
+            "city_zone_fallback": "按城市/省份匹配 Zone",
+            "city_zone_prefix_family_fallback": "按同邮编族缩小城市 Zone",
+            "postal_family_fallback": "按同省邮编族模糊匹配 Zone",
+            "nearest_postal_prefix_fallback": "采用最近邮编前缀锚点",
+            "learned_quote_reused": "复用人工确认学习记录",
+            "learned_from_manual_task": "来源为已处理人工任务",
             "billing_pallets_manual_required": "计费托数需人工确认",
-            "stale_origin_overridden": "BC 始发仓已按规则覆盖为 Calgary",
+            "stale_origin_overridden": "始发仓已按省份规则覆盖",
             "split_record_conflict": "邮编存在拆分记录冲突",
         }
     )

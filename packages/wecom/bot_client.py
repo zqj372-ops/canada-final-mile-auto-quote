@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from time import perf_counter
 from typing import Any
 
@@ -77,6 +78,86 @@ class WeComBotClient:
             )
 
 
+class WeComAIBotLongConnectionClient:
+    def __init__(self, bot_id: str, secret: str, *, timeout_seconds: int = 8):
+        self.bot_id = bot_id
+        self.secret = secret
+        self.timeout_seconds = timeout_seconds
+
+    def test_connection(self) -> WeComSendResult:
+        started = perf_counter()
+        try:
+            asyncio.run(self._test_connection_async())
+            latency_ms = int((perf_counter() - started) * 1000)
+            return WeComSendResult(success=True, latency_ms=latency_ms, status_code=None)
+        except Exception as exc:
+            latency_ms = int((perf_counter() - started) * 1000)
+            return WeComSendResult(
+                success=False,
+                error=_safe_aibot_error(exc),
+                latency_ms=latency_ms,
+                status_code=None,
+            )
+
+    async def _test_connection_async(self) -> None:
+        try:
+            from aibot import WSClient, WSClientOptions
+        except ImportError as exc:
+            raise RuntimeError("WeComAIBotSDKNotInstalled") from exc
+
+        authenticated = asyncio.Event()
+        errors: list[Exception] = []
+        client = WSClient(
+            WSClientOptions(
+                bot_id=self.bot_id,
+                secret=self.secret,
+                max_reconnect_attempts=0,
+                request_timeout=self.timeout_seconds * 1000,
+                logger=_SilentAIBotLogger(),
+            )
+        )
+        client.on("authenticated", lambda: authenticated.set())
+        client.on("error", lambda error: errors.append(error))
+        try:
+            await asyncio.wait_for(client.connect(), timeout=self.timeout_seconds)
+            await asyncio.wait_for(authenticated.wait(), timeout=self.timeout_seconds)
+        except asyncio.TimeoutError as exc:
+            if errors:
+                raise RuntimeError(
+                    f"WeComAIBotConnectionError:{self._safe_sdk_error(errors[-1])}"
+                ) from exc
+            raise RuntimeError("WeComAIBotAuthTimeout") from exc
+        finally:
+            client.disconnect()
+
+    def _safe_sdk_error(self, exc: Exception) -> str:
+        message = str(exc)
+        if self.bot_id:
+            message = message.replace(self.bot_id, "<bot_id>")
+        if self.secret:
+            message = message.replace(self.secret, "<secret>")
+        compact = " ".join(message.split())
+        if not compact:
+            return exc.__class__.__name__
+        if len(compact) > 120:
+            compact = compact[:120] + "..."
+        return f"{exc.__class__.__name__}:{compact}"
+
+
+class _SilentAIBotLogger:
+    def debug(self, *_args: object) -> None:
+        return None
+
+    def info(self, *_args: object) -> None:
+        return None
+
+    def warn(self, *_args: object) -> None:
+        return None
+
+    def error(self, *_args: object) -> None:
+        return None
+
+
 def truncate_markdown(content: str) -> str:
     if len(content) <= MAX_MARKDOWN_LENGTH:
         return content
@@ -89,3 +170,10 @@ def _safe_error(text: str) -> str:
     if len(compact) > 240:
         return compact[:240] + "..."
     return compact
+
+
+def _safe_aibot_error(exc: Exception) -> str:
+    message = str(exc)
+    if message.startswith("WeComAIBot"):
+        return message
+    return exc.__class__.__name__

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
 from uuid import uuid4
@@ -10,6 +10,7 @@ from packages.address_normalizer import normalize_city, normalize_postal_code, n
 
 class ZoneQuoteSourceType(StrEnum):
     ZONE_MATRIX = "zone_matrix"
+    LEARNED_MANUAL_QUOTE = "learned_manual_quote"
     MANUAL_REQUIRED = "manual_required"
 
 
@@ -76,6 +77,7 @@ class ZoneQuoteResult(BaseModel):
     origin: str | None = None
     zone: int | None = None
     billing_pallets: int | None = None
+    pallet_breakdown: dict[str, int] = Field(default_factory=dict)
     base_price_usd: Decimal | None = None
     fuel_usd: Decimal | None = None
     accessorials: dict[str, Decimal] = Field(default_factory=dict)
@@ -83,6 +85,9 @@ class ZoneQuoteResult(BaseModel):
     risk_tags: list[str] = Field(default_factory=list)
     manual_review_required: bool
     matched_rule: str
+    matched_by: str | None = None
+    candidate_count: int = 0
+    match_trace: dict[str, object] = Field(default_factory=dict)
     sales_note: str | None = None
     internal_note: str | None = None
 
@@ -92,6 +97,33 @@ class PostalCodeCityRecord:
     postal_code: str
     preferred_city: str
     province: str | None = None
+    fsa: str | None = None
+    official_city: str | None = None
+    municipality: str | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
+    source: str | None = None
+
+
+@dataclass(frozen=True)
+class PostalZoneOverrideRecord:
+    postal_code: str
+    postal_prefix: str
+    province: str
+    canonical_city: str | None
+    origin: str
+    zone: int
+    confidence: int = 100
+    source: str | None = None
+    note: str | None = None
+
+
+@dataclass(frozen=True)
+class CityAliasRecord:
+    province: str
+    alias_city: str
+    canonical_city: str
+    alias_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +133,9 @@ class ZoneLookupRuleRecord:
     province: str
     origin: str
     zone: int
+    canonical_city: str | None = None
+    priority: int = 100
+    active: bool = True
     match_level: str | None = None
     note: str | None = None
 
@@ -124,4 +159,6 @@ class ZoneLookupDecision:
     zone: int | None = None
     confidence: int = 0
     risk_tags: tuple[str, ...] = ()
-
+    matched_by: str | None = None
+    candidate_count: int = 0
+    match_trace: dict[str, object] = field(default_factory=dict)

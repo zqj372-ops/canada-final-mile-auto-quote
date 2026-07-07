@@ -55,6 +55,12 @@ class PostalCodeCityLookup(Base):
     postal_code: Mapped[str] = mapped_column(String(10), primary_key=True)
     preferred_city: Mapped[str] = mapped_column(String(100), nullable=False)
     province: Mapped[str | None] = mapped_column(String(10), index=True)
+    fsa: Mapped[str | None] = mapped_column(String(3), index=True)
+    official_city: Mapped[str | None] = mapped_column(String(100))
+    municipality: Mapped[str | None] = mapped_column(String(100))
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    source: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -77,7 +83,64 @@ class ZoneLookupRule(Base):
     province: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     origin: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     zone: Mapped[int] = mapped_column(Integer, nullable=False)
+    canonical_city: Mapped[str | None] = mapped_column(String(100), index=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100", index=True)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1", index=True)
     match_level: Mapped[str | None] = mapped_column(String(32))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class PostalZoneOverride(Base):
+    __tablename__ = "postal_zone_overrides"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    postal_code: Mapped[str] = mapped_column(String(10), nullable=False, unique=True, index=True)
+    postal_prefix: Mapped[str] = mapped_column(String(3), nullable=False, index=True)
+    province: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    canonical_city: Mapped[str | None] = mapped_column(String(100), index=True)
+    origin: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    zone: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1", index=True)
+    source: Mapped[str | None] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class CityAlias(Base):
+    __tablename__ = "city_aliases"
+    __table_args__ = (
+        UniqueConstraint("province", "alias_city", name="uq_city_aliases_province_alias"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    province: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    alias_city: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    canonical_city: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    alias_type: Mapped[str | None] = mapped_column(String(32))
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1", index=True)
+    source: Mapped[str | None] = mapped_column(Text)
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -222,7 +285,9 @@ class WeComBotConfig(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
-    webhook_url_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    webhook_url_encrypted: Mapped[str | None] = mapped_column(Text)
+    bot_id: Mapped[str | None] = mapped_column(String(128))
+    secret_encrypted: Mapped[str | None] = mapped_column(Text)
     bot_type: Mapped[str] = mapped_column(String(32), nullable=False, default="group_webhook")
     purpose: Mapped[str] = mapped_column(String(32), nullable=False, default="general", index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
@@ -252,6 +317,81 @@ class SearchApiConfig(Base):
     purpose: Mapped[str] = mapped_column(String(32), nullable=False, default="general", index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class LearnedQuoteRule(Base):
+    __tablename__ = "learned_quote_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_task_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    quote_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    postal_code: Mapped[str | None] = mapped_column(String(10), index=True)
+    postal_prefix: Mapped[str | None] = mapped_column(String(3), index=True)
+    city: Mapped[str | None] = mapped_column(String(100), index=True)
+    province: Mapped[str | None] = mapped_column(String(10), index=True)
+    origin: Mapped[str | None] = mapped_column(String(32), index=True)
+    zone: Mapped[int | None] = mapped_column(Integer, index=True)
+    billing_pallets: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    total_price_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    base_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", index=True)
+    usage_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class HermesLearningCandidate(Base):
+    __tablename__ = "hermes_learning_candidates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_task_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    quote_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    candidate_type: Mapped[str] = mapped_column(String(64), nullable=False, default="learned_exception_price", index=True)
+    scope: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    postal_code: Mapped[str | None] = mapped_column(String(10), index=True)
+    postal_prefix: Mapped[str | None] = mapped_column(String(3), index=True)
+    city: Mapped[str | None] = mapped_column(String(100), index=True)
+    province: Mapped[str | None] = mapped_column(String(10), index=True)
+    origin: Mapped[str | None] = mapped_column(String(32), index=True)
+    zone: Mapped[int | None] = mapped_column(Integer, index=True)
+    billing_pallets: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    resolved_total_price_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    resolved_base_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    support_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending_review", index=True)
+    duplicate_key: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    proposal_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    evidence_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    risk_tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    review_note: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[str | None] = mapped_column(String(128))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    promoted_rule_id: Mapped[int | None] = mapped_column(Integer, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

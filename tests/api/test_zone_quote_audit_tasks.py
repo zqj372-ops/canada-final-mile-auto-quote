@@ -120,6 +120,30 @@ def test_manual_required_creates_manual_quote_task() -> None:
     assert tasks[0]["reason"] == quote["matched_rule"]
 
 
+def test_error_summary_reports_manual_required_and_recent_tasks() -> None:
+    client = build_client(include_zone_rule=False)
+
+    quote = client.post("/quotes/zone-calculate", json=payload()).json()
+    response = client.get("/quotes/error-summary")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["window_label"] == "近24小时"
+    assert body["total_audit_count"] == 1
+    assert body["daily_total_audit_count"] == 1
+    assert body["manual_required_audit_count"] == 1
+    assert body["daily_manual_required_audit_count"] == 1
+    assert body["pending_manual_task_count"] == 1
+    assert body["daily_pending_manual_task_count"] == 1
+    assert body["daily_risk_tag_counts"] == [{"tag": "zone_not_found", "label": "未命中邮编分区", "count": 1}]
+    assert body["risk_tag_counts"] == [{"tag": "zone_not_found", "label": "未命中邮编分区", "count": 1}]
+    assert body["recent_manual_tasks"][0]["quote_id"] == quote["quote_id"]
+    assert body["recent_manual_tasks"][0]["reason_zh"]
+    assert body["recent_manual_tasks"][0]["risk_tag_labels"] == ["未命中邮编分区"]
+    assert body["recent_manual_audits"][0]["quote_id"] == quote["quote_id"]
+    assert body["recent_manual_audits"][0]["risk_tag_labels"] == ["未命中邮编分区"]
+
+
 def test_successful_quote_does_not_create_manual_quote_task() -> None:
     client = build_client()
 
@@ -152,6 +176,72 @@ def test_manual_quote_task_can_be_patched() -> None:
     assert body["resolved_note"] == "Confirmed with supplier."
 
 
+def test_resolved_manual_task_creates_candidate_and_reuses_only_after_approval() -> None:
+    client = build_client(include_zone_rule=False)
+
+    first_quote = client.post("/quotes/zone-calculate", json=payload()).json()
+    task = client.get("/quotes/manual-tasks").json()[0]
+    patch_response = client.patch(
+        f"/quotes/manual-tasks/{task['id']}",
+        json={
+            "status": "resolved",
+            "resolved_price_usd": "250.00",
+            "resolved_note": "Confirmed one-off price; allow future same FSA/city/pallet reuse.",
+        },
+    )
+    second_quote_before_approval = client.post("/quotes/zone-calculate", json=payload()).json()
+    candidates = client.get("/quotes/learning-candidates").json()
+    approval = client.post(
+        f"/quotes/learning-candidates/{candidates[0]['id']}/approve",
+        json={"review_note": "Approved by operator after supplier confirmation."},
+    )
+    second_quote_after_approval = client.post("/quotes/zone-calculate", json=payload()).json()
+    tasks = client.get("/quotes/manual-tasks").json()
+    summary = client.get("/quotes/error-summary").json()
+
+    assert first_quote["source_type"] == "manual_required"
+    assert patch_response.status_code == 200
+    assert second_quote_before_approval["source_type"] == "manual_required"
+    assert candidates[0]["status"] == "pending_review"
+    assert candidates[0]["resolved_total_price_usd"] == "250.00"
+    assert approval.status_code == 200
+    assert approval.json()["candidate"]["status"] == "approved"
+    assert second_quote_after_approval["source_type"] == "learned_manual_quote"
+    assert second_quote_after_approval["manual_review_required"] is False
+    assert second_quote_after_approval["total_price_usd"] == "250.00"
+    assert second_quote_after_approval["billing_pallets"] == 3
+    assert "learned_quote_reused" in second_quote_after_approval["risk_tags"]
+    assert len(tasks) == 2
+    assert summary["active_learning_rule_count"] == 1
+    assert summary["pending_learning_candidate_count"] == 0
+    assert summary["approved_learning_candidate_count"] == 1
+    assert summary["learning_rule_usage_count"] == 1
+    assert summary["recent_learning_rules"][0]["postal_prefix"] == "L4K"
+    assert summary["recent_learning_candidates"][0]["postal_prefix"] == "L4K"
+
+
+def test_resolved_manual_task_learning_respects_billing_pallets() -> None:
+    client = build_client(include_zone_rule=False)
+
+    client.post("/quotes/zone-calculate", json=payload())
+    task = client.get("/quotes/manual-tasks").json()[0]
+    client.patch(
+        f"/quotes/manual-tasks/{task['id']}",
+        json={"status": "resolved", "resolved_price_usd": "250.00"},
+    )
+    candidate = client.get("/quotes/learning-candidates").json()[0]
+    client.post(f"/quotes/learning-candidates/{candidate['id']}/approve", json={})
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=payload(cbm=1, weight_kg=100, requires_appointment=False),
+    )
+
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["billing_pallets"] == 1
+
+
 def test_zone_calculate_uses_database_pricing_config() -> None:
     client = build_client(
         config_rows=[
@@ -165,4 +255,3 @@ def test_zone_calculate_uses_database_pricing_config() -> None:
     assert quote["fuel_usd"] == "12.00"
     assert quote["accessorials"]["appointment_fee_usd"] == "20.00"
     assert quote["total_price_usd"] == "152.00"
-

@@ -1,5 +1,6 @@
 import type { QuoteWorkbenchConfig } from "../api/client";
 import type { ParsedQuoteInput } from "../utils/quoteParser";
+import AddressMapPreview from "./AddressMapPreview";
 import ChineseFieldLabel from "./ChineseFieldLabel";
 
 export default function ParsedAddressCard({
@@ -30,7 +31,7 @@ export default function ParsedAddressCard({
   return (
     <section className="ai-glass-panel min-w-0 p-5">
       <h2 className="text-xl font-semibold text-white">地址信息</h2>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+      <div className="mt-3 grid grid-cols-2 gap-2">
         <Metric label="目的地地址" value={address.address_line || "待确认"} wide />
         <Metric label="目的地城市" value={address.city || "待确认"} />
         <Metric label="目的地省份" value={address.province_name ? `${address.province_name} / ${address.province_code}` : "待确认"} />
@@ -39,7 +40,9 @@ export default function ParsedAddressCard({
         <Metric label="偏远等级" value="待查询" />
       </div>
 
-      <div className="mt-5 grid gap-4 md:grid-cols-2">
+      <AddressMapPreview parsed={parsed} />
+
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
         <label>
           <ChineseFieldLabel label="包装类型" hint="后台配置选项，影响计费托数规则。" />
           <select
@@ -71,9 +74,9 @@ export default function ParsedAddressCard({
         </label>
       </div>
 
-      <fieldset className="mt-5 rounded-md border border-white/10 p-3">
+      <fieldset className="mt-3 rounded-md border border-white/10 p-3">
         <legend className="px-1 text-sm font-semibold text-slate-100">附加服务确认</legend>
-        <div className="mt-2 grid gap-3 sm:grid-cols-3">
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
           {config.service_options.map((option) => (
             <label
               key={option.value}
@@ -115,7 +118,7 @@ function Metric({
   wide?: boolean;
 }) {
   return (
-    <div className={`rounded-md border border-white/10 bg-white/[0.04] p-3 ${wide ? "sm:col-span-2" : ""}`}>
+    <div className={`rounded-md border border-white/10 bg-white/[0.04] p-2.5 ${wide ? "col-span-2" : ""}`}>
       <dt className="text-xs font-medium text-slate-400">{label}</dt>
       <dd className="mt-1 break-words text-sm font-semibold text-white">{value}</dd>
     </div>

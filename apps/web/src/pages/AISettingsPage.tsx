@@ -183,6 +183,10 @@ export default function AISettingsPage() {
     event.preventDefault();
     setError(null);
     setNotice(null);
+    if (!form.enabled && form.is_default) {
+      setError("禁用的 AI 配置不能设为默认，请先启用或取消默认。");
+      return;
+    }
     setIsSaving(true);
     try {
       const payload = buildPayload(form);
@@ -207,6 +211,9 @@ export default function AISettingsPage() {
   }
 
   async function handleDelete(config: AIModelConfigPublic) {
+    if (!window.confirm(`确认删除 AI 配置「${config.name}」吗？`)) {
+      return;
+    }
     setError(null);
     setNotice(null);
     try {
@@ -224,6 +231,10 @@ export default function AISettingsPage() {
   async function handleSetDefault(config: AIModelConfigPublic) {
     setError(null);
     setNotice(null);
+    if (!config.enabled) {
+      setError("禁用的 AI 配置不能设为默认，请先启用后再设置。");
+      return;
+    }
     try {
       await setDefaultAIConfig(config.id);
       setNotice(`${config.name} 已设为默认`);
@@ -270,7 +281,16 @@ export default function AISettingsPage() {
   }
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => {
+      const next = { ...current, [key]: value };
+      if (key === "enabled" && value === false) {
+        next.is_default = false;
+      }
+      if (key === "is_default" && value === true && !next.enabled) {
+        return current;
+      }
+      return next;
+    });
   }
 
   function updateImport<K extends keyof ImportState>(key: K, value: ImportState[K]) {
@@ -283,6 +303,7 @@ export default function AISettingsPage() {
       ...current,
       provider,
       base_url: preset?.base_url ?? "",
+      api_key: "",
       model_name: "",
     }));
     setDiscoveredModels([]);
@@ -489,7 +510,7 @@ export default function AISettingsPage() {
             </label>
             <div className="grid gap-3 sm:grid-cols-2">
               <CheckboxField label="enabled" checked={form.enabled} onChange={(value) => update("enabled", value)} />
-              <CheckboxField label="is_default" checked={form.is_default} onChange={(value) => update("is_default", value)} />
+              <CheckboxField label="is_default" checked={form.is_default} onChange={(value) => update("is_default", value)} disabled={!form.enabled} />
             </div>
             <button className="btn-primary" type="submit" disabled={isSaving}>
               {isSaving ? "保存中..." : form.id ? "保存配置" : "新增配置"}
@@ -551,7 +572,7 @@ export default function AISettingsPage() {
                         className="btn-secondary"
                         type="button"
                         onClick={() => void handleSetDefault(config)}
-                        disabled={config.is_default}
+                        disabled={config.is_default || !config.enabled}
                       >
                         设为默认
                       </button>
@@ -637,10 +658,12 @@ function CheckboxField({
   label,
   checked,
   onChange,
+  disabled = false,
 }: {
   label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
+  disabled?: boolean;
 }) {
   return (
     <label className="flex min-h-11 items-center gap-3 rounded-md border border-slate-200 px-3 py-2">
@@ -648,6 +671,7 @@ function CheckboxField({
         className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
         type="checkbox"
         checked={checked}
+        disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
       />
       <span className="text-sm font-medium text-slate-800">{label}</span>

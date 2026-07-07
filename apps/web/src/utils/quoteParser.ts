@@ -2,6 +2,7 @@ import type { ProvinceAlias, QuoteWorkbenchConfig } from "../api/client";
 
 export interface ParsedCargoItem {
   id: number;
+  quantity: number;
   length_cm: number;
   width_cm: number;
   height_cm: number;
@@ -38,25 +39,33 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const cargoRegex = buildCargoRegex(config);
-  const spaceCargoRegex = buildSpaceCargoRegex(config);
   const cargoItems: ParsedCargoItem[] = [];
   const addressLines: string[] = [];
+  const allowNumericTable = hasDimensionWeightTable(rawInput);
 
   for (const line of lines) {
-    const match = line.match(cargoRegex) ?? line.match(spaceCargoRegex);
-    if (match) {
-      const [, length, width, height, weight] = match;
-      const item = toCargoItem(cargoItems.length + 1, length, width, height, weight);
+    const item = parseCargoLine(line, cargoItems.length + 1, config, allowNumericTable);
+    if (item) {
       cargoItems.push(item);
     } else {
       addressLines.push(line);
     }
   }
 
+  const aggregate = parseAggregateTotals(rawInput);
+  if (cargoItems.length === 1 && aggregate.piece_count && aggregate.piece_count > cargoItems[0].quantity) {
+    cargoItems[0] = { ...cargoItems[0], quantity: aggregate.piece_count };
+  }
   const address = parseAddress(addressLines, config);
-  const totalCbm = round3(cargoItems.reduce((sum, item) => sum + item.cbm, 0));
-  const totalWeight = round1(cargoItems.reduce((sum, item) => sum + item.weight_kg, 0));
+  const cargoCbm = round3(cargoItems.reduce((sum, item) => sum + item.cbm * item.quantity, 0));
+  const cargoWeight = round1(cargoItems.reduce((sum, item) => sum + item.weight_kg * item.quantity, 0));
+  const cargoPieceCount = cargoItems.reduce((sum, item) => sum + item.quantity, 0);
+  const totalCbm = aggregate.cbm || cargoCbm || 0;
+  const totalWeight = aggregate.weight_kg || cargoWeight || 0;
+  const pieceCount =
+    aggregate.piece_count && aggregate.piece_count >= cargoPieceCount
+      ? aggregate.piece_count
+      : cargoPieceCount || aggregate.piece_count || 0;
   const density = totalCbm > 0 ? round1(totalWeight / totalCbm) : null;
   const maxItem = cargoItems.reduce<ParsedCargoItem | null>(
     (current, item) => (!current || item.cbm > current.cbm ? item : current),
@@ -69,9 +78,12 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
     ? Math.max(...cargoItems.map((item) => item.weight_kg))
     : null;
 
-  const missingFields = buildMissingFields(cargoItems, address);
+  const missingFields = buildMissingFields({ totalCbm, totalWeight, pieceCount, address });
   const riskHints = buildRiskHints({
     cargoItems,
+    pieceCount,
+    totalCbm,
+    totalWeight,
     address,
     density,
     longestSide,
@@ -81,7 +93,7 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
 
   return {
     cargo_items: cargoItems,
-    piece_count: cargoItems.length,
+    piece_count: pieceCount,
     total_cbm: totalCbm,
     total_weight_kg: totalWeight,
     density_kg_per_cbm: density,
@@ -97,25 +109,216 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
   };
 }
 
+function parseAggregateTotals(rawInput: string): {
+  piece_count: number | null;
+  cbm: number | null;
+  weight_kg: number | null;
+} {
+  const pieceCount = findExplicitPieceCount(rawInput);
+  const cbmMatch = rawInput.match(/(\d+(?:\.\d+)?)\s*(?:cbm|m3|m³|方|立方)/i);
+  const explicitWeightMatch =
+    rawInput.match(/(?:合计|总计|总重量|总重|重量合计|一共|共)[^\n\r]{0,32}?(\d+(?:\.\d+)?)\s*(kg|kgs|公斤|千克|lb|lbs|pounds?|磅)/i) ??
+    rawInput.match(/(\d+(?:\.\d+)?)\s*(kg|kgs|公斤|千克|lb|lbs|pounds?|磅)\s*(?:total|合计|总重)/i);
+  const weightMatches = Array.from(
+    rawInput.matchAll(/(\d+(?:\.\d+)?)\s*(kg|kgs|公斤|千克|lb|lbs|pounds?|磅)/gi),
+  );
+  const weightMatch = weightMatches.length ? weightMatches[weightMatches.length - 1] : undefined;
+  const hasDimensionSpecs = /\d+(?:\.\d+)?\s*(?:mm|cm|厘米|m|米|inches|inch|in|"|ft|feet|英尺|英寸)?\s*(?:\*|x|X|×|by)\s*\d+(?:\.\d+)?/i.test(rawInput);
+  const fallbackAggregateWeight = !hasDimensionSpecs && pieceCount && cbmMatch ? weightMatch : undefined;
+  const selectedWeight = explicitWeightMatch ?? fallbackAggregateWeight;
+  return {
+    piece_count: pieceCount,
+    cbm: cbmMatch ? round3(Number(cbmMatch[1])) : null,
+    weight_kg: selectedWeight ? round1(toKg(Number(selectedWeight[1]), selectedWeight[2])) : null,
+  };
+}
+
+function findExplicitPieceCount(rawInput: string): number | null {
+  const patterns = [
+    /(?:数量|箱数|件数|总件数|总箱数)\s*[:：]?\s*(?:共|合计|总计)?\s*(\d{1,5})\s*(?:箱|件|pcs?|pieces?|ctns?|cartons?|boxes)/i,
+    /(?:一共|共|合计|总计|总件数|件数)[^\d\n\r]{0,8}(\d{1,5})\s*(?:箱|件|pcs?|pieces?|ctns?|cartons?|boxes)/i,
+    /(\d{1,5})\s*(?:箱|件|pcs?|pieces?|ctns?|cartons?|boxes)/i,
+  ];
+  for (const pattern of patterns) {
+    const match = rawInput.match(pattern);
+    if (match) {
+      return Number(match[1]);
+    }
+  }
+  return null;
+}
+
+function toKg(value: number, unit: string): number {
+  const normalized = unit.toLowerCase();
+  if (["lb", "lbs", "pound", "pounds", "磅"].includes(normalized)) {
+    return value * 0.45359237;
+  }
+  return value;
+}
+
 function toCargoItem(
   id: number,
-  length: string,
-  width: string,
-  height: string,
-  weight: string,
+  lengthCm: number,
+  widthCm: number,
+  heightCm: number,
+  weightKg: number,
+  quantity: number,
 ): ParsedCargoItem {
-  const lengthCm = Number(length);
-  const widthCm = Number(width);
-  const heightCm = Number(height);
-  const weightKg = Number(weight);
   return {
     id,
+    quantity,
     length_cm: lengthCm,
     width_cm: widthCm,
     height_cm: heightCm,
     weight_kg: weightKg,
     cbm: (lengthCm * widthCm * heightCm) / 1_000_000,
   };
+}
+
+function parseCargoLine(
+  line: string,
+  id: number,
+  config: QuoteWorkbenchConfig,
+  allowNumericTable = false,
+): ParsedCargoItem | null {
+  const normalized = normalizeCargoText(line);
+  const decimal = "(\\d+(?:\\.\\d+)?)";
+  const separators = config.parser.dimension_separators.map(escapeRegex).join("|");
+  const dimensionUnits = "mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸";
+  const units = config.parser.weight_units.map(escapeRegex).join("|");
+  const dimensionRegex = new RegExp(
+    `${decimal}\\s*(${dimensionUnits})?\\s*(?:${separators})\\s*${decimal}\\s*(${dimensionUnits})?\\s*(?:${separators})\\s*${decimal}\\s*(${dimensionUnits})?`,
+    "i",
+  );
+  const dimensionMatch = normalized.match(dimensionRegex);
+  if (!dimensionMatch || dimensionMatch.index === undefined) {
+    return parseSpaceSeparatedCargoLine(normalized, id, config) ??
+      (allowNumericTable ? parseNumericTableCargoLine(normalized, id) : null);
+  }
+
+  const weightRegex = new RegExp(`${decimal}\\s*(${units})`, "i");
+  const afterDimension = normalized.slice(dimensionMatch.index + dimensionMatch[0].length);
+  const weightMatch = afterDimension.match(weightRegex) ?? normalized.match(weightRegex);
+  if (!weightMatch || weightMatch.index === undefined) {
+    return null;
+  }
+
+  const dimensionFallbackUnit = dimensionMatch[6] || dimensionMatch[4] || dimensionMatch[2] ||
+    inferDimensionUnit([Number(dimensionMatch[1]), Number(dimensionMatch[3]), Number(dimensionMatch[5])]) ||
+    "cm";
+  const weightStart = (afterDimension.match(weightRegex) ? dimensionMatch.index + dimensionMatch[0].length : 0) + weightMatch.index;
+  const weightEnd = weightStart + weightMatch[0].length;
+  const quantity = findQuantity(normalized, dimensionMatch.index, weightEnd);
+  return toCargoItem(
+    id,
+    toCm(Number(dimensionMatch[1]), dimensionMatch[2] || dimensionFallbackUnit),
+    toCm(Number(dimensionMatch[3]), dimensionMatch[4] || dimensionFallbackUnit),
+    toCm(Number(dimensionMatch[5]), dimensionMatch[6] || dimensionFallbackUnit),
+    toKg(Number(weightMatch[1]), weightMatch[2]),
+    quantity,
+  );
+}
+
+function hasDimensionWeightTable(rawInput: string): boolean {
+  const normalized = normalizeCargoText(rawInput).toLowerCase();
+  return /(?:长|length)\s*(?:宽|width)\s*(?:高|height)[\s\S]*?(?:重量|weight|kg)/i.test(normalized) ||
+    /\bl\b\s*\bw\b\s*\bh\b[\s\S]*?(?:weight|kg)/i.test(normalized) ||
+    /长[\s\S]{0,20}宽[\s\S]{0,20}高[\s\S]{0,40}(?:围长|重量)/i.test(normalized);
+}
+
+function parseNumericTableCargoLine(line: string, id: number): ParsedCargoItem | null {
+  if (/(?:电话|phone|tel|邮编|postal|zip|地址|address|国家|country|城市|city|州省|province)/i.test(line)) {
+    return null;
+  }
+  const numbers = Array.from(line.matchAll(/(?<![A-Za-z])\d+(?:\.\d+)?(?![A-Za-z])/g)).map((match) => Number(match[0]));
+  if (numbers.length < 4) {
+    return null;
+  }
+  const unit = inferDimensionUnit(numbers.slice(0, 3));
+  const lengthCm = toCm(numbers[0], unit);
+  const widthCm = toCm(numbers[1], unit);
+  const heightCm = toCm(numbers[2], unit);
+  const weightKg = numbers.length >= 5 ? numbers[numbers.length - 1] : numbers[3];
+  if ([lengthCm, widthCm, heightCm, weightKg].some((value) => !Number.isFinite(value) || value <= 0)) {
+    return null;
+  }
+  return toCargoItem(id, lengthCm, widthCm, heightCm, weightKg, 1);
+}
+
+function parseSpaceSeparatedCargoLine(line: string, id: number, config: QuoteWorkbenchConfig): ParsedCargoItem | null {
+  if (!config.parser.allow_space_dimension_separator) {
+    return null;
+  }
+  const decimal = "(\\d+(?:\\.\\d+)?)";
+  const units = config.parser.weight_units.map(escapeRegex).join("|");
+  const dimensionUnits = "mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸";
+  const pattern = new RegExp(
+    `(?:^|[^\\d.])${decimal}\\s+${decimal}\\s+${decimal}(?:\\s*(${dimensionUnits}))?\\s+${decimal}\\s*(${units})`,
+    "i",
+  );
+  const match = line.match(pattern);
+  if (!match || match.index === undefined) {
+    return null;
+  }
+  const start = match.index;
+  const end = start + match[0].length;
+  return toCargoItem(
+    id,
+    toCm(Number(match[1]), match[4] || inferDimensionUnit([Number(match[1]), Number(match[2]), Number(match[3])]) || "cm"),
+    toCm(Number(match[2]), match[4] || inferDimensionUnit([Number(match[1]), Number(match[2]), Number(match[3])]) || "cm"),
+    toCm(Number(match[3]), match[4] || inferDimensionUnit([Number(match[1]), Number(match[2]), Number(match[3])]) || "cm"),
+    toKg(Number(match[5]), match[6]),
+    findQuantity(line, start, end),
+  );
+}
+
+function findQuantity(line: string, dimensionStart: number, itemEnd: number): number {
+  const prefix = line.slice(Math.max(0, dimensionStart - 32), dimensionStart);
+  const suffix = line.slice(itemEnd, itemEnd + 48);
+  const quantityUnit = "(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托|pallets?)";
+  const prefixMatch = prefix.match(new RegExp(`(\\d{1,5})\\s*${quantityUnit}\\s*$`, "i"));
+  if (prefixMatch) {
+    return Math.max(1, Number(prefixMatch[1]));
+  }
+  const suffixTokenFirst = suffix.match(new RegExp(`(?:x|×|qty|quantity|数量|件数|${quantityUnit})\\s*(\\d{1,5})\\b`, "i"));
+  if (suffixTokenFirst) {
+    return Math.max(1, Number(suffixTokenFirst[1]));
+  }
+  const suffixNumberFirst = suffix.match(new RegExp(`(\\d{1,5})\\s*${quantityUnit}`, "i"));
+  if (suffixNumberFirst) {
+    return Math.max(1, Number(suffixNumberFirst[1]));
+  }
+  return 1;
+}
+
+function toCm(value: number, unit: string | undefined): number {
+  const normalized = (unit || "cm").toLowerCase();
+  if (normalized === "mm") {
+    return value / 10;
+  }
+  if (["m", "米"].includes(normalized)) {
+    return value * 100;
+  }
+  if (["in", "inch", "inches", "\"", "英寸"].includes(normalized)) {
+    return value * 2.54;
+  }
+  if (["ft", "feet", "英尺"].includes(normalized)) {
+    return value * 30.48;
+  }
+  return value;
+}
+
+function inferDimensionUnit(values: number[]): string | undefined {
+  return values.some((value) => Number.isFinite(value) && value > 500) ? "mm" : undefined;
+}
+
+function normalizeCargoText(value: string): string {
+  return value
+    .replace(/＊/g, "*")
+    .replace(/Ｘ/g, "x")
+    .replace(/公斤/g, "kg")
+    .replace(/千克/g, "kg")
+    .replace(/厘米/g, "cm");
 }
 
 function buildCargoRegex(config: QuoteWorkbenchConfig): RegExp {
@@ -145,7 +348,20 @@ function parseAddress(lines: string[], config: QuoteWorkbenchConfig): ParsedAddr
   let province: ProvinceAlias | null = null;
   const cleanedLines: string[] = [];
 
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    const labeled = parseLabeledAddressLine(rawLine, config);
+    if (labeled.skip) {
+      postalCode = postalCode ?? labeled.postal_code;
+      addressLine = addressLine ?? labeled.address_line;
+      city = city ?? labeled.city;
+      province = province ?? labeled.province;
+      continue;
+    }
+
+    const line = cleanAddressLine(rawLine);
+    if (!line || isNonAddressLine(line)) {
+      continue;
+    }
     const postalMatch = postalRegex ? line.match(postalRegex) : null;
     if (!postalCode && postalMatch?.[0]) {
       postalCode = normalizeCanadianPostalCode(postalMatch[0]);
@@ -162,6 +378,13 @@ function parseAddress(lines: string[], config: QuoteWorkbenchConfig): ParsedAddr
     const foundProvince = findProvince(line, config.provinces);
     if (foundProvince) {
       province = province ?? foundProvince.province;
+      const parsedLine = parseAddressLineWithProvince(line, foundProvince.alias, config.parser.country_aliases);
+      if (parsedLine.address_line && !addressLine) {
+        addressLine = parsedLine.address_line;
+      }
+      if (parsedLine.city && !city) {
+        city = parsedLine.city;
+      }
       const cityCandidate = removeKnownAddressTokens(
         line,
         foundProvince.alias,
@@ -187,14 +410,203 @@ function parseAddress(lines: string[], config: QuoteWorkbenchConfig): ParsedAddr
     addressLine = cleanedLines.find((line) => /^\d+/.test(line)) ?? null;
   }
 
+  const inferredProvince = province ?? inferProvinceFromPostalCode(postalCode, config.provinces);
+
   return {
     address_line: addressLine,
     city,
-    province_code: province?.code ?? null,
-    province_name: province?.name ?? null,
+    province_code: inferredProvince?.code ?? null,
+    province_name: inferredProvince?.name ?? null,
     postal_code: postalCode,
     country: config.parser.default_country,
   };
+}
+
+function parseLabeledAddressLine(
+  rawLine: string,
+  config: QuoteWorkbenchConfig,
+): {
+  skip: boolean;
+  address_line: string | null;
+  city: string | null;
+  province: ProvinceAlias | null;
+  postal_code: string | null;
+} {
+  const empty = {
+    skip: false,
+    address_line: null,
+    city: null,
+    province: null,
+    postal_code: null,
+  };
+  const match = rawLine.match(/^\s*([^:：]{1,24})\s*[:：]\s*(.+?)\s*$/);
+  if (!match) {
+    return empty;
+  }
+  const label = match[1].trim().toLowerCase();
+  const value = match[2].trim();
+  if (!value) {
+    return { ...empty, skip: true };
+  }
+  if (/(?:收货人|联系人|电话|手机|国家|country|consignee|contact|phone|tel)$/.test(label)) {
+    return { ...empty, skip: true };
+  }
+  if (/(?:地址\s*\d*|address\s*(?:line)?\s*\d*)$/.test(label)) {
+    const postalMatch = value.match(safeRegex(config.parser.postal_code_pattern, "i") ?? /a^/);
+    const foundProvince = findProvince(value, config.provinces);
+    const parsedLine = foundProvince
+      ? parseAddressLineWithProvince(value, foundProvince.alias, config.parser.country_aliases)
+      : { address_line: null, city: null };
+    return {
+      ...empty,
+      skip: true,
+      address_line: parsedLine.address_line ?? stripAddressQualifiers(value, config) ?? value,
+      city: parsedLine.city,
+      province: foundProvince?.province ?? null,
+      postal_code: postalMatch?.[0] ? normalizeCanadianPostalCode(postalMatch[0]) : null,
+    };
+  }
+  if (/(?:城市|city)$/.test(label)) {
+    return { ...empty, skip: true, city: value };
+  }
+  if (/(?:州省|省份|province|state)$/.test(label)) {
+    return { ...empty, skip: true, province: findProvince(value, config.provinces)?.province ?? null };
+  }
+  if (/(?:邮编|postal|zip)/.test(label)) {
+    const postalMatch = value.match(safeRegex(config.parser.postal_code_pattern, "i") ?? /a^/);
+    return { ...empty, skip: true, postal_code: postalMatch?.[0] ? normalizeCanadianPostalCode(postalMatch[0]) : null };
+  }
+  return empty;
+}
+
+function inferProvinceFromPostalCode(
+  postalCode: string | null,
+  provinces: ProvinceAlias[],
+): ProvinceAlias | null {
+  if (!postalCode) {
+    return null;
+  }
+  const map: Record<string, string> = {
+    A: "NL",
+    B: "NS",
+    C: "PE",
+    E: "NB",
+    G: "QC",
+    H: "QC",
+    J: "QC",
+    K: "ON",
+    L: "ON",
+    M: "ON",
+    N: "ON",
+    P: "ON",
+    R: "MB",
+    S: "SK",
+    T: "AB",
+    V: "BC",
+    X: "NT",
+    Y: "YT",
+  };
+  const provinceCode = map[postalCode.trim().toUpperCase()[0]];
+  return provinces.find((province) => province.code === provinceCode) ?? null;
+}
+
+function cleanAddressLine(line: string): string {
+  return line
+    .trim()
+    .replace(/^加拿大地址\s*[:：]\s*/i, "")
+    .replace(/^(?:地址\s*\d*|收件地址|目的地|派送地址|delivery\s*address|address\s*(?:line)?\s*\d*)\s*[:：]\s*/i, "")
+    .replace(/^\d{1,5}\s*(?:件|箱|pcs?|pieces?|ctns?|cartons?|boxes)\s*(?:货|货物|cargo|goods)?[.。,\s，]*/i, "")
+    .trim();
+}
+
+function stripAddressQualifiers(value: string, config: QuoteWorkbenchConfig): string | null {
+  let output = value;
+  const postalRegex = safeRegex(config.parser.postal_code_pattern, "ig");
+  if (postalRegex) {
+    output = output.replace(postalRegex, " ");
+  }
+  for (const province of config.provinces) {
+    for (const alias of province.aliases) {
+      if (containsToken(output, alias)) {
+        output = output.replace(new RegExp(`(^|[^a-z0-9])${escapeRegex(alias)}([^a-z0-9]|$)`, "ig"), " ");
+      }
+    }
+  }
+  output = removeCountryAliases(output, config.parser.country_aliases);
+  const parts = output
+    .split(/[,，]/)
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  output = (parts.length > 1 ? joinUniqueParts(parts) : output)
+    .replace(/[,，]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return output || null;
+}
+
+function isNonAddressLine(line: string): boolean {
+  if (/[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d/.test(line) || looksLikeStreetAddress(line)) {
+    return false;
+  }
+  if (/^[a-zA-Z_][a-zA-Z0-9_]*\s*=/.test(line)) {
+    return true;
+  }
+  if (/(?:hscode|hs\s*code|品名|产品|商品|cbm|m3|m³|kg|kgs|公斤|千克|箱|件|报价|谢谢|麻烦)/i.test(line)) {
+    return true;
+  }
+  return !/[A-Za-z]/.test(line);
+}
+
+function looksLikeStreetAddress(line: string): boolean {
+  if (/(?:cbm|m3|m³|kg|kgs|公斤|千克|箱|件)/i.test(line)) {
+    return false;
+  }
+  if (/\d+(?:\.\d+)?\s*(?:mm|cm|厘米|m|米|inches|inch|in|"|ft|feet|英尺|英寸)?\s*(?:\*|x|X|×|by)\s*\d+(?:\.\d+)?/i.test(line)) {
+    return false;
+  }
+  return /\b\d{1,6}\b/.test(line) && /[A-Za-z]/.test(line);
+}
+
+function parseAddressLineWithProvince(
+  line: string,
+  provinceAlias: string,
+  countryAliases: string[],
+): { address_line: string | null; city: string | null } {
+  const beforeProvince = line.split(new RegExp(escapeRegex(provinceAlias), "i"))[0] ?? line;
+  const withoutCountry = removeCountryAliases(beforeProvince, countryAliases).replace(/\s+/g, " ").trim();
+  const parts = withoutCountry
+    .split(/[,，]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length >= 2) {
+    if (looksLikeStreetAddress(parts[parts.length - 1])) {
+      return {
+        address_line: joinUniqueParts(parts),
+        city: null,
+      };
+    }
+    return {
+      address_line: parts.slice(0, -1).join(", "),
+      city: parts[parts.length - 1],
+    };
+  }
+  if (parts.length === 1 && !/^\d+/.test(parts[0])) {
+    return { address_line: null, city: parts[0] };
+  }
+  return { address_line: parts[0] ?? null, city: null };
+}
+
+function joinUniqueParts(parts: string[]): string {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const part of parts) {
+    const key = part.trim().toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(part);
+    }
+  }
+  return unique.join(", ");
 }
 
 function findProvince(
@@ -219,11 +631,17 @@ function removeKnownAddressTokens(
 ): string | null {
   let output = line;
   output = output.replace(new RegExp(escapeRegex(provinceAlias), "i"), " ");
+  output = removeCountryAliases(output, countryAliases);
+  output = output.replace(/[,，]+/g, " ").replace(/\s+/g, " ").trim();
+  return output || null;
+}
+
+function removeCountryAliases(line: string, countryAliases: string[]): string {
+  let output = line;
   for (const countryAlias of countryAliases) {
     output = output.replace(new RegExp(escapeRegex(countryAlias), "ig"), " ");
   }
-  output = output.replace(/[,，]+/g, " ").replace(/\s+/g, " ").trim();
-  return output || null;
+  return output;
 }
 
 function containsCountryAlias(line: string, aliases: string[]): boolean {
@@ -246,10 +664,26 @@ function normalizeCanadianPostalCode(value: string): string {
   return compact.length === 6 ? `${compact.slice(0, 3)} ${compact.slice(3)}` : value.toUpperCase();
 }
 
-function buildMissingFields(cargoItems: ParsedCargoItem[], address: ParsedAddress): string[] {
+function buildMissingFields({
+  totalCbm,
+  totalWeight,
+  pieceCount,
+  address,
+}: {
+  totalCbm: number;
+  totalWeight: number;
+  pieceCount: number;
+  address: ParsedAddress;
+}): string[] {
   const missing: string[] = [];
-  if (!cargoItems.length) {
-    missing.push("货物尺寸重量");
+  if (!pieceCount) {
+    missing.push("件数");
+  }
+  if (!totalCbm) {
+    missing.push("总体积 CBM");
+  }
+  if (!totalWeight) {
+    missing.push("总重量 KG");
   }
   if (!address.postal_code) {
     missing.push("目的地邮编");
@@ -268,6 +702,9 @@ function buildMissingFields(cargoItems: ParsedCargoItem[], address: ParsedAddres
 
 function buildRiskHints({
   cargoItems,
+  pieceCount,
+  totalCbm,
+  totalWeight,
   address,
   density,
   longestSide,
@@ -275,6 +712,9 @@ function buildRiskHints({
   config,
 }: {
   cargoItems: ParsedCargoItem[];
+  pieceCount: number;
+  totalCbm: number;
+  totalWeight: number;
   address: ParsedAddress;
   density: number | null;
   longestSide: number | null;
@@ -282,7 +722,7 @@ function buildRiskHints({
   config: QuoteWorkbenchConfig;
 }): string[] {
   const risks: string[] = [];
-  if (!cargoItems.length) {
+  if (!cargoItems.length && (!pieceCount || !totalCbm || !totalWeight)) {
     return risks;
   }
   if (density !== null && density >= config.risks.dense_density_kg_per_cbm) {
@@ -296,6 +736,9 @@ function buildRiskHints({
   }
   if (heaviestPiece !== null && heaviestPiece >= config.risks.heavy_single_piece_kg) {
     risks.push("存在较重单件，请确认卸货设备、dock 或尾板需求。");
+  }
+  if (!cargoItems.length) {
+    risks.push("客户提供的是汇总体积/重量，最大单件尺寸待确认。");
   }
   risks.push("请确认是否有叉车 / dock / 尾板需求。");
   risks.push("请确认派送地址是否商业地址；如为住宅，可能产生住宅、尾板、预约等附加费。");

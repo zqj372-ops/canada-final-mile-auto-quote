@@ -17,6 +17,8 @@ AI_QUOTE_WRITE_ROLES = ("admin", "sales")
 MANUAL_TASK_READ_ROLES = ("admin", "operator", "viewer")
 MANUAL_TASK_WRITE_ROLES = ("admin", "operator")
 AUDIT_READ_ROLES = ("admin", "operator", "viewer")
+LEARNING_READ_ROLES = ("admin", "operator", "viewer")
+LEARNING_WRITE_ROLES = ("admin", "operator")
 
 
 class CurrentActor(BaseModel):

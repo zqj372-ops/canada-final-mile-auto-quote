@@ -26,6 +26,34 @@ textarea {
     @apply min-h-dvh bg-slate-100;
   }
 
+  .admin-shell {
+    @apply grid min-h-dvh bg-slate-100 lg:grid-cols-[18rem_minmax(0,1fr)];
+  }
+
+  .admin-sidebar {
+    @apply border-b border-slate-800 bg-slate-950 text-slate-100 lg:sticky lg:top-0 lg:h-dvh lg:overflow-y-auto lg:border-b-0 lg:border-r;
+  }
+
+  .admin-topbar {
+    @apply sticky top-0 z-20 flex min-h-20 flex-col gap-4 border-b border-slate-200 bg-white/95 px-4 py-4 backdrop-blur sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8;
+  }
+
+  .admin-nav-link {
+    @apply grid min-h-11 grid-cols-[1fr_auto] items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-300;
+  }
+
+  .admin-nav-link span:last-child {
+    @apply text-xs font-medium text-slate-500;
+  }
+
+  .admin-nav-link-active {
+    @apply bg-blue-600 text-white shadow-sm;
+  }
+
+  .admin-nav-link-active span:last-child {
+    @apply text-blue-100;
+  }
+
   .panel {
     @apply rounded-lg border border-slate-200 bg-white shadow-sm;
   }
@@ -96,5 +124,967 @@ textarea {
 
   .ai-secondary-button {
     @apply inline-flex min-h-11 items-center justify-center rounded-md border border-white/15 bg-white/[0.06] px-4 py-2 text-sm font-semibold text-slate-100 transition hover:border-cyan-200/50 hover:bg-cyan-300/10 focus:outline-none focus:ring-2 focus:ring-cyan-200 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:text-slate-500;
+  }
+}
+
+.ai-quote-compact .ai-glass-panel {
+  padding: 0.875rem !important;
+}
+
+.ai-quote-compact .ai-textarea {
+  min-height: 18rem !important;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.ai-quote-compact .ai-input,
+.ai-quote-compact .ai-select {
+  min-height: 2.35rem;
+  font-size: 0.95rem;
+}
+
+.ai-quote-compact .ai-primary-button,
+.ai-quote-compact .ai-secondary-button,
+.ai-theme-toggle {
+  min-height: 2.5rem;
+  padding: 0.45rem 0.75rem;
+}
+
+.ai-quote-compact h2 {
+  font-size: 1.03rem;
+  line-height: 1.35;
+}
+
+.ai-quote-compact dt,
+.ai-quote-compact .metric-label {
+  font-size: 0.7rem;
+}
+
+.ai-quote-compact dd,
+.ai-quote-compact .metric-value {
+  margin-top: 0.125rem;
+}
+
+.ai-quote-compact table {
+  font-size: 0.82rem;
+}
+
+.ai-quote-compact th,
+.ai-quote-compact td {
+  padding: 0.45rem 0.55rem !important;
+}
+
+@media (min-width: 1024px) {
+  .ai-quote-compact {
+    font-size: 0.92rem;
+  }
+
+  .ai-quote-compact .ai-glass-panel {
+    padding: 0.72rem !important;
+  }
+
+  .ai-quote-compact .ai-textarea {
+    min-height: 15.5rem !important;
+    font-size: 0.88rem;
+    line-height: 1.42;
+  }
+
+  .ai-quote-compact .ai-input,
+  .ai-quote-compact .ai-select {
+    min-height: 2.12rem;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.86rem;
+  }
+
+  .ai-quote-compact .ai-primary-button,
+  .ai-quote-compact .ai-secondary-button,
+  .ai-quote-compact .ai-theme-toggle {
+    min-height: 2.15rem;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.8rem;
+  }
+
+  .ai-quote-compact h1 {
+    font-size: 1.45rem;
+    line-height: 1.18;
+  }
+
+  .ai-quote-compact h2 {
+    font-size: 0.98rem;
+    line-height: 1.26;
+  }
+
+  .ai-quote-compact h3 {
+    font-size: 0.86rem;
+    line-height: 1.3;
+  }
+
+  .ai-quote-compact dt,
+  .ai-quote-compact .metric-label {
+    font-size: 0.66rem;
+  }
+
+  .ai-quote-compact dd,
+  .ai-quote-compact .metric-value {
+    font-size: 0.86rem;
+  }
+
+  .ai-quote-compact table {
+    font-size: 0.76rem;
+  }
+
+  .ai-quote-compact th,
+  .ai-quote-compact td {
+    padding: 0.34rem 0.45rem !important;
+  }
+}
+
+.ai-theme-toggle {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.375rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgb(226, 232, 240);
+  font-size: 0.875rem;
+  font-weight: 700;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.ai-theme-toggle:hover {
+  border-color: rgba(103, 232, 249, 0.55);
+  background: rgba(103, 232, 249, 0.12);
+}
+
+.ai-theme-light {
+  color-scheme: light;
+  background:
+    linear-gradient(rgba(15, 23, 42, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.045) 1px, transparent 1px),
+    #f8fafc !important;
+  background-size: 28px 28px, 28px 28px, auto !important;
+}
+
+.ai-theme-light .ai-glass-panel {
+  border-color: rgba(15, 23, 42, 0.16) !important;
+  background: rgba(255, 255, 255, 0.94) !important;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08) !important;
+  backdrop-filter: blur(10px);
+}
+
+.ai-theme-light .ai-textarea,
+.ai-theme-light .ai-input,
+.ai-theme-light .ai-select {
+  border-color: rgba(15, 23, 42, 0.18) !important;
+  background: #ffffff !important;
+  color: #020617 !important;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+
+.ai-theme-light .ai-textarea::placeholder,
+.ai-theme-light .ai-input::placeholder {
+  color: #64748b !important;
+}
+
+.ai-theme-light .ai-primary-button {
+  border-color: #020617 !important;
+  background: #020617 !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.ai-theme-light .ai-primary-button:hover {
+  background: #1e293b !important;
+}
+
+.ai-theme-light .ai-secondary-button,
+.ai-theme-light .ai-theme-toggle {
+  border-color: rgba(15, 23, 42, 0.22) !important;
+  background: #ffffff !important;
+  color: #020617 !important;
+  box-shadow: none !important;
+}
+
+.ai-theme-light .ai-secondary-button:hover,
+.ai-theme-light .ai-theme-toggle:hover {
+  border-color: #020617 !important;
+  background: #f1f5f9 !important;
+}
+
+.ai-theme-light .text-white,
+.ai-theme-light .text-slate-50,
+.ai-theme-light .text-slate-100,
+.ai-theme-light .text-slate-200,
+.ai-theme-light .text-cyan-50,
+.ai-theme-light .text-cyan-100,
+.ai-theme-light .text-cyan-200,
+.ai-theme-light .text-emerald-100,
+.ai-theme-light .text-emerald-200,
+.ai-theme-light .text-violet-200 {
+  color: #0f172a !important;
+}
+
+.ai-theme-light .text-slate-300,
+.ai-theme-light .text-slate-400,
+.ai-theme-light .text-cyan-100\/70,
+.ai-theme-light .text-cyan-100\/80 {
+  color: #475569 !important;
+}
+
+.ai-theme-light .text-amber-50,
+.ai-theme-light .text-amber-100 {
+  color: #78350f !important;
+}
+
+.ai-theme-light .text-red-50,
+.ai-theme-light .text-red-100 {
+  color: #991b1b !important;
+}
+
+.ai-theme-light .text-emerald-50,
+.ai-theme-light .text-emerald-100,
+.ai-theme-light .text-emerald-200 {
+  color: #065f46 !important;
+}
+
+.ai-theme-light .text-cyan-50,
+.ai-theme-light .text-cyan-100,
+.ai-theme-light .text-cyan-200 {
+  color: #155e75 !important;
+}
+
+.ai-theme-light .bg-white\/10,
+.ai-theme-light .bg-white\/\[0\.03\],
+.ai-theme-light .bg-white\/\[0\.04\],
+.ai-theme-light .bg-white\/\[0\.05\],
+.ai-theme-light .bg-white\/\[0\.06\],
+.ai-theme-light .bg-cyan-300\/10,
+.ai-theme-light .bg-emerald-300\/10 {
+  background-color: rgba(15, 23, 42, 0.04) !important;
+}
+
+.ai-theme-light .bg-amber-300\/10 {
+  background-color: #fffbeb !important;
+}
+
+.ai-theme-light .bg-red-500\/10 {
+  background-color: #fef2f2 !important;
+}
+
+.ai-theme-light .bg-cyan-300\/10 {
+  background-color: #ecfeff !important;
+}
+
+.ai-theme-light .bg-emerald-300\/10 {
+  background-color: #ecfdf5 !important;
+}
+
+.ai-theme-light .border-white\/10,
+.ai-theme-light .border-white\/15,
+.ai-theme-light .border-cyan-200\/20,
+.ai-theme-light .border-cyan-300\/40,
+.ai-theme-light .border-cyan-300\/50,
+.ai-theme-light .border-emerald-300\/50 {
+  border-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+.ai-theme-light .border-amber-200\/20,
+.ai-theme-light .border-amber-300\/40,
+.ai-theme-light .border-amber-300\/50,
+.ai-theme-light .border-amber-300\/60 {
+  border-color: #f59e0b !important;
+}
+
+.ai-theme-light .border-red-300\/40,
+.ai-theme-light .border-red-300\/50,
+.ai-theme-light .border-red-300\/60 {
+  border-color: #fca5a5 !important;
+}
+
+.ai-theme-light .border-cyan-300\/40,
+.ai-theme-light .border-cyan-300\/50 {
+  border-color: #67e8f9 !important;
+}
+
+.ai-theme-light .border-emerald-300\/50 {
+  border-color: #6ee7b7 !important;
+}
+
+.ai-theme-light .bg-slate-950,
+.ai-theme-light .bg-slate-950\/40,
+.ai-theme-light .bg-slate-950\/70,
+.ai-theme-light .bg-slate-900,
+.ai-theme-light .bg-slate-900\/70 {
+  background-color: #ffffff !important;
+}
+
+.ai-theme-light .ai-access-key,
+.ai-theme-light .ai-format-details {
+  background: rgba(15, 23, 42, 0.035) !important;
+  border-color: rgba(15, 23, 42, 0.14) !important;
+}
+
+@media (max-width: 640px) {
+  .ai-quote-compact .ai-glass-panel {
+    padding: 0.625rem !important;
+  }
+
+  .ai-quote-compact .ai-textarea {
+    min-height: 12rem !important;
+    font-size: 0.9rem;
+  }
+
+  .ai-quote-compact .ai-primary-button,
+  .ai-quote-compact .ai-secondary-button,
+  .ai-theme-toggle {
+    min-height: 2.35rem;
+    font-size: 0.82rem;
+  }
+
+  .ai-quote-compact table {
+    min-width: 460px !important;
+    font-size: 0.78rem;
+  }
+}
+
+.logistics-site {
+  color-scheme: light;
+  position: relative;
+  overflow-x: clip;
+  color: #0f172a;
+  background:
+    radial-gradient(circle at 8% 8%, rgba(56, 189, 248, 0.24), transparent 24rem),
+    radial-gradient(circle at 86% 10%, rgba(125, 211, 252, 0.24), transparent 26rem),
+    radial-gradient(circle at 70% 72%, rgba(168, 85, 247, 0.12), transparent 24rem),
+    linear-gradient(135deg, #f8fbff 0%, #eef8ff 42%, #ffffff 100%);
+}
+
+.logistics-site::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(15, 23, 42, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+    radial-gradient(circle, rgba(14, 165, 233, 0.14) 1px, transparent 1.5px);
+  background-position: center;
+  background-size: 42px 42px, 42px 42px, 26px 26px;
+  mask-image: linear-gradient(to bottom, black, rgba(0, 0, 0, 0.45), transparent);
+}
+
+.logistics-site::after {
+  content: "";
+  position: fixed;
+  left: -12vw;
+  top: 20rem;
+  width: 124vw;
+  height: 10rem;
+  pointer-events: none;
+  transform: rotate(-8deg);
+  background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.11), rgba(255, 255, 255, 0.7), transparent);
+  filter: blur(18px);
+}
+
+.logistics-nav {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  min-height: 4.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(248, 250, 252, 0.72);
+  padding: 0 1rem;
+  backdrop-filter: blur(22px);
+}
+
+.logistics-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: #0f172a;
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.logistics-brand span {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 36% 30%, #ffffff, transparent 32%),
+    linear-gradient(135deg, #38bdf8, #0f172a);
+  box-shadow: 0 0 28px rgba(56, 189, 248, 0.42);
+}
+
+.logistics-nav nav {
+  display: none;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.logistics-nav nav a {
+  min-height: 2.5rem;
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  color: #475569;
+  font-size: 0.88rem;
+  font-weight: 700;
+  transition: background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+
+.logistics-nav nav a:hover {
+  background: rgba(255, 255, 255, 0.78);
+  color: #0369a1;
+  box-shadow: 0 10px 30px rgba(14, 165, 233, 0.12);
+}
+
+.logistics-hero,
+.logistics-quote-section,
+.logistics-section {
+  position: relative;
+  z-index: 1;
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 3.5rem 1rem;
+}
+
+.logistics-hero {
+  display: grid;
+  min-height: min(760px, calc(100dvh - 4.75rem));
+  align-items: center;
+  gap: 2rem;
+  padding-top: 2.5rem;
+}
+
+.logistics-hero-copy h1 {
+  max-width: 58rem;
+  color: #08111f;
+  font-size: clamp(3rem, 8vw, 6.9rem);
+  font-weight: 850;
+  letter-spacing: 0;
+  line-height: 0.95;
+}
+
+.logistics-hero-subtitle {
+  margin-top: 1.25rem;
+  max-width: 42rem;
+  color: #475569;
+  font-size: clamp(1rem, 1.5vw, 1.28rem);
+  line-height: 1.8;
+}
+
+.logistics-hero-actions,
+.logistics-trust-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.logistics-hero-actions {
+  margin-top: 2rem;
+}
+
+.logistics-trust-row {
+  margin-top: 1.5rem;
+  color: #64748b;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.logistics-trust-row span {
+  border-left: 1px solid rgba(14, 165, 233, 0.34);
+  padding-left: 0.75rem;
+}
+
+.logistics-glow-button {
+  position: relative;
+  display: inline-flex;
+  min-height: 3rem;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(14, 165, 233, 0.34);
+  padding: 0.8rem 1.15rem;
+  font-weight: 850;
+  transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.logistics-glow-button:hover {
+  transform: translateY(-1px);
+}
+
+.logistics-glow-button-primary {
+  background: linear-gradient(135deg, #0f172a, #075985 52%, #0891b2);
+  color: #ffffff;
+  box-shadow: 0 18px 46px rgba(8, 145, 178, 0.26), inset 0 1px 0 rgba(255, 255, 255, 0.26);
+}
+
+.logistics-glow-button-primary:hover {
+  box-shadow: 0 22px 60px rgba(8, 145, 178, 0.34), 0 0 0 5px rgba(14, 165, 233, 0.1);
+}
+
+.logistics-glow-button-secondary {
+  background: rgba(255, 255, 255, 0.72);
+  color: #0f172a;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+}
+
+.logistics-glow-button-secondary:hover {
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgba(14, 165, 233, 0.16);
+}
+
+.logistics-glass-card {
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 1.15rem;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.52));
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(24px);
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.logistics-glass-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(103, 232, 249, 0.78);
+  box-shadow: 0 30px 96px rgba(8, 145, 178, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.logistics-hero-preview {
+  position: relative;
+  min-height: 34rem;
+  overflow: hidden;
+  padding: 1.25rem;
+}
+
+.logistics-route-map {
+  position: relative;
+  height: 12.5rem;
+  border-radius: 0.9rem;
+  background:
+    linear-gradient(90deg, rgba(14, 165, 233, 0.16) 1px, transparent 1px),
+    linear-gradient(rgba(14, 165, 233, 0.12) 1px, transparent 1px),
+    radial-gradient(circle at 22% 60%, rgba(14, 165, 233, 0.2), transparent 7rem),
+    rgba(248, 250, 252, 0.8);
+  background-size: 30px 30px, 30px 30px, auto, auto;
+}
+
+.logistics-route-map::before {
+  content: "";
+  position: absolute;
+  inset: 50% 11% auto 11%;
+  height: 2px;
+  background: linear-gradient(90deg, #38bdf8, #22c55e, #8b5cf6);
+  box-shadow: 0 0 22px rgba(56, 189, 248, 0.48);
+}
+
+.node {
+  position: absolute;
+  display: inline-flex;
+  min-width: 3rem;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(14, 165, 233, 0.26);
+  background: rgba(255, 255, 255, 0.82);
+  color: #0369a1;
+  font-size: 0.72rem;
+  font-weight: 850;
+  box-shadow: 0 12px 32px rgba(14, 165, 233, 0.16);
+}
+
+.node-port { left: 7%; top: 48%; }
+.node-wh { left: 34%; top: 30%; }
+.node-truck { right: 31%; top: 55%; }
+.node-pin { right: 8%; top: 39%; }
+
+.logistics-preview-header,
+.logistics-preview-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.logistics-preview-header {
+  margin-top: 1rem;
+}
+
+.logistics-preview-header p,
+.logistics-preview-total span {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.logistics-preview-header h2 {
+  margin-top: 0.2rem;
+  font-size: 1.35rem;
+  font-weight: 850;
+}
+
+.logistics-preview-header > span {
+  border-radius: 999px;
+  background: #ecfeff;
+  padding: 0.45rem 0.7rem;
+  color: #0e7490;
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.logistics-preview-grid {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.logistics-preview-grid div,
+.logistics-stat-card,
+.logistics-feature-card,
+.logistics-history-card {
+  padding: 1rem;
+}
+
+.logistics-preview-grid dt,
+.logistics-stat-card p {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.logistics-preview-grid dd {
+  margin-top: 0.25rem;
+  font-size: 1rem;
+  font-weight: 850;
+  color: #0f172a;
+}
+
+.logistics-scanline {
+  position: relative;
+  margin-top: 1.2rem;
+  height: 0.55rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.11);
+}
+
+.logistics-scanline span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, #38bdf8, transparent);
+  animation: logistics-scan 1.6s ease-in-out infinite;
+}
+
+.logistics-preview-total {
+  margin-top: 1.15rem;
+  border-radius: 0.9rem;
+  background: linear-gradient(135deg, rgba(236, 254, 255, 0.92), rgba(255, 255, 255, 0.82));
+  padding: 1rem;
+}
+
+.logistics-preview-total strong {
+  color: #0369a1;
+  font-size: 1rem;
+}
+
+.logistics-section-heading {
+  margin: 0 auto 1.5rem;
+  max-width: 52rem;
+  text-align: center;
+}
+
+.logistics-section-heading p {
+  color: #0891b2;
+  font-size: 0.78rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.logistics-section-heading h2 {
+  margin-top: 0.45rem;
+  color: #0f172a;
+  font-size: clamp(2rem, 4vw, 3.65rem);
+  font-weight: 850;
+  line-height: 1.04;
+}
+
+.logistics-section-heading span {
+  display: block;
+  margin-top: 0.8rem;
+  color: #475569;
+  font-size: 1rem;
+  line-height: 1.8;
+}
+
+.logistics-quote-section {
+  padding-top: 4rem;
+}
+
+.logistics-quote-section-direct {
+  padding-top: 1rem;
+  padding-bottom: 1.25rem;
+}
+
+.logistics-quote-section-direct .logistics-section-heading {
+  margin-bottom: 0.75rem;
+}
+
+.logistics-quote-section-direct .logistics-section-heading h2 {
+  font-size: clamp(1.9rem, 3vw, 2.65rem);
+}
+
+.logistics-quote-section-direct .logistics-section-heading span {
+  margin-top: 0.4rem;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.logistics-workbench-toolbar {
+  margin: 0 auto 1rem;
+  display: flex;
+  max-width: 1680px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
+.logistics-status-pill,
+.logistics-alert {
+  border-radius: 0.8rem;
+  border: 1px solid rgba(14, 165, 233, 0.24);
+  padding: 0.7rem 0.95rem;
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+.logistics-status-ready {
+  background: rgba(236, 254, 255, 0.82);
+  color: #0e7490;
+}
+
+.logistics-status-warning,
+.logistics-alert-warning {
+  border-color: rgba(245, 158, 11, 0.34);
+  background: rgba(255, 251, 235, 0.82);
+  color: #92400e;
+}
+
+.logistics-alert-error {
+  margin-bottom: 1rem;
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(254, 242, 242, 0.9);
+  color: #991b1b;
+}
+
+.logistics-workbench-grid {
+  display: grid;
+  align-items: start;
+  gap: 0.9rem;
+}
+
+.logistics-site .ai-glass-panel {
+  border: 1px solid rgba(255, 255, 255, 0.82) !important;
+  border-radius: 1rem !important;
+  background: rgba(255, 255, 255, 0.78) !important;
+  box-shadow: 0 18px 54px rgba(15, 23, 42, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+  backdrop-filter: blur(22px);
+}
+
+.logistics-site .ai-textarea,
+.logistics-site .ai-input,
+.logistics-site .ai-select {
+  border-color: rgba(14, 165, 233, 0.22) !important;
+  border-radius: 0.8rem !important;
+  background: rgba(255, 255, 255, 0.86) !important;
+  color: #0f172a !important;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.05), 0 0 0 0 rgba(56, 189, 248, 0) !important;
+}
+
+.logistics-site .ai-textarea:focus,
+.logistics-site .ai-input:focus,
+.logistics-site .ai-select:focus {
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.16), 0 16px 42px rgba(8, 145, 178, 0.1) !important;
+}
+
+.logistics-site .ai-primary-button {
+  border-color: rgba(14, 165, 233, 0.48) !important;
+  border-radius: 0.75rem !important;
+  background: linear-gradient(135deg, #0f172a, #075985 55%, #0891b2) !important;
+  color: #ffffff !important;
+  box-shadow: 0 14px 36px rgba(8, 145, 178, 0.24) !important;
+}
+
+.logistics-site .ai-secondary-button,
+.logistics-site .ai-theme-toggle {
+  border-color: rgba(14, 165, 233, 0.2) !important;
+  border-radius: 0.75rem !important;
+  background: rgba(255, 255, 255, 0.78) !important;
+  color: #0f172a !important;
+}
+
+.logistics-feature-grid,
+.logistics-stats-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.logistics-feature-card h3 {
+  margin-top: 1rem;
+  color: #0f172a;
+  font-size: 1.12rem;
+  font-weight: 850;
+}
+
+.logistics-feature-card p {
+  margin-top: 0.55rem;
+  color: #475569;
+  font-size: 0.93rem;
+  line-height: 1.7;
+}
+
+.logistics-feature-icon {
+  display: inline-flex;
+  min-width: 2.65rem;
+  min-height: 2.65rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.8rem;
+  background: linear-gradient(135deg, #ecfeff, #ffffff);
+  color: #0891b2;
+  font-weight: 900;
+}
+
+.logistics-stat-card strong {
+  display: block;
+  margin-top: 0.45rem;
+  color: #0f172a;
+  font-size: clamp(1.6rem, 3vw, 2.6rem);
+  font-weight: 900;
+  line-height: 1;
+}
+
+.logistics-stat-card span {
+  display: inline-flex;
+  margin-top: 0.8rem;
+  border-radius: 999px;
+  background: #ecfeff;
+  padding: 0.35rem 0.62rem;
+  color: #0e7490;
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.logistics-history-card {
+  overflow-x: auto;
+}
+
+.logistics-history-head,
+.logistics-history-row {
+  display: grid;
+  min-width: 840px;
+  grid-template-columns: 1.1fr 1.4fr 1.2fr 1fr 0.8fr;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+}
+
+.logistics-history-head {
+  border-radius: 0.8rem;
+  background: rgba(241, 245, 249, 0.82);
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.logistics-history-row {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  color: #334155;
+  font-size: 0.92rem;
+}
+
+.logistics-history-row .mono {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.logistics-history-row strong {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.35rem 0.62rem;
+  font-size: 0.76rem;
+}
+
+.status-won,
+.status-quoted {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.status-risk,
+.status-pending {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.status-draft {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+@keyframes logistics-scan {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(280%); }
+}
+
+@media (min-width: 768px) {
+  .logistics-nav {
+    padding: 0 2rem;
+  }
+
+  .logistics-nav nav {
+    display: flex;
+  }
+
+  .logistics-feature-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .logistics-stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1180px) {
+  .logistics-hero {
+    grid-template-columns: minmax(0, 1fr) minmax(410px, 0.72fr);
+  }
+
+  .logistics-workbench-grid {
+    grid-template-columns: minmax(320px, 430px) minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logistics-scanline span,
+  .logistics-glass-card,
+  .logistics-glow-button,
+  .logistics-nav nav a {
+    animation: none !important;
+    transition: none !important;
   }
 }

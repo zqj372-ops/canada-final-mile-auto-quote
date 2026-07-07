@@ -8,6 +8,7 @@ ENV PYTHONUNBUFFERED=1
 COPY pyproject.toml README.md ./
 COPY apps ./apps
 COPY packages ./packages
+COPY reference ./reference
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY scripts ./scripts

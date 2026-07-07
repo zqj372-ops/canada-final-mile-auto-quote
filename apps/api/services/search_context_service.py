@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 class SearchEvidence(BaseModel):
     query: str
     answer: str | None = None
+    summary_zh: str | None = None
     results: list[SearchResultItem] = Field(default_factory=list)
     error: str | None = None
 
@@ -25,8 +26,7 @@ class QuoteSearchContext(BaseModel):
     address_research: SearchEvidence | None = None
     market_research: SearchEvidence | None = None
     note: str = (
-        "Search context is reference-only. It must not override deterministic quote_result amounts, "
-        "zone rules, or manual_required decisions."
+        "搜索结果仅用于确认地址情况，不能覆盖系统价格表、Zone 规则或 manual_required 结论。"
     )
 
 
@@ -51,20 +51,29 @@ def build_quote_search_context(
         )
     )
     address_query = _build_address_query(extraction)
-    market_query = _build_market_query(extraction)
 
     return QuoteSearchContext(
         provider=record.provider,
-        address_research=_search(client, address_query, max_results=3) if address_query else None,
-        market_research=_search(client, market_query, max_results=3),
+        address_research=_search(client, address_query, max_results=3, kind="address", extraction=extraction)
+        if address_query
+        else None,
+        market_research=None,
     )
 
 
-def _search(client: TavilySearchClient, query: str, *, max_results: int) -> SearchEvidence:
+def _search(
+    client: TavilySearchClient,
+    query: str,
+    *,
+    max_results: int,
+    kind: str,
+    extraction: AIExtractedQuoteDraft,
+) -> SearchEvidence:
     response = client.search(query, max_results=max_results)
     return SearchEvidence(
         query=query,
         answer=response.answer,
+        summary_zh=_build_summary_zh(kind=kind, extraction=extraction, result_count=len(response.results), error=response.error),
         results=response.results,
         error=response.error,
     )
@@ -76,15 +85,36 @@ def _build_address_query(extraction: AIExtractedQuoteDraft) -> str | None:
         extraction.city,
         extraction.province,
         extraction.postal_code,
-        "Canada address business residential rural delivery location",
+        "加拿大地址情况 查询 是否住宅 商业地址 小镇 偏远地区 卡车派送 卸货平台 请用中文总结",
     ]
     query = " ".join(part for part in parts if part)
     return query or None
 
 
-def _build_market_query(extraction: AIExtractedQuoteDraft) -> str:
-    location = " ".join(part for part in [extraction.city, extraction.province, extraction.postal_code] if part)
-    return (
-        f"Canada final mile LTL truck delivery {location} residential liftgate appointment remote area "
-        "market conditions reference"
-    ).strip()
+def _build_summary_zh(
+    *,
+    kind: str,
+    extraction: AIExtractedQuoteDraft,
+    result_count: int,
+    error: str | None,
+) -> str:
+    destination = "，".join(
+        part
+        for part in [
+            extraction.address_line,
+            extraction.city,
+            extraction.province,
+            extraction.postal_code,
+        ]
+        if part
+    )
+    destination = destination or "当前目的地"
+    if error:
+        return f"搜索验证失败：{error}。请人工确认 {destination} 的地址类型、偏远情况和派送限制。"
+    if kind == "address":
+        return (
+            f"地址情况：已搜索 {destination} 的公开资料，返回 {result_count} 条来源。"
+            "请重点确认该地址是否为住宅/私人地址、小镇或偏远地区，以及卡车是否可进入、是否有 dock/叉车、是否需要尾板或预约。"
+            "搜索结果只作为人工判断线索，不会改变系统报价金额。"
+        )
+    return f"已搜索 {destination} 的公开资料，返回 {result_count} 条来源。"
