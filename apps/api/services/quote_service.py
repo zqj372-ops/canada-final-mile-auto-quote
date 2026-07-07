@@ -68,19 +68,21 @@ def apply_learned_quote_if_available(
     payload: ZoneQuoteRequest,
     result: ZoneQuoteResult,
 ) -> ZoneQuoteResult:
-    if not result.manual_review_required:
-        return result
-
     try:
-        learned_rule = LearnedQuoteRuleRepository(db).find_match(payload, result)
+        repository = LearnedQuoteRuleRepository(db)
+        candidate = repository.find_best_candidate(payload, result)
     except Exception:
         logger.exception("Failed to query learned quote rules.", extra={"quote_id": result.quote_id})
         db.rollback()
         return result
 
-    if learned_rule is None:
+    if candidate is None:
         return result
-    return _result_from_learned_rule(payload, result, learned_rule)
+    learned_rule, match_score = candidate
+    if not _should_apply_learned_rule(result, learned_rule, match_score):
+        return result
+    repository.mark_used(learned_rule)
+    return _result_from_learned_rule(payload, result, learned_rule, match_score=match_score)
 
 
 def record_zone_quote_side_effects(
@@ -133,9 +135,16 @@ def _result_from_learned_rule(
     request: ZoneQuoteRequest,
     original: ZoneQuoteResult,
     rule: LearnedQuoteRule,
+    *,
+    match_score: int,
 ) -> ZoneQuoteResult:
+    is_corrective_override = not original.manual_review_required
     total_price = Decimal(rule.total_price_usd).quantize(Decimal("0.01"))
     base_price = Decimal(rule.base_price_usd or rule.total_price_usd).quantize(Decimal("0.01"))
+    risk_tags = ["learned_quote_reused", "learned_from_manual_task"]
+    if is_corrective_override:
+        risk_tags.extend(original.risk_tags)
+        risk_tags.append("hermes_corrective_override")
     result = ZoneQuoteResult(
         quote_id=original.quote_id,
         source_type=ZoneQuoteSourceType.LEARNED_MANUAL_QUOTE,
@@ -153,14 +162,16 @@ def _result_from_learned_rule(
         fuel_usd=Decimal("0.00"),
         accessorials={},
         total_price_usd=total_price,
-        risk_tags=["learned_quote_reused", "learned_from_manual_task"],
+        risk_tags=sorted(set(risk_tags)),
         manual_review_required=False,
         matched_rule=(
-            f"learned_manual_quote + task {rule.source_task_id} + {rule.scope} + "
-            f"{rule.postal_prefix or rule.postal_code or 'unknown'} + {rule.billing_pallets} pallets"
+            f"learned_manual_quote + task {rule.source_task_id} + score {match_score} + {rule.scope} + "
+            f"{rule.postal_code or rule.postal_prefix or 'unknown'} + {rule.billing_pallets} pallets"
         ),
         internal_note=(
-            "报价来自人工确认后的学习库，不是 AI 计算；建议运营定期复核并转入正式 Zone 价格表。"
+            "Hermes 已在报价时用已审核人工规则纠错；不是 AI 计算，也没有改写 Zone 价格表。"
+            if is_corrective_override
+            else "报价来自人工确认后的学习库，不是 AI 计算；建议运营定期复核并转入正式 Zone 价格表。"
         ),
     )
     result.sales_note = _build_learned_sales_note(request, result)
@@ -182,3 +193,34 @@ def _build_learned_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult
             "- 如地址类型、卸货条件、复重复尺变化，费用可能需要重新确认",
         ]
     )
+
+
+def _should_apply_learned_rule(result: ZoneQuoteResult, rule: LearnedQuoteRule, match_score: int) -> bool:
+    if result.manual_review_required:
+        return True
+    if match_score >= 100:
+        return True
+    if match_score >= 90 and _has_correctable_zone_risk(result) and _learned_rule_differs_from_zone_result(result, rule):
+        return True
+    return False
+
+
+def _has_correctable_zone_risk(result: ZoneQuoteResult) -> bool:
+    correctable_tags = {
+        "city_zone_fallback",
+        "city_zone_prefix_family_fallback",
+        "postal_family_fallback",
+        "nearest_postal_prefix_fallback",
+        "stale_origin_overridden",
+    }
+    return bool(correctable_tags.intersection(result.risk_tags))
+
+
+def _learned_rule_differs_from_zone_result(result: ZoneQuoteResult, rule: LearnedQuoteRule) -> bool:
+    if rule.origin and result.origin and rule.origin != result.origin:
+        return True
+    if rule.zone is not None and result.zone is not None and rule.zone != result.zone:
+        return True
+    if rule.total_price_usd is not None and result.total_price_usd is not None:
+        return Decimal(rule.total_price_usd).quantize(Decimal("0.01")) != Decimal(result.total_price_usd).quantize(Decimal("0.01"))
+    return False

@@ -9,6 +9,7 @@ RISK_TAG_LABELS: dict[str, str] = {
     "nearest_postal_prefix_fallback": "采用最近邮编前缀锚点",
     "learned_quote_reused": "复用人工确认学习记录",
     "learned_from_manual_task": "来源为已处理人工任务",
+    "hermes_corrective_override": "Hermes 已在报价时纠错",
     "billing_pallets_manual_required": "计费托数需人工确认",
     "missing_billable_pallet_basis": "缺少计费托数依据",
     "long_piece_count_suspicious": "超长件数量异常",

@@ -79,7 +79,7 @@ class LearnedQuoteRuleRepository:
         self.session.refresh(record)
         return record
 
-    def find_match(self, request: ZoneQuoteRequest, result: ZoneQuoteResult) -> LearnedQuoteRule | None:
+    def find_best_candidate(self, request: ZoneQuoteRequest, result: ZoneQuoteResult) -> tuple[LearnedQuoteRule, int] | None:
         billing_pallets = result.billing_pallets
         if billing_pallets is None:
             return None
@@ -106,7 +106,17 @@ class LearnedQuoteRuleRepository:
             return None
 
         scored.sort(key=lambda item: (item[0], item[1].confidence, item[1].updated_at or item[1].created_at), reverse=True)
-        record = scored[0][1]
+        return scored[0][1], scored[0][0]
+
+    def find_match(self, request: ZoneQuoteRequest, result: ZoneQuoteResult) -> LearnedQuoteRule | None:
+        candidate = self.find_best_candidate(request, result)
+        if candidate is None:
+            return None
+        record, _score = candidate
+        self.mark_used(record)
+        return record
+
+    def mark_used(self, record: LearnedQuoteRule) -> LearnedQuoteRule:
         record.usage_count += 1
         record.last_used_at = datetime.now(timezone.utc)
         self.session.commit()

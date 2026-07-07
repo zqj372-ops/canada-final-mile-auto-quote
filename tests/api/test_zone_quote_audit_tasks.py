@@ -6,12 +6,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from apps.api.db.models import Base, PostalCodeCityLookup, QuoteRuleConfig, ZoneLookupRule, ZonePriceMatrix
+from apps.api.db.models import Base, LearnedQuoteRule, PostalCodeCityLookup, QuoteRuleConfig, ZoneLookupRule, ZonePriceMatrix
 from apps.api.db.session import get_db
 from apps.api.main import app
 
 
-def build_client(*, include_zone_rule: bool = True, config_rows: list[dict[str, object]] | None = None) -> TestClient:
+def build_client(
+    *,
+    include_zone_rule: bool = True,
+    config_rows: list[dict[str, object]] | None = None,
+    learned_rows: list[dict[str, object]] | None = None,
+) -> TestClient:
     engine = create_engine(
         "sqlite+pysqlite://",
         connect_args={"check_same_thread": False},
@@ -46,6 +51,8 @@ def build_client(*, include_zone_rule: bool = True, config_rows: list[dict[str, 
         )
         for row in config_rows or []:
             session.add(QuoteRuleConfig(**row))
+        for row in learned_rows or []:
+            session.add(LearnedQuoteRule(**row))
         session.commit()
 
     def override_get_db() -> Generator[Session]:
@@ -240,6 +247,72 @@ def test_resolved_manual_task_learning_respects_billing_pallets() -> None:
     body = response.json()
     assert body["source_type"] == "manual_required"
     assert body["billing_pallets"] == 1
+
+
+def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:
+    client = build_client(
+        learned_rows=[
+            {
+                "source_task_id": 99,
+                "quote_id": "manual-99",
+                "scope": "postal_prefix_city",
+                "postal_code": "L4K 2N2",
+                "postal_prefix": "L4K",
+                "city": "CONCORD",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 2,
+                "billing_pallets": 3,
+                "total_price_usd": Decimal("250.00"),
+                "base_price_usd": Decimal("250.00"),
+                "confidence": 72,
+                "status": "active",
+                "usage_count": 0,
+                "note": "Approved exact postal correction.",
+            }
+        ]
+    )
+
+    response = client.post("/quotes/zone-calculate", json=payload())
+
+    body = response.json()
+    assert body["source_type"] == "learned_manual_quote"
+    assert body["manual_review_required"] is False
+    assert body["total_price_usd"] == "250.00"
+    assert body["matched_rule"].startswith("learned_manual_quote")
+    assert "score 100" in body["matched_rule"]
+    assert "hermes_corrective_override" in body["risk_tags"]
+
+
+def test_prefix_city_learned_rule_does_not_override_clean_zone_quote() -> None:
+    client = build_client(
+        learned_rows=[
+            {
+                "source_task_id": 100,
+                "quote_id": "manual-100",
+                "scope": "postal_prefix_city",
+                "postal_code": None,
+                "postal_prefix": "L4K",
+                "city": "CONCORD",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 2,
+                "billing_pallets": 3,
+                "total_price_usd": Decimal("250.00"),
+                "base_price_usd": Decimal("250.00"),
+                "confidence": 72,
+                "status": "active",
+                "usage_count": 0,
+                "note": "Prefix city rules should not cover clean zone_matrix quotes.",
+            }
+        ]
+    )
+
+    response = client.post("/quotes/zone-calculate", json=payload())
+
+    body = response.json()
+    assert body["source_type"] == "zone_matrix"
+    assert body["total_price_usd"] != "250.00"
 
 
 def test_zone_calculate_uses_database_pricing_config() -> None:
