@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  listHermesLearningCandidates,
   listWeComBots,
   listManualTasks,
   updateManualTask,
+  type HermesLearningCandidate,
   type ManualQuoteTask,
   type ManualQuoteTaskUpdate,
   type WeComBotConfigPublic,
@@ -28,11 +30,12 @@ export default function ManualTasksPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [wecomBots, setWecomBots] = useState<WeComBotConfigPublic[]>([]);
+  const [learningCandidates, setLearningCandidates] = useState<HermesLearningCandidate[]>([]);
   const [notifyWecom, setNotifyWecom] = useState(false);
   const [selectedWecomBotId, setSelectedWecomBotId] = useState("");
 
   useEffect(() => {
-    void loadTasks();
+    void refreshTasksAndLearning();
     void loadWecomBots();
   }, []);
 
@@ -42,6 +45,20 @@ export default function ManualTasksPage() {
     }
     return tasks.filter((task) => task.status === filter);
   }, [filter, tasks]);
+
+  const learningCandidateByTaskId = useMemo(() => {
+    const map = new Map<number, HermesLearningCandidate>();
+    learningCandidates.forEach((candidate) => {
+      if (candidate.source_task_id !== null && !map.has(candidate.source_task_id)) {
+        map.set(candidate.source_task_id, candidate);
+      }
+    });
+    return map;
+  }, [learningCandidates]);
+
+  async function refreshTasksAndLearning() {
+    await Promise.all([loadTasks(), loadLearningCandidates()]);
+  }
 
   async function loadTasks() {
     setIsLoading(true);
@@ -56,6 +73,14 @@ export default function ManualTasksPage() {
       setError(caught instanceof Error ? caught.message : "人工任务加载失败");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function loadLearningCandidates() {
+    try {
+      setLearningCandidates(await listHermesLearningCandidates({ status: "all", limit: 200 }));
+    } catch {
+      setLearningCandidates([]);
     }
   }
 
@@ -94,6 +119,7 @@ export default function ManualTasksPage() {
       );
       setDrafts((current) => ({ ...current, [updated.id]: draftFromTask(updated) }));
       setNotice(`任务 ${updated.id} 已更新`);
+      await loadLearningCandidates();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "人工任务更新失败");
     } finally {
@@ -132,7 +158,7 @@ export default function ManualTasksPage() {
             只处理无法自动命中价格表的报价。任务标记为已解决并填写金额后，系统会生成 Hermes 待审核候选；批准后才会复用。
           </p>
         </div>
-        <button className="btn-secondary" type="button" onClick={() => void loadTasks()}>
+        <button className="btn-secondary" type="button" onClick={() => void refreshTasksAndLearning()}>
           刷新任务
         </button>
       </header>
@@ -188,10 +214,11 @@ export default function ManualTasksPage() {
         <div className="grid gap-4">
           {visibleTasks.map((task) => {
             const draft = drafts[task.id] ?? draftFromTask(task);
+            const learningCandidate = learningCandidateByTaskId.get(task.id) ?? null;
             return (
-              <article key={task.id} className="panel p-5">
-                <div className="grid gap-4 lg:grid-cols-[1fr_0.9fr]">
-                  <div>
+              <article key={task.id} className="panel overflow-hidden p-4 sm:p-5">
+                <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,0.65fr)]">
+                  <div className="min-w-0">
                     <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                       <div>
                         <p className="text-xs font-medium uppercase text-slate-500">
@@ -229,10 +256,9 @@ export default function ManualTasksPage() {
                       </div>
                     </dl>
 
-                    <InquiryDetails task={task} />
                   </div>
 
-                  <div className="rounded-md border border-slate-200 p-4">
+                  <div className="min-w-0 rounded-md border border-slate-200 p-4">
                     <h3 className="section-title">处理任务</h3>
                     <p className="mt-1 text-sm leading-6 text-slate-600">
                       已解决任务必须填写人工确认金额；保存后只生成 Hermes 候选，不会直接影响报价。
@@ -294,6 +320,11 @@ export default function ManualTasksPage() {
                           }
                         />
                       </label>
+                      <ManualTaskLearningBridge
+                        candidate={learningCandidate}
+                        draft={draft}
+                        task={task}
+                      />
                       <div className="grid gap-3 rounded-md border border-slate-200 p-3">
                         <label className="flex min-h-11 items-center gap-3">
                           <input
@@ -335,12 +366,91 @@ export default function ManualTasksPage() {
                     </div>
                   </div>
                 </div>
+                <InquiryDetails task={task} />
               </article>
             );
           })}
         </div>
       )}
     </div>
+  );
+}
+
+function ManualTaskLearningBridge({
+  candidate,
+  draft,
+  task,
+}: {
+  candidate: HermesLearningCandidate | null;
+  draft: TaskDraft;
+  task: ManualQuoteTask;
+}) {
+  const status = hermesBridgeStatus(task, draft, candidate);
+  return (
+    <section className={`rounded-md border px-3 py-3 ${status.className}`}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Hermes 学习
+          </p>
+          <h4 className="mt-1 text-sm font-semibold text-slate-950">{status.title}</h4>
+          <p className="mt-1 text-sm leading-5 text-slate-600">{status.description}</p>
+        </div>
+        <a
+          className="inline-flex min-h-9 w-fit items-center justify-center rounded-md border border-blue-200 bg-white px-3 text-sm font-semibold text-blue-800 hover:bg-blue-50"
+          href={withBasePath("/learning-candidates")}
+        >
+          打开 Hermes
+        </a>
+      </div>
+      <div className="mt-3 grid gap-2 text-xs font-semibold text-slate-700 sm:grid-cols-3">
+        <HermesStep active done label="1 人工确认" />
+        <HermesStep active={status.step >= 2} done={status.step > 2} label="2 生成候选" />
+        <HermesStep active={status.step >= 3} done={status.done} label="3 批准复用" />
+      </div>
+      {candidate && (
+        <div className="mt-3 grid gap-2 rounded-md bg-white/70 p-2 text-sm sm:grid-cols-2">
+          <span>
+            <span className="text-slate-500">候选</span>
+            <span className="ml-2 font-semibold text-slate-950">#{candidate.id}</span>
+          </span>
+          <span>
+            <span className="text-slate-500">状态</span>
+            <span className="ml-2 font-semibold text-slate-950">
+              {candidateStatusLabel(candidate.status)}
+            </span>
+          </span>
+          <span>
+            <span className="text-slate-500">建议价</span>
+            <span className="ml-2 font-semibold text-slate-950">
+              {formatMoney(candidate.resolved_total_price_usd)}
+            </span>
+          </span>
+          <span>
+            <span className="text-slate-500">范围</span>
+            <span className="ml-2 font-semibold text-slate-950">
+              {candidate.scope} / {candidate.billing_pallets} 托
+            </span>
+          </span>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function HermesStep({ active, done, label }: { active: boolean; done: boolean; label: string }) {
+  return (
+    <span
+      className={`rounded-md px-2 py-1 text-center ${
+        done
+          ? "bg-emerald-100 text-emerald-800"
+          : active
+            ? "bg-blue-100 text-blue-800"
+            : "bg-slate-100 text-slate-500"
+      }`}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -372,7 +482,7 @@ function InquiryDetails({ task }: { task: ManualQuoteTask }) {
         </div>
       )}
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-3">
+      <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-3">
         <DetailGroup title="货物信息" items={details.cargoItems} />
         <DetailGroup title="地址信息" items={details.addressItems} />
         <DetailGroup title="报价/服务信息" items={details.serviceItems} />
@@ -401,13 +511,15 @@ function InquiryDetails({ task }: { task: ManualQuoteTask }) {
 
 function DetailGroup({ title, items }: { title: string; items: Array<{ label: string; value: string }> }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-3">
+    <div className="min-w-0 rounded-md border border-slate-200 bg-white p-3">
       <h4 className="text-sm font-semibold text-slate-950">{title}</h4>
       <dl className="mt-3 grid gap-2">
         {items.map((item) => (
-          <div key={item.label} className="grid grid-cols-[6rem_1fr] gap-3 text-sm">
+          <div key={item.label} className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] gap-2 text-sm">
             <dt className="text-slate-500">{item.label}</dt>
-            <dd className="break-words font-medium text-slate-900">{item.value}</dd>
+            <dd className="min-w-0 break-words font-medium leading-5 text-slate-900 [overflow-wrap:anywhere]">
+              {item.value}
+            </dd>
           </div>
         ))}
       </dl>
@@ -480,6 +592,113 @@ function taskStatusLabel(value: string): string {
     cancelled: "已取消",
   };
   return labels[value] ?? value;
+}
+
+function candidateStatusLabel(value: string): string {
+  const labels: Record<string, string> = {
+    pending_review: "待审核",
+    approved: "已批准",
+    rejected: "已拒绝",
+  };
+  return labels[value] ?? value;
+}
+
+function hermesBridgeStatus(
+  task: ManualQuoteTask,
+  draft: TaskDraft,
+  candidate: HermesLearningCandidate | null,
+): {
+  className: string;
+  description: string;
+  done: boolean;
+  step: number;
+  title: string;
+} {
+  if (candidate) {
+    if (candidate.status === "approved") {
+      return {
+        className: "border-emerald-200 bg-emerald-50",
+        description: `已发布为学习规则 #${candidate.promoted_rule_id ?? "-"}，后续仅在 Zone/价格表未命中时复用。`,
+        done: true,
+        step: 3,
+        title: "已进入 Hermes 并批准复用",
+      };
+    }
+    return {
+      className: candidate.status === "rejected" ? "border-slate-200 bg-slate-50" : "border-blue-200 bg-blue-50",
+      description:
+        candidate.status === "rejected"
+          ? "这条候选已被拒绝，不会进入自动复用规则。"
+          : "这条人工任务已生成 Hermes 待审核候选，批准后才会被自动报价复用。",
+      done: false,
+      step: candidate.status === "rejected" ? 2 : 3,
+      title: `已生成候选 #${candidate.id} / ${candidateStatusLabel(candidate.status)}`,
+    };
+  }
+
+  const result = asRecord(task.result_json);
+  const request = asRecord(task.request_json);
+  const draftIsResolved = draft.status === "resolved";
+  const hasPrice = Boolean(draft.resolved_price_usd.trim() || task.resolved_price_usd);
+  const hasBillingPallets = numberValue(result?.billing_pallets) !== null;
+  const hasPostalBasis = Boolean(
+    stringValue(request?.postal_code)
+      || stringValue(result?.postal_code)
+      || stringValue(result?.postal_prefix),
+  );
+
+  if (!draftIsResolved) {
+    return {
+      className: "border-slate-200 bg-slate-50",
+      description: "先填写人工确认金额，并把处理状态保存为“已解决”。",
+      done: false,
+      step: 1,
+      title: "尚未进入 Hermes",
+    };
+  }
+  if (!hasPrice) {
+    return {
+      className: "border-amber-200 bg-amber-50",
+      description: "状态已选“已解决”，但还没有人工确认金额；保存前不会生成 Hermes 候选。",
+      done: false,
+      step: 1,
+      title: "缺人工确认金额",
+    };
+  }
+  if (!hasBillingPallets) {
+    return {
+      className: "border-amber-200 bg-amber-50",
+      description: "缺少可学习的计费托数。请先确认实际托数或重新报价，否则 Hermes 不会生成候选。",
+      done: false,
+      step: 1,
+      title: "暂不能生成 Hermes 候选",
+    };
+  }
+  if (!hasPostalBasis) {
+    return {
+      className: "border-amber-200 bg-amber-50",
+      description: "缺少邮编或邮编前缀，无法确定学习规则适用范围。",
+      done: false,
+      step: 1,
+      title: "缺少学习范围",
+    };
+  }
+  if (task.status === "resolved" && task.resolved_price_usd) {
+    return {
+      className: "border-amber-200 bg-amber-50",
+      description: "任务已解决但未关联到候选，可能已合并到相同范围的其他 Hermes 候选；请到 Hermes 学习页查看。",
+      done: false,
+      step: 2,
+      title: "未找到关联候选",
+    };
+  }
+  return {
+    className: "border-blue-200 bg-blue-50",
+    description: "保存后会自动生成 Hermes 待审核候选；候选批准前不会影响自动报价。",
+    done: false,
+    step: 2,
+    title: "保存后生成 Hermes 候选",
+  };
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -785,4 +1004,17 @@ function formatMoney(value: string | number | null): string {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? `$${parsed.toFixed(2)}` : `$${String(value)}`;
+}
+
+function withBasePath(routePath: string): string {
+  const base = normalizeBasePath(import.meta.env.VITE_APP_BASE_PATH || "/");
+  const normalizedRoute = routePath.startsWith("/") ? routePath.slice(1) : routePath;
+  return `${base}${normalizedRoute}`;
+}
+
+function normalizeBasePath(path: string): string {
+  if (!path || path === "/") {
+    return "/";
+  }
+  return path.endsWith("/") ? path : `${path}/`;
 }
