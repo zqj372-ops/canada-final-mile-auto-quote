@@ -124,6 +124,7 @@ export interface AIAutoQuoteResponse {
   missing_fields: string[];
   manual_review_required: boolean;
   search_context: QuoteSearchContext | null;
+  address_validation: LocalAddressValidation | null;
 }
 
 export interface AIModelConfigPublic {
@@ -325,6 +326,37 @@ export interface QuoteSearchContext {
   address_research: SearchEvidence | null;
   market_research: SearchEvidence | null;
   note: string;
+}
+
+export interface LocalAddressValidation {
+  provider: string;
+  status:
+    | "missing_postal_code"
+    | "invalid_postal_code"
+    | "postal_not_found"
+    | "postal_verified"
+    | "verified"
+    | "corrected_by_postal_lookup";
+  matched: boolean;
+  confidence: number;
+  address_line: string | null;
+  postal_code: string | null;
+  postal_prefix: string | null;
+  input_city: string | null;
+  input_province: string | null;
+  preferred_city: string | null;
+  official_city: string | null;
+  municipality: string | null;
+  province: string | null;
+  corrected_city: string | null;
+  corrected_province: string | null;
+  city_consistent: boolean | null;
+  province_consistent: boolean | null;
+  latitude: number | null;
+  longitude: number | null;
+  source: string | null;
+  risk_tags: string[];
+  note_zh: string;
 }
 
 export interface ManualQuoteTask {
@@ -697,6 +729,25 @@ export function calculateAIAutoQuote(
     method: "POST",
     body: JSON.stringify(payload),
   }, apiKeyScope);
+}
+
+export function verifyLocalAddress(params: {
+  address_line?: string | null;
+  postal_code?: string | null;
+  city?: string | null;
+  province?: string | null;
+}): Promise<LocalAddressValidation> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      search.set(key, String(value));
+    }
+  });
+  return request<LocalAddressValidation>(
+    `/maps/local-verify${search.toString() ? `?${search.toString()}` : ""}`,
+    {},
+    "quote",
+  );
 }
 
 export function listManualTasks(): Promise<ManualQuoteTask[]> {

@@ -275,6 +275,9 @@ def test_ai_provider_failure_uses_complete_deterministic_fallback(monkeypatch: p
     assert body["quote_result"]["source_type"] == "zone_matrix"
     assert body["quote_result"]["billing_pallets"] == 3
     assert body["quote_result"]["total_price_usd"] == "212.00"
+    assert body["address_validation"]["status"] == "verified"
+    assert body["address_validation"]["preferred_city"] == "Concord"
+    assert body["address_validation"]["province"] == "ON"
     assert "deterministic parser generated" in body["internal_note"]
 
 
@@ -293,6 +296,8 @@ def test_ai_extraction_complete_calls_zone_quote_engine(monkeypatch: pytest.Monk
     assert body["quote_result"]["source_type"] == "zone_matrix"
     assert body["quote_result"]["total_price_usd"] == "212.00"
     assert body["manual_review_required"] is False
+    assert body["address_validation"]["matched"] is True
+    assert body["address_validation"]["postal_code"] == "L4K 2N2"
 
 
 def test_ai_optional_missing_fields_still_calls_zone_quote_engine(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,11 +1,55 @@
+import { useEffect, useMemo, useState } from "react";
+
+import { getApiBaseUrl, verifyLocalAddress, type LocalAddressValidation } from "../api/client";
 import type { ParsedQuoteInput } from "../utils/quoteParser";
-import { getApiBaseUrl } from "../api/client";
 
 export default function AddressMapPreview({ parsed }: { parsed: ParsedQuoteInput }) {
-  const query = buildMapQuery(parsed);
+  const query = useMemo(() => buildMapQuery(parsed), [parsed]);
   const embedUrl = query
     ? `${getApiBaseUrl()}/maps/embed?query=${encodeURIComponent(query)}`
     : "";
+  const [validation, setValidation] = useState<LocalAddressValidation | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const address = parsed.address;
+    const hasAddressBasis = Boolean(address.postal_code || address.city || address.province_code || address.address_line);
+    if (!hasAddressBasis) {
+      setValidation(null);
+      setValidationError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setValidationError(null);
+    void verifyLocalAddress({
+      address_line: address.address_line,
+      postal_code: address.postal_code,
+      city: address.city,
+      province: address.province_code || address.province_name,
+    })
+      .then((nextValidation) => {
+        if (!cancelled) {
+          setValidation(nextValidation);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setValidation(null);
+          setValidationError(error instanceof Error ? error.message : "本地地址验证失败");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    parsed.address.address_line,
+    parsed.address.city,
+    parsed.address.postal_code,
+    parsed.address.province_code,
+    parsed.address.province_name,
+  ]);
 
   return (
     <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.04] p-3 sm:p-4">
@@ -28,6 +72,8 @@ export default function AddressMapPreview({ parsed }: { parsed: ParsedQuoteInput
         )}
       </div>
 
+      <LocalValidationSummary validation={validation} error={validationError} />
+
       {query ? (
         <div className="mt-4 overflow-hidden rounded-md border border-white/10 bg-slate-950/40">
           <iframe
@@ -45,6 +91,77 @@ export default function AddressMapPreview({ parsed }: { parsed: ParsedQuoteInput
       )}
     </div>
   );
+}
+
+function LocalValidationSummary({
+  validation,
+  error,
+}: {
+  validation: LocalAddressValidation | null;
+  error: string | null;
+}) {
+  if (error) {
+    return (
+      <div className="mt-3 rounded-md border border-amber-300/40 bg-amber-300/10 p-3 text-sm leading-6 text-amber-100">
+        本地邮编验证暂时失败：{error}
+      </div>
+    );
+  }
+  if (!validation) {
+    return (
+      <div className="mt-3 rounded-md border border-white/10 bg-white/[0.04] p-3 text-sm leading-6 text-slate-400">
+        地址解析完成后自动读取本地邮编库验证城市、省份和邮编。
+      </div>
+    );
+  }
+
+  const tone = validation.matched
+    ? validation.status === "corrected_by_postal_lookup"
+      ? "border-amber-300/40 bg-amber-300/10 text-amber-100"
+      : "border-emerald-300/40 bg-emerald-300/10 text-emerald-100"
+    : "border-amber-300/40 bg-amber-300/10 text-amber-100";
+  const statusLabel = formatValidationStatus(validation.status);
+  const canonical = [
+    validation.preferred_city,
+    validation.province,
+    validation.postal_code,
+  ].filter(Boolean).join(", ");
+
+  return (
+    <div className={`mt-3 rounded-md border p-3 ${tone}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold">本地邮编库验证：{statusLabel}</p>
+        <span className="rounded-full border border-current/30 px-2 py-0.5 text-xs font-semibold">
+          {validation.confidence}%
+        </span>
+      </div>
+      <p className="mt-2 text-sm leading-6">{validation.note_zh}</p>
+      {canonical && (
+        <p className="mt-2 text-xs leading-5 opacity-90">
+          规范地址字段：{canonical}
+        </p>
+      )}
+      {(validation.corrected_city || validation.corrected_province) && (
+        <p className="mt-1 text-xs leading-5 opacity-90">
+          建议修正：{validation.corrected_city ? `城市改为 ${validation.corrected_city}` : ""}
+          {validation.corrected_city && validation.corrected_province ? "，" : ""}
+          {validation.corrected_province ? `省份改为 ${validation.corrected_province}` : ""}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function formatValidationStatus(status: LocalAddressValidation["status"]): string {
+  const labels: Record<LocalAddressValidation["status"], string> = {
+    missing_postal_code: "缺少邮编",
+    invalid_postal_code: "邮编格式错误",
+    postal_not_found: "本地库未命中",
+    postal_verified: "邮编已命中",
+    verified: "城市省份一致",
+    corrected_by_postal_lookup: "已按邮编库建议纠正",
+  };
+  return labels[status] || status;
 }
 
 function buildMapQuery(parsed: ParsedQuoteInput): string {

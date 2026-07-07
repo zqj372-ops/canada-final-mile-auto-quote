@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from inspect import signature
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -13,6 +14,10 @@ from apps.api.db.repositories.ai_model_config_repository import AIModelConfigRep
 from apps.api.db.repositories.manual_quote_task_repository import ManualQuoteTaskRepository
 from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
 from apps.api.db.repositories.zone_repository import ZoneRepository
+from apps.api.services.address_validation_service import (
+    LocalAddressValidation,
+    build_local_address_validation_from_extraction,
+)
 from apps.api.services.notification_service import notify_ai_missing_fields, notify_ai_quote_success
 from apps.api.services.quote_service import apply_learned_quote_if_available, record_zone_quote_side_effects, try_notification
 from apps.api.services.search_context_service import QuoteSearchContext, build_quote_search_context
@@ -56,6 +61,7 @@ class AIAutoQuoteResponse(BaseModel):
     missing_fields: list[str] = Field(default_factory=list)
     manual_review_required: bool
     search_context: QuoteSearchContext | None = None
+    address_validation: LocalAddressValidation | None = None
 
 
 def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQuoteResponse:
@@ -119,6 +125,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
 
     missing_fields = sorted(missing_required_fields(extraction))
     extraction.missing_fields = missing_fields
+    address_validation = _optional_address_validation(db, extraction)
     search_context = _optional_search_context(db, extraction, payload)
     if missing_fields:
         customer_reply = build_follow_up_question(missing_fields)
@@ -136,6 +143,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
                 "manual_review_required": True,
                 "missing_fields": missing_fields,
                 "extraction": extraction.model_dump(mode="json"),
+                "address_validation": address_validation.model_dump(mode="json") if address_validation else None,
                 "search_context": search_context.model_dump(mode="json") if search_context else None,
                 "customer_reply": customer_reply,
             },
@@ -160,6 +168,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
             missing_fields=missing_fields,
             manual_review_required=True,
             search_context=search_context,
+            address_validation=address_validation,
         )
 
     if not payload.auto_submit_when_complete:
@@ -176,6 +185,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
             missing_fields=[],
             manual_review_required=False,
             search_context=search_context,
+            address_validation=address_validation,
         )
 
     zone_request = _zone_request_from_extraction(extraction)
@@ -199,12 +209,14 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
             missing_fields=[],
             manual_review_required=True,
             search_context=search_context,
+            address_validation=address_validation,
         )
 
-    customer_reply = (
-        _build_guarded_sales_note(ai_client, quote_result, search_context=search_context)
-        if search_context
-        else _build_guarded_sales_note(ai_client, quote_result)
+    customer_reply = _build_sales_note(
+        ai_client,
+        quote_result,
+        search_context=search_context,
+        address_validation=address_validation,
     )
     quote_result.sales_note = customer_reply
     response = AIAutoQuoteResponse(
@@ -220,6 +232,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
         missing_fields=[],
         manual_review_required=False,
         search_context=search_context,
+        address_validation=address_validation,
     )
     if payload.notify_email or payload.notify_wecom:
         try_notification(
@@ -285,6 +298,17 @@ def _optional_search_context(
         logger.warning("Search context failed.", extra={"error": str(exc)})
         return QuoteSearchContext(provider="unknown", note=f"Search context failed: {exc.__class__.__name__}")
 
+
+def _optional_address_validation(
+    db: Session,
+    extraction: AIExtractedQuoteDraft,
+) -> LocalAddressValidation | None:
+    try:
+        return build_local_address_validation_from_extraction(db, extraction)
+    except Exception as exc:
+        logger.warning("Local address validation failed.", extra={"error": str(exc)})
+        return None
+
 def _zone_request_from_extraction(extraction: AIExtractedQuoteDraft) -> ZoneQuoteRequest:
     try:
         return ZoneQuoteRequest(
@@ -309,11 +333,28 @@ def _zone_request_from_extraction(extraction: AIExtractedQuoteDraft) -> ZoneQuot
         raise HTTPException(status_code=422, detail=f"Extracted quote fields failed validation: {exc}") from exc
 
 
+def _build_sales_note(
+    ai_client: OpenAICompatibleClient,
+    quote_result: ZoneQuoteResult,
+    *,
+    search_context: QuoteSearchContext | None,
+    address_validation: LocalAddressValidation | None,
+) -> str:
+    parameters = signature(_build_guarded_sales_note).parameters
+    kwargs: dict[str, object] = {}
+    if "search_context" in parameters:
+        kwargs["search_context"] = search_context
+    if "address_validation" in parameters:
+        kwargs["address_validation"] = address_validation
+    return _build_guarded_sales_note(ai_client, quote_result, **kwargs)
+
+
 def _build_guarded_sales_note(
     ai_client: OpenAICompatibleClient,
     quote_result: ZoneQuoteResult,
     *,
     search_context: QuoteSearchContext | None = None,
+    address_validation: LocalAddressValidation | None = None,
 ) -> str:
     fallback = quote_result.sales_note or "Quote result is locked by the deterministic quote engine."
     response = ai_client.complete(
@@ -325,6 +366,7 @@ def _build_guarded_sales_note(
                     {
                         "price_locked": True,
                         "quote_result": quote_result.model_dump(mode="json"),
+                        "local_address_validation": address_validation.model_dump(mode="json") if address_validation else None,
                         "external_search_context": search_context.model_dump(mode="json") if search_context else None,
                         "allowed_actions": ["explain", "summarize", "warn_risk", "mention_reference_only_search_context"],
                         "forbidden_actions": [

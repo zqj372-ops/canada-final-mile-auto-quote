@@ -43,6 +43,7 @@ SALES_NOTE_SYSTEM_PROMPT = """
 - 不输出思考过程，不输出 <think>，不输出 quote_id，不输出 matched_rule，不解释 Zone 匹配逻辑。
 - 不要 Markdown 表格，不要长标题，不要价格明细表。
 - 输出必须是客户可直接看的销售报价，中文为主，语气简洁。
+- local_address_validation 只能用于确认城市/省份/邮编是否一致，不能作为价格依据。
 - external_search_context 只能转成一句“请确认地址类型/卸货条件”，不要展开搜索来源或搜索结论。
 
 输出格式：
