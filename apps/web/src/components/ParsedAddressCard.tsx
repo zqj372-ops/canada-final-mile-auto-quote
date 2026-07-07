@@ -29,8 +29,8 @@ export default function ParsedAddressCard({
   const address = parsed.address;
 
   return (
-    <section className="ai-glass-panel min-w-0 p-5">
-      <h2 className="text-xl font-semibold text-white">地址信息</h2>
+    <section className="panel min-w-0 p-4">
+      <h2 className="section-title text-lg">地址信息</h2>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <Metric label="目的地地址" value={address.address_line || "待确认"} wide />
         <Metric label="目的地城市" value={address.city || "待确认"} />
@@ -46,7 +46,7 @@ export default function ParsedAddressCard({
         <label>
           <ChineseFieldLabel label="包装类型" hint="后台配置选项，影响计费托数规则。" />
           <select
-            className="ai-select mt-2"
+            className="field-input mt-2"
             value={packagingType}
             onChange={(event) => onPackagingTypeChange(event.target.value)}
           >
@@ -61,7 +61,7 @@ export default function ParsedAddressCard({
         <label>
           <ChineseFieldLabel label="地址类型" hint="无法自动判断时请人工确认。" />
           <select
-            className="ai-select mt-2"
+            className="field-input mt-2"
             value={addressType}
             onChange={(event) => onAddressTypeChange(event.target.value)}
           >
@@ -74,16 +74,16 @@ export default function ParsedAddressCard({
         </label>
       </div>
 
-      <fieldset className="mt-3 rounded-md border border-white/10 p-3">
-        <legend className="px-1 text-sm font-semibold text-slate-100">附加服务确认</legend>
+      <fieldset className="mt-3 rounded-md border border-slate-200 p-3">
+        <legend className="px-1 text-sm font-semibold text-slate-700">附加服务确认</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-3">
           {config.service_options.map((option) => (
             <label
               key={option.value}
-              className="flex min-h-11 items-center gap-3 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2 text-sm font-semibold text-slate-100"
+              className="flex min-h-11 items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700"
             >
               <input
-                className="h-4 w-4 rounded border-cyan-200 bg-slate-950 text-cyan-400 focus:ring-cyan-300"
+                className="h-4 w-4 rounded border-slate-300 text-teal-700 focus:ring-teal-700"
                 type="checkbox"
                 checked={Boolean(services[option.value])}
                 onChange={(event) => onServiceChange(option.value, event.target.checked)}
@@ -95,7 +95,7 @@ export default function ParsedAddressCard({
         <label className="mt-3 block">
           <ChineseFieldLabel label="等待时间（分钟）" />
           <input
-            className="ai-input mt-2"
+            className="field-input mt-2"
             type="number"
             min={0}
             step={1}
@@ -118,9 +118,9 @@ function Metric({
   wide?: boolean;
 }) {
   return (
-    <div className={`rounded-md border border-white/10 bg-white/[0.04] p-2.5 ${wide ? "col-span-2" : ""}`}>
-      <dt className="text-xs font-medium text-slate-400">{label}</dt>
-      <dd className="mt-1 break-words text-sm font-semibold text-white">{value}</dd>
+    <div className={`rounded-md border border-slate-200 bg-white p-2.5 ${wide ? "col-span-2" : ""}`}>
+      <dt className="text-xs font-medium text-slate-500">{label}</dt>
+      <dd className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</dd>
     </div>
   );
 }

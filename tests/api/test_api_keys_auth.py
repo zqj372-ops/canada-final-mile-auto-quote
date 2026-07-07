@@ -7,10 +7,20 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from apps.api.db.models import APIKey, Base, ManualQuoteTask, PostalCodeCityLookup, ZoneLookupRule, ZonePriceMatrix
+from apps.api.db.models import (
+    APIKey,
+    Base,
+    ManualQuoteTask,
+    PostalCodeCityLookup,
+    SalesQuoteRecord,
+    User,
+    ZoneLookupRule,
+    ZonePriceMatrix,
+)
 from apps.api.db.session import get_db
 from apps.api.main import app
 from apps.api.security.api_keys import API_KEY_PREFIX, hash_api_key
+from apps.api.security.passwords import hash_password
 
 
 ADMIN_KEY = "caq_admin_test_key"
@@ -38,6 +48,79 @@ def build_client() -> TestClient:
             ("Disabled", DISABLED_KEY, "admin", False),
         ]:
             session.add(APIKey(name=name, key_hash=hash_api_key(plain_key), role=role, enabled=enabled))
+
+        sales_user = User(
+            username="sales@example.com",
+            display_name="Sales User",
+            password_hash=hash_password("password123"),
+            role="sales",
+            enabled=True,
+        )
+        other_sales_user = User(
+            username="other@example.com",
+            display_name="Other Sales",
+            password_hash=hash_password("password123"),
+            role="sales",
+            enabled=True,
+        )
+        session.add_all([sales_user, other_sales_user])
+        session.flush()
+        session.add_all(
+            [
+                SalesQuoteRecord(
+                    quote_id="quote_sales_user",
+                    actor_user_id=sales_user.id,
+                    actor_name=sales_user.display_name,
+                    actor_role=sales_user.role,
+                    status="quoted",
+                    customer_message="sales user message",
+                    customer_reply="reply",
+                    request_json={},
+                    result_json={
+                        "manual_review_required": False,
+                        "missing_fields": [],
+                        "extraction": {"postal_code": "L4K 2N2", "piece_count": 3},
+                        "quote_result": {
+                            "quote_id": "quote_sales_user",
+                            "source_type": "zone_matrix",
+                            "city": "Concord",
+                            "province": "ON",
+                            "zone": 2,
+                            "billing_pallets": 3,
+                            "total_price_usd": "120.00",
+                            "risk_tags": [],
+                            "confidence": 100,
+                        },
+                    },
+                ),
+                SalesQuoteRecord(
+                    quote_id="quote_other_user",
+                    actor_user_id=other_sales_user.id,
+                    actor_name=other_sales_user.display_name,
+                    actor_role=other_sales_user.role,
+                    status="quoted",
+                    customer_message="other user message",
+                    customer_reply="reply",
+                    request_json={},
+                    result_json={
+                        "manual_review_required": False,
+                        "missing_fields": [],
+                        "extraction": {"postal_code": "L4K 2N2", "piece_count": 3},
+                        "quote_result": {
+                            "quote_id": "quote_other_user",
+                            "source_type": "zone_matrix",
+                            "city": "Concord",
+                            "province": "ON",
+                            "zone": 2,
+                            "billing_pallets": 3,
+                            "total_price_usd": "120.00",
+                            "risk_tags": [],
+                            "confidence": 100,
+                        },
+                    },
+                ),
+            ]
+        )
 
         session.add(PostalCodeCityLookup(postal_code="L4K 2N2", preferred_city="Concord", province="ON"))
         session.add(
@@ -215,3 +298,39 @@ def test_auth_me_allows_sales_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["role"] == "sales"
+
+
+def test_user_can_login_and_use_bearer_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    login_response = client.post(
+        "/auth/login",
+        json={"username": "sales@example.com", "password": "password123"},
+    )
+    token = login_response.json()["access_token"]
+    me_response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert login_response.status_code == 200
+    assert me_response.status_code == 200
+    assert me_response.json()["name"] == "Sales User"
+    assert me_response.json()["role"] == "sales"
+
+
+def test_sales_user_reads_only_own_quote_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    login_response = client.post(
+        "/auth/login",
+        json={"username": "sales@example.com", "password": "password123"},
+    )
+    token = login_response.json()["access_token"]
+    records_response = client.get(
+        "/quotes/sales-records",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert records_response.status_code == 200
+    records = records_response.json()
+    assert [record["quote_id"] for record in records] == ["quote_sales_user"]

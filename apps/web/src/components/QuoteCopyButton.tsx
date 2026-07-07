@@ -21,8 +21,8 @@ export default function QuoteCopyButton({
   }
 
   return (
-    <button className="ai-primary-button" type="button" onClick={handleCopy} disabled={disabled}>
-      {state === "copied" ? "已复制" : state === "failed" ? "复制失败" : "一键复制销售报价"}
+    <button className="btn-primary" type="button" onClick={handleCopy} disabled={disabled}>
+      {state === "copied" ? "已复制" : state === "failed" ? "复制失败" : "复制客户回复"}
     </button>
   );
 }

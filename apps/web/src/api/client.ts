@@ -77,9 +77,43 @@ export interface ZoneQuoteResult {
 }
 
 export interface CurrentActor {
+  user_id: number | null;
   api_key_id: number | null;
   name: string;
   role: string;
+}
+
+export interface AuthLoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface AuthLoginResponse {
+  access_token: string;
+  token_type: "bearer";
+  expires_in_seconds: number;
+  actor: CurrentActor;
+}
+
+export type UserRole = "admin" | "operator" | "sales" | "viewer";
+
+export interface UserPublic {
+  id: number;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  enabled: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+  last_login_at: string | null;
+}
+
+export interface UserPayload {
+  username?: string;
+  password?: string;
+  display_name?: string | null;
+  role?: UserRole;
+  enabled?: boolean;
 }
 
 export interface AIExtractedQuoteDraft {
@@ -408,6 +442,36 @@ export interface QuoteAuditLog {
   created_at: string | null;
 }
 
+export interface SalesQuoteRecord {
+  id: number;
+  quote_id: string | null;
+  actor_user_id: number | null;
+  actor_api_key_id: number | null;
+  actor_name: string | null;
+  actor_role: string | null;
+  status: "quoted" | "manual_required" | string;
+  customer_message: string;
+  customer_reply: string | null;
+  destination: string;
+  cargo_summary: string;
+  total_price_usd: MoneyValue;
+  currency_code: string;
+  zone: number | null;
+  billing_pallets: number | null;
+  confidence: number;
+  source_type: string;
+  postal_code: string | null;
+  city: string | null;
+  province: string | null;
+  risk_tags: string[];
+  risk_tag_labels?: string[];
+  missing_fields: string[];
+  manual_reason: string | null;
+  created_at: string | null;
+  request_json: JsonValue;
+  result_json: JsonValue;
+}
+
 export interface RiskTagCount {
   tag: string;
   label?: string;
@@ -625,6 +689,7 @@ const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || "/api"
 ).replace(/\/$/, "");
 export type ApiKeyScope = "quote" | "admin";
+const AUTH_TOKEN_STORAGE_KEY = "canada-final-mile-auth-token";
 
 const API_KEY_STORAGE_KEYS: Record<ApiKeyScope, string> = {
   quote: "canada-final-mile-quote-api-key",
@@ -647,11 +712,12 @@ async function request<T>(
   apiKeyScope: ApiKeyScope = "admin",
 ): Promise<T> {
   const apiKey = getStoredApiKey(apiKeyScope);
+  const authToken = getStoredAuthToken();
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      ...(apiKey ? { "X-API-Key": apiKey } : {}),
+      ...(authToken ? { Authorization: `Bearer ${authToken}` } : apiKey ? { "X-API-Key": apiKey } : {}),
       ...(options.headers ?? {}),
     },
   });
@@ -721,6 +787,40 @@ export function getBackofficeActor(): Promise<CurrentActor> {
   return request<CurrentActor>("/auth/backoffice", {}, "admin");
 }
 
+export function login(payload: AuthLoginRequest): Promise<AuthLoginResponse> {
+  return request<AuthLoginResponse>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getCurrentActor(apiKeyScope: ApiKeyScope = "quote"): Promise<CurrentActor> {
+  return request<CurrentActor>("/auth/me", {}, apiKeyScope);
+}
+
+export function listUsers(): Promise<UserPublic[]> {
+  return request<UserPublic[]>("/users");
+}
+
+export function createUser(
+  payload: Required<Pick<UserPayload, "username" | "password" | "role">> & UserPayload,
+): Promise<UserPublic> {
+  return request<UserPublic>("/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateUser(
+  userId: number,
+  payload: Omit<UserPayload, "username">,
+): Promise<UserPublic> {
+  return request<UserPublic>(`/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function calculateAIAutoQuote(
   payload: AIAutoQuoteRequest,
   apiKeyScope: ApiKeyScope = "admin",
@@ -770,6 +870,21 @@ export function getQuoteAudit(quoteId: string): Promise<QuoteAuditLog> {
 
 export function getQuoteErrorSummary(limit = 20): Promise<QuoteErrorSummary> {
   return request<QuoteErrorSummary>(`/quotes/error-summary?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function listSalesQuoteRecords(params: {
+  status?: "quoted" | "manual_required" | "";
+  limit?: number;
+} = {}): Promise<SalesQuoteRecord[]> {
+  const search = new URLSearchParams();
+  if (params.status) {
+    search.set("status", params.status);
+  }
+  if (params.limit) {
+    search.set("limit", String(params.limit));
+  }
+  const query = search.toString();
+  return request<SalesQuoteRecord[]>(`/quotes/sales-records${query ? `?${query}` : ""}`, {}, "quote");
 }
 
 export function listHermesLearningCandidates(params: {
@@ -1091,4 +1206,20 @@ export function setStoredApiKey(scope: ApiKeyScope, apiKey: string): void {
 
 export function clearStoredApiKey(scope: ApiKeyScope): void {
   window.localStorage.removeItem(API_KEY_STORAGE_KEYS[scope]);
+}
+
+export function getStoredAuthToken(): string {
+  try {
+    return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function setStoredAuthToken(token: string): void {
+  window.localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token.trim());
+}
+
+export function clearStoredAuthToken(): void {
+  window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
 }

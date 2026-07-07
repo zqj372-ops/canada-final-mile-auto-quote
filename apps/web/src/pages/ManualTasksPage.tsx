@@ -33,6 +33,8 @@ export default function ManualTasksPage() {
   const [learningCandidates, setLearningCandidates] = useState<HermesLearningCandidate[]>([]);
   const [notifyEmail, setNotifyEmail] = useState(false);
   const [selectedEmailConfigId, setSelectedEmailConfigId] = useState("");
+  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
+  const [taskQuery, setTaskQuery] = useState("");
 
   useEffect(() => {
     void refreshTasksAndLearning();
@@ -40,11 +42,13 @@ export default function ManualTasksPage() {
   }, []);
 
   const visibleTasks = useMemo(() => {
-    if (filter === "all") {
-      return tasks;
+    const filteredByStatus = filter === "all" ? tasks : tasks.filter((task) => task.status === filter);
+    const query = taskQuery.trim().toLowerCase();
+    if (!query) {
+      return filteredByStatus;
     }
-    return tasks.filter((task) => task.status === filter);
-  }, [filter, tasks]);
+    return filteredByStatus.filter((task) => taskMatchesQuery(task, query));
+  }, [filter, taskQuery, tasks]);
 
   const learningCandidateByTaskId = useMemo(() => {
     const map = new Map<number, HermesLearningCandidate>();
@@ -55,6 +59,24 @@ export default function ManualTasksPage() {
     });
     return map;
   }, [learningCandidates]);
+  const selectedTask =
+    visibleTasks.find((task) => task.id === selectedTaskId) ?? visibleTasks[0] ?? null;
+  const selectedDraft = selectedTask ? drafts[selectedTask.id] ?? draftFromTask(selectedTask) : null;
+  const selectedLearningCandidate = selectedTask
+    ? learningCandidateByTaskId.get(selectedTask.id) ?? null
+    : null;
+
+  useEffect(() => {
+    if (!visibleTasks.length) {
+      if (selectedTaskId !== null) {
+        setSelectedTaskId(null);
+      }
+      return;
+    }
+    if (!visibleTasks.some((task) => task.id === selectedTaskId)) {
+      setSelectedTaskId(visibleTasks[0].id);
+    }
+  }, [selectedTaskId, visibleTasks]);
 
   async function refreshTasksAndLearning() {
     await Promise.all([loadTasks(), loadLearningCandidates()]);
@@ -65,9 +87,10 @@ export default function ManualTasksPage() {
     setError(null);
     try {
       const response = await listManualTasks();
-      setTasks(response);
+      const nextTasks = Array.isArray(response) ? response : [];
+      setTasks(nextTasks);
       setDrafts(
-        Object.fromEntries(response.map((task) => [task.id, draftFromTask(task)])),
+        Object.fromEntries(nextTasks.map((task) => [task.id, draftFromTask(task)])),
       );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "人工任务加载失败");
@@ -78,7 +101,8 @@ export default function ManualTasksPage() {
 
   async function loadLearningCandidates() {
     try {
-      setLearningCandidates(await listHermesLearningCandidates({ status: "all", limit: 200 }));
+      const response = await listHermesLearningCandidates({ status: "all", limit: 200 });
+      setLearningCandidates(Array.isArray(response) ? response : []);
     } catch {
       setLearningCandidates([]);
     }
@@ -86,7 +110,8 @@ export default function ManualTasksPage() {
 
   async function loadEmailConfigs() {
     try {
-      setEmailConfigs(await listEmailConfigs());
+      const response = await listEmailConfigs();
+      setEmailConfigs(Array.isArray(response) ? response : []);
     } catch {
       setEmailConfigs([]);
     }
@@ -147,59 +172,48 @@ export default function ManualTasksPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-      <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+    <div className="manual-tasks-page">
+      <header className="admin-page-header">
         <div>
-          <p className="text-sm font-medium text-blue-800">Manual Tasks</p>
-          <h1 className="mt-1 text-2xl font-semibold text-slate-950">
-            人工确认池
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            只处理无法自动命中价格表的报价。任务标记为已解决并填写金额后，系统会生成 Hermes 待审核候选；批准后才会复用。
-          </p>
+          <h1>人工任务</h1>
+          <p>AI 识别不确定或高风险的报价单，需要人工 review 和处理。</p>
         </div>
-        <button className="btn-secondary" type="button" onClick={() => void refreshTasksAndLearning()}>
-          刷新任务
-        </button>
+        <div className="manual-actions">
+          <label className="manual-search">
+            <span className="sr-only">搜索任务</span>
+            <input
+              value={taskQuery}
+              onChange={(event) => setTaskQuery(event.target.value)}
+              placeholder="搜索 quote_id、目的地、原因..."
+            />
+          </label>
+          <button className="btn-secondary" type="button" onClick={() => void refreshTasksAndLearning()}>
+            刷新
+          </button>
+        </div>
       </header>
 
-      <section className="panel p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-wrap gap-2" role="tablist" aria-label="任务状态筛选">
-            {(["pending", "resolved", "all"] as TaskFilter[]).map((item) => (
-              <button
-                key={item}
-                type="button"
-                className={
-                  filter === item
-                    ? "btn-primary"
-                    : "btn-secondary bg-white text-slate-700"
-                }
-                onClick={() => setFilter(item)}
-              >
-                {taskFilterLabel(item)}
-              </button>
-            ))}
-          </div>
-          <p className="text-sm text-slate-600">
-            当前显示 {visibleTasks.length} / {tasks.length} 个任务
-          </p>
-        </div>
-      </section>
+      <div className="manual-tabs" role="tablist" aria-label="任务状态筛选">
+        {(["pending", "resolved", "all"] as TaskFilter[]).map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={filter === item ? "manual-tab-active" : ""}
+            onClick={() => setFilter(item)}
+          >
+            {taskFilterLabel(item)}
+            <span>{taskFilterCount(item, tasks)}</span>
+          </button>
+        ))}
+      </div>
 
       {error && (
-        <div
-          className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900"
-          role="alert"
-        >
+        <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900" role="alert">
           {error}
         </div>
       )}
       {notice && (
-        <div
-          className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900"
-          role="status"
-        >
+        <div className="rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900" role="status">
           {notice}
         </div>
       )}
@@ -207,173 +221,224 @@ export default function ManualTasksPage() {
       {isLoading ? (
         <section className="panel p-6 text-sm text-slate-600">正在加载任务...</section>
       ) : visibleTasks.length === 0 ? (
-        <section className="panel p-6 text-sm text-slate-600">
-          当前筛选下没有人工确认任务。
-        </section>
-      ) : (
-        <div className="grid gap-4">
-          {visibleTasks.map((task) => {
-            const draft = drafts[task.id] ?? draftFromTask(task);
-            const learningCandidate = learningCandidateByTaskId.get(task.id) ?? null;
-            return (
-              <article key={task.id} className="panel overflow-hidden p-4 sm:p-5">
-                <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(360px,0.65fr)]">
-                  <div className="min-w-0">
-                    <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-                      <div>
-                        <p className="text-xs font-medium uppercase text-slate-500">
-                          Task #{task.id}
-                        </p>
-                        <h2 className="mt-1 break-words text-lg font-semibold text-slate-950">
-                          {task.quote_id}
-                        </h2>
-                      </div>
-                      <span
-                        className={`inline-flex rounded-md px-2 py-1 text-xs font-semibold ${
-                          task.status === "resolved"
-                            ? "bg-emerald-50 text-emerald-800"
-                            : "bg-amber-50 text-amber-900"
-                        }`}
-                          >
-                        {taskStatusLabel(task.status)}
-                      </span>
-                    </div>
+        <section className="panel p-6 text-sm text-slate-600">当前筛选下没有人工确认任务。</section>
+      ) : selectedTask && selectedDraft ? (
+        <div className="manual-task-workspace">
+          <section className="panel manual-task-list">
+            <div className="manual-list-head">
+              <span>Quote ID</span>
+              <span>目的地</span>
+              <span>原因</span>
+              <span>创建时间</span>
+              <span>风险标签</span>
+            </div>
+            {visibleTasks.map((task) => {
+              const isSelected = selectedTask.id === task.id;
+              const details = buildInquiryDetails(task);
+              const destination = briefDestination(details);
+              return (
+                <button
+                  key={task.id}
+                  className={`manual-list-row ${isSelected ? "manual-list-row-active" : ""}`}
+                  type="button"
+                  onClick={() => setSelectedTaskId(task.id)}
+                >
+                  <span className="manual-select-dot" aria-hidden="true" />
+                  <strong>{task.quote_id}</strong>
+                  <span>{destination}</span>
+                  <span>{task.reason_zh || task.reason}</span>
+                  <span>{formatDate(task.created_at)}</span>
+                  <span>
+                    <RiskTags tags={(task.risk_tag_labels?.length ? task.risk_tag_labels : task.risk_tags).slice(0, 2)} />
+                  </span>
+                </button>
+              );
+            })}
+            <div className="manual-list-footer">
+              <span>共 {visibleTasks.length} 条</span>
+              <div>
+                <button type="button" disabled>‹</button>
+                <button className="active" type="button">1</button>
+                <button type="button">2</button>
+                <button type="button">3</button>
+                <button type="button">4</button>
+                <button type="button">›</button>
+              </div>
+              <select aria-label="每页条数">
+                <option>10 条/页</option>
+              </select>
+            </div>
+          </section>
 
-                    <dl className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <FieldValue label="需人工原因" value={task.reason_zh || task.reason} />
-                      <FieldValue label="处理人" value={task.assigned_to || "未分配"} />
-                      <FieldValue
-                        label="人工确认金额"
-                        value={formatMoney(task.resolved_price_usd)}
-                      />
-                      <FieldValue label="创建时间" value={formatDate(task.created_at)} />
-                      <FieldValue label="更新时间" value={formatDate(task.updated_at)} />
-                      <div>
-                        <dt className="metric-label">风险标签</dt>
-                        <dd className="mt-2">
-                          <RiskTags tags={task.risk_tag_labels?.length ? task.risk_tag_labels : task.risk_tags} />
-                        </dd>
-                      </div>
-                    </dl>
+          <section className="panel manual-detail-panel">
+            <div className="manual-detail-header">
+              <div>
+                <p>Quote ID</p>
+                <h2>{selectedTask.quote_id}</h2>
+              </div>
+              <TaskStatusBadge status={selectedTask.status} />
+            </div>
 
-                  </div>
+            <ManualTaskLearningBridge
+              candidate={selectedLearningCandidate}
+              draft={selectedDraft}
+              task={selectedTask}
+            />
 
-                  <div className="min-w-0 rounded-md border border-slate-200 p-4">
-                    <h3 className="section-title">处理任务</h3>
-                    <p className="mt-1 text-sm leading-6 text-slate-600">
-                      已解决任务必须填写人工确认金额；保存后只生成 Hermes 候选，不会直接影响报价。
-                    </p>
-                    <div className="mt-3 grid gap-3">
-                      <label>
-                        <span className="field-label">处理状态</span>
-                        <select
-                          className="field-input"
-                          value={draft.status}
-                          onChange={(event) =>
-                            updateDraft(task.id, "status", event.target.value)
-                          }
-                        >
-                          {(["pending", "in_progress", "resolved", "cancelled"] as TaskStatus[]).map((status) => (
-                            <option key={status} value={status}>
-                              {taskStatusLabel(status)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        <span className="field-label">处理人</span>
-                        <input
-                          className="field-input"
-                          value={draft.assigned_to}
-                          onChange={(event) =>
-                            updateDraft(task.id, "assigned_to", event.target.value)
-                          }
-                        />
-                      </label>
-                      <label>
-                        <span className="field-label">人工确认金额 USD</span>
-                        <input
-                          className="field-input"
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={draft.resolved_price_usd}
-                          onChange={(event) =>
-                            updateDraft(
-                              task.id,
-                              "resolved_price_usd",
-                              event.target.value,
-                            )
-                          }
-                        />
-                        <p className="field-hint">
-                          仅用于人工处理结果；已解决时必填，不会改写 Zone 价格矩阵。
-                        </p>
-                      </label>
-                      <label>
-                        <span className="field-label">处理备注</span>
-                        <textarea
-                          className="field-input min-h-24"
-                          value={draft.resolved_note}
-                          onChange={(event) =>
-                            updateDraft(task.id, "resolved_note", event.target.value)
-                          }
-                        />
-                      </label>
-                      <ManualTaskLearningBridge
-                        candidate={learningCandidate}
-                        draft={draft}
-                        task={task}
-                      />
-                      <div className="grid gap-3 rounded-md border border-slate-200 p-3">
-                        <label className="flex min-h-11 items-center gap-3">
-                          <input
-                            className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-700"
-                            type="checkbox"
-                            checked={notifyEmail}
-                            onChange={(event) => setNotifyEmail(event.target.checked)}
-                          />
-                          <span className="text-sm font-medium text-slate-800">
-                            resolved 后同步发送邮件
-                          </span>
-                        </label>
-                        <label>
-                          <span className="field-label">邮件通知配置</span>
-                          <select
-                            className="field-input"
-                            value={selectedEmailConfigId}
-                            onChange={(event) => setSelectedEmailConfigId(event.target.value)}
-                            disabled={!notifyEmail}
-                          >
-                            <option value="">使用 manual_resolved/default 邮箱</option>
-                            {emailConfigs.map((config) => (
-                              <option key={config.id} value={config.id}>
-                                {config.name} / {config.purpose}
-                                {config.is_default ? " / 默认" : ""}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <button
-                        className="btn-primary"
-                        type="button"
-                        onClick={() => void saveTask(task)}
-                        disabled={savingTaskId === task.id}
-                      >
-                        {savingTaskId === task.id ? "保存中..." : "保存处理结果"}
-                      </button>
-                    </div>
-                  </div>
+            <InquiryDetails task={selectedTask} />
+
+            <section className="manual-process-form">
+              <h3>处理表单</h3>
+              <div className="grid gap-3 lg:grid-cols-3">
+                <label>
+                  <span className="field-label">状态</span>
+                  <select
+                    className="field-input"
+                    value={selectedDraft.status}
+                    onChange={(event) => updateDraft(selectedTask.id, "status", event.target.value)}
+                  >
+                    {(["pending", "in_progress", "resolved", "cancelled"] as TaskStatus[]).map((status) => (
+                      <option key={status} value={status}>
+                        {taskStatusLabel(status)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span className="field-label">处理人</span>
+                  <input
+                    className="field-input"
+                    value={selectedDraft.assigned_to}
+                    onChange={(event) => updateDraft(selectedTask.id, "assigned_to", event.target.value)}
+                    placeholder="请输入处理人姓名"
+                  />
+                </label>
+                <label>
+                  <span className="field-label">人工确认金额 USD</span>
+                  <input
+                    className="field-input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={selectedDraft.resolved_price_usd}
+                    onChange={(event) => updateDraft(selectedTask.id, "resolved_price_usd", event.target.value)}
+                    placeholder="请输入最终确认金额"
+                  />
+                </label>
+              </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_18rem]">
+                <label>
+                  <span className="field-label">处理备注</span>
+                  <textarea
+                    className="field-input min-h-28"
+                    value={selectedDraft.resolved_note}
+                    onChange={(event) => updateDraft(selectedTask.id, "resolved_note", event.target.value)}
+                    placeholder="请说明处理过程、确认重点及特殊情况..."
+                  />
+                </label>
+                <div className="grid gap-3 rounded-md border border-slate-200 p-3">
+                  <label className="flex min-h-11 items-center gap-3">
+                    <input
+                      className="h-4 w-4 rounded border-slate-300 text-teal-700 focus:ring-teal-700"
+                      type="checkbox"
+                      checked={notifyEmail}
+                      onChange={(event) => setNotifyEmail(event.target.checked)}
+                    />
+                    <span className="text-sm font-medium text-slate-800">保存后邮件发送给客户</span>
+                  </label>
+                  <label>
+                    <span className="field-label">邮件通知配置</span>
+                    <select
+                      className="field-input"
+                      value={selectedEmailConfigId}
+                      onChange={(event) => setSelectedEmailConfigId(event.target.value)}
+                      disabled={!notifyEmail}
+                    >
+                      <option value="">使用 manual_resolved/default 邮箱</option>
+                      {emailConfigs.map((config) => (
+                        <option key={config.id} value={config.id}>
+                          {config.name} / {config.purpose}
+                          {config.is_default ? " / 默认" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
-                <InquiryDetails task={task} />
-              </article>
-            );
-          })}
+              </div>
+              <div className="mt-4 flex justify-center gap-3">
+                <button
+                  className="btn-secondary min-w-28"
+                  type="button"
+                  onClick={() =>
+                    setDrafts((current) => ({
+                      ...current,
+                      [selectedTask.id]: draftFromTask(selectedTask),
+                    }))
+                  }
+                >
+                  取消
+                </button>
+                <button
+                  className="btn-primary min-w-36"
+                  type="button"
+                  onClick={() => void saveTask(selectedTask)}
+                  disabled={savingTaskId === selectedTask.id}
+                >
+                  {savingTaskId === selectedTask.id ? "保存中..." : "保存处理结果"}
+                </button>
+              </div>
+            </section>
+          </section>
         </div>
-      )}
+      ) : null}
     </div>
   );
+}
+
+function TaskStatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={`manual-status-badge ${
+        status === "resolved"
+          ? "manual-status-resolved"
+          : status === "cancelled"
+            ? "manual-status-cancelled"
+            : "manual-status-pending"
+      }`}
+    >
+      {taskStatusLabel(status)}
+    </span>
+  );
+}
+
+function taskFilterCount(filter: TaskFilter, tasks: ManualQuoteTask[]): number {
+  if (filter === "all") {
+    return tasks.length;
+  }
+  return tasks.filter((task) => task.status === filter).length;
+}
+
+function taskMatchesQuery(task: ManualQuoteTask, query: string): boolean {
+  const details = buildInquiryDetails(task);
+  return [
+    task.quote_id,
+    task.reason,
+    task.reason_zh,
+    task.assigned_to,
+    briefDestination(details),
+    ...details.addressItems.map((item) => item.value),
+    ...details.missingFields,
+  ]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(query));
+}
+
+function briefDestination(details: ReturnType<typeof buildInquiryDetails>): string {
+  const city = details.addressItems.find((item) => item.label === "城市")?.value;
+  const province = details.addressItems.find((item) => item.label === "省份")?.value;
+  return [city, province]
+    .filter((value) => value && value !== "未返回")
+    .join(", ") || "目的地待确认";
 }
 
 function ManualTaskLearningBridge({

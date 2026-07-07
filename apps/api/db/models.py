@@ -9,6 +9,29 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="sales", index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class VendorRateRule(Base):
     __tablename__ = "vendor_rate_rules"
 
@@ -219,6 +242,27 @@ class QuoteAuditLog(Base):
     total_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     manual_review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, index=True)
     risk_tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class SalesQuoteRecord(Base):
+    __tablename__ = "sales_quote_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    quote_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    actor_api_key_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    actor_name: Mapped[str | None] = mapped_column(String(128), index=True)
+    actor_role: Mapped[str | None] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    customer_message: Mapped[str] = mapped_column(Text, nullable=False)
+    customer_reply: Mapped[str | None] = mapped_column(Text)
+    request_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    result_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

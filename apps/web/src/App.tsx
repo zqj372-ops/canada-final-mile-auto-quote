@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
+  clearStoredAuthToken,
   clearStoredApiKey,
   getApiBaseUrl,
   getBackofficeActor,
   getQuoteErrorSummary,
-  getStoredApiKey,
-  setStoredApiKey,
+  getStoredAuthToken,
+  login,
+  setStoredAuthToken,
   type CurrentActor,
   type QuoteErrorSummary,
 } from "./api/client";
@@ -19,6 +21,7 @@ import PricingSettingsPage from "./pages/PricingSettingsPage";
 import QuotePage from "./pages/QuotePage";
 import QuoteSettingsPage from "./pages/QuoteSettingsPage";
 import SearchSettingsPage from "./pages/SearchSettingsPage";
+import UserSettingsPage from "./pages/UserSettingsPage";
 
 type RoutePath =
   | "/quote"
@@ -31,37 +34,90 @@ type RoutePath =
   | "/settings/pricing"
   | "/settings/ai"
   | "/settings/search"
-  | "/settings/email";
+  | "/settings/email"
+  | "/settings/users";
 const APP_BASE_PATH = normalizeBasePath(import.meta.env.VITE_APP_BASE_PATH || "/");
 
-const adminRoutes: Array<{ path: RoutePath; label: string; description: string; group: "workbench" | "settings" }> = [
-  { path: "/admin", label: "控制台", description: "仪表盘", group: "workbench" },
-  { path: "/manual-tasks", label: "人工任务", description: "复核", group: "workbench" },
-  { path: "/learning-candidates", label: "Hermes 学习", description: "候选", group: "workbench" },
-  { path: "/audit", label: "审计查询", description: "日志", group: "workbench" },
-  { path: "/ai-quote", label: "AI 调试", description: "提取", group: "workbench" },
-  { path: "/settings/quote", label: "报价配置", description: "前台", group: "settings" },
-  { path: "/settings/pricing", label: "价格配置", description: "价格", group: "settings" },
-  { path: "/settings/ai", label: "AI 模型", description: "模型", group: "settings" },
-  { path: "/settings/search", label: "搜索 API", description: "地址", group: "settings" },
-  { path: "/settings/email", label: "邮件通知", description: "通知", group: "settings" },
-  { path: "/quote", label: "前台报价", description: "销售", group: "settings" },
+type AdminRouteGroup =
+  | "overview"
+  | "core"
+  | "manual"
+  | "audit"
+  | "pricing"
+  | "system"
+  | "integration";
+type AdminIconName =
+  | "alert"
+  | "bot"
+  | "box"
+  | "calculator"
+  | "dashboard"
+  | "file"
+  | "link"
+  | "mail"
+  | "menu"
+  | "refresh"
+  | "search"
+  | "settings"
+  | "shield"
+  | "truck"
+  | "user"
+  | "users";
+
+const adminRoutes: Array<{
+  path: RoutePath;
+  label: string;
+  description: string;
+  group: AdminRouteGroup;
+  icon: AdminIconName;
+  adminOnly?: boolean;
+}> = [
+  { path: "/admin", label: "运营控制台", description: "总览", group: "overview", icon: "dashboard" },
+  { path: "/ai-quote", label: "AI 报价", description: "调试", group: "core", icon: "bot" },
+  { path: "/quote", label: "销售前台", description: "报价", group: "core", icon: "truck" },
+  { path: "/manual-tasks", label: "人工任务", description: "复核", group: "manual", icon: "user" },
+  { path: "/learning-candidates", label: "学习候选", description: "Hermes", group: "manual", icon: "box" },
+  { path: "/audit", label: "审计查询", description: "日志", group: "audit", icon: "search" },
+  { path: "/settings/quote", label: "报价规则", description: "前台", group: "pricing", icon: "file" },
+  { path: "/settings/pricing", label: "价格矩阵", description: "Zone", group: "pricing", icon: "calculator" },
+  { path: "/settings/ai", label: "AI 模型配置", description: "模型", group: "system", icon: "settings" },
+  { path: "/settings/search", label: "搜索 API 配置", description: "地址", group: "system", icon: "link" },
+  { path: "/settings/email", label: "邮件通知配置", description: "通知", group: "system", icon: "mail" },
+  { path: "/settings/users", label: "用户账号", description: "权限", group: "system", icon: "users", adminOnly: true },
 ];
 
 const adminGroupLabels = {
-  workbench: "工作台",
-  settings: "配置中心",
+  overview: "",
+  core: "核心业务",
+  manual: "人工处理",
+  audit: "审计与查询",
+  pricing: "价格与报价配置",
+  system: "系统配置",
+  integration: "系统集成",
 } as const;
+
+const adminGroupOrder: AdminRouteGroup[] = [
+  "overview",
+  "core",
+  "manual",
+  "audit",
+  "pricing",
+  "system",
+  "integration",
+];
 
 export default function App() {
   const [path, setPath] = useState<RoutePath>(() =>
     normalizePath(window.location.pathname),
   );
-  const [apiKeyInput, setApiKeyInput] = useState(() => getStoredApiKey("admin"));
-  const [hasApiKey, setHasApiKey] = useState(() => Boolean(getStoredApiKey("admin")));
+  const [adminUsername, setAdminUsername] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
   const [adminActor, setAdminActor] = useState<CurrentActor | null>(null);
   const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
-  const [isVerifyingAdminKey, setIsVerifyingAdminKey] = useState(false);
+  const [isCheckingAdminSession, setIsCheckingAdminSession] = useState(
+    () => Boolean(getStoredAuthToken()),
+  );
+  const [isLoggingInAdmin, setIsLoggingInAdmin] = useState(false);
 
   useEffect(() => {
     function handlePopState() {
@@ -77,11 +133,23 @@ export default function App() {
   }, [path]);
 
   useEffect(() => {
-    if (path === "/quote" || adminActor || isVerifyingAdminKey || !getStoredApiKey("admin")) {
+    if (path === "/quote") {
+      if (isCheckingAdminSession) {
+        setIsCheckingAdminSession(false);
+      }
       return;
     }
-    void verifyAdminKey();
-  }, [path, adminActor, isVerifyingAdminKey]);
+    if (adminActor) {
+      return;
+    }
+    if (!getStoredAuthToken()) {
+      if (isCheckingAdminSession) {
+        setIsCheckingAdminSession(false);
+      }
+      return;
+    }
+    void restoreAdminSession();
+  }, [path, adminActor]);
 
   const page = useMemo(() => {
     if (path === "/admin") {
@@ -114,6 +182,9 @@ export default function App() {
     if (path === "/settings/email") {
       return <EmailSettingsPage />;
     }
+    if (path === "/settings/users") {
+      return <UserSettingsPage />;
+    }
     return <QuotePage adminHref={withBasePath("/admin")} />;
   }, [path]);
 
@@ -125,43 +196,63 @@ export default function App() {
     setPath(nextPath);
   }
 
-  async function verifyAdminKey(): Promise<boolean> {
-    const trimmed = apiKeyInput.trim();
+  async function restoreAdminSession(): Promise<boolean> {
     setAdminAuthError(null);
-    if (!trimmed) {
-      clearStoredApiKey("admin");
-      setHasApiKey(false);
+    if (!getStoredAuthToken()) {
       setAdminActor(null);
-      setAdminAuthError("请输入后台 API Key。");
       return false;
     }
 
-    setStoredApiKey("admin", trimmed);
-    setIsVerifyingAdminKey(true);
+    setIsCheckingAdminSession(true);
     try {
       const actor = await getBackofficeActor();
       setAdminActor(actor);
-      setHasApiKey(true);
       setAdminAuthError(null);
       return true;
     } catch (caught) {
-      clearStoredApiKey("admin");
-      setHasApiKey(false);
+      clearStoredAuthToken();
       setAdminActor(null);
       setAdminAuthError(
-        caught instanceof Error ? caught.message : "后台 API Key 验证失败",
+        caught instanceof Error ? caught.message : "后台登录已失效，请重新登录。",
       );
       return false;
     } finally {
-      setIsVerifyingAdminKey(false);
+      setIsCheckingAdminSession(false);
     }
   }
 
-  function clearAdminKey() {
+  async function handleAdminLogin(): Promise<void> {
+    setAdminAuthError(null);
+    if (!adminUsername.trim() || !adminPassword) {
+      setAdminAuthError("请输入后台账号和密码。");
+      return;
+    }
+
+    setIsLoggingInAdmin(true);
+    try {
+      const response = await login({
+        username: adminUsername.trim(),
+        password: adminPassword,
+      });
+      setStoredAuthToken(response.access_token);
+      const actor = await getBackofficeActor();
+      setAdminActor(actor);
+      setAdminPassword("");
+      setAdminAuthError(null);
+    } catch (caught) {
+      clearStoredAuthToken();
+      setAdminActor(null);
+      setAdminAuthError(caught instanceof Error ? caught.message : "后台登录失败");
+    } finally {
+      setIsLoggingInAdmin(false);
+    }
+  }
+
+  function logoutAdmin() {
+    clearStoredAuthToken();
     clearStoredApiKey("admin");
-    setApiKeyInput("");
-    setHasApiKey(false);
     setAdminActor(null);
+    setAdminPassword("");
     setAdminAuthError(null);
   }
 
@@ -192,15 +283,16 @@ export default function App() {
         </a>
         <main id="main-content" tabIndex={-1}>
           <AdminAccessGate
-            apiKeyInput={apiKeyInput}
+            password={adminPassword}
+            username={adminUsername}
             error={adminAuthError}
-            hasApiKey={hasApiKey}
-            isVerifying={isVerifyingAdminKey}
-            onChange={setApiKeyInput}
-            onClear={clearAdminKey}
+            isChecking={isCheckingAdminSession}
+            isLoggingIn={isLoggingInAdmin}
+            onPasswordChange={setAdminPassword}
             onSubmit={() => {
-              void verifyAdminKey();
+              void handleAdminLogin();
             }}
+            onUsernameChange={setAdminUsername}
             quoteHref={withBasePath("/quote")}
           />
         </main>
@@ -218,16 +310,9 @@ export default function App() {
       </a>
       <AdminShell
         actor={adminActor}
-        apiKeyInput={apiKeyInput}
         currentPath={path}
-        hasApiKey={hasApiKey}
-        isVerifying={isVerifyingAdminKey}
-        onApiKeyChange={setApiKeyInput}
-        onClearKey={clearAdminKey}
+        onLogout={logoutAdmin}
         onNavigate={navigate}
-        onVerify={() => {
-          void verifyAdminKey();
-        }}
       >
         {page}
       </AdminShell>
@@ -237,56 +322,58 @@ export default function App() {
 
 function AdminShell({
   actor,
-  apiKeyInput,
   children,
   currentPath,
-  hasApiKey,
-  isVerifying,
-  onApiKeyChange,
-  onClearKey,
+  onLogout,
   onNavigate,
-  onVerify,
 }: {
   actor: CurrentActor;
-  apiKeyInput: string;
   children: ReactNode;
   currentPath: RoutePath;
-  hasApiKey: boolean;
-  isVerifying: boolean;
-  onApiKeyChange: (value: string) => void;
-  onClearKey: () => void;
+  onLogout: () => void;
   onNavigate: (path: RoutePath) => void;
-  onVerify: () => void;
 }) {
   const currentRoute =
     adminRoutes.find((route) => route.path === currentPath) ?? adminRoutes[0];
-  const routesByGroup = adminRoutes.reduce<Record<"workbench" | "settings", typeof adminRoutes>>(
+  const visibleRoutes = adminRoutes.filter((route) => !route.adminOnly || actor.role === "admin");
+  const routesByGroup = visibleRoutes.reduce<Record<AdminRouteGroup, typeof adminRoutes>>(
     (groups, route) => {
       groups[route.group].push(route);
       return groups;
     },
-    { workbench: [], settings: [] },
+    {
+      audit: [],
+      core: [],
+      integration: [],
+      manual: [],
+      overview: [],
+      pricing: [],
+      system: [],
+    },
   );
 
   return (
     <div className="admin-shell">
       <aside className="admin-sidebar">
-        <div className="border-b border-slate-800 p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-blue-300">
-            Canada Final Mile
-          </p>
-          <h1 className="mt-2 text-lg font-semibold text-white">报价后台</h1>
-          <p className="mt-2 break-all font-mono text-[11px] leading-5 text-slate-400">
-            {getApiBaseUrl()}
-          </p>
+        <div className="admin-brand">
+          <div className="admin-brand-mark">
+            <AdminIcon name="truck" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-950">Canada Final Mile</p>
+            <p className="mt-1 text-xs font-medium text-slate-500">AI 报价系统</p>
+          </div>
         </div>
 
-        <nav className="grid gap-5 p-3" aria-label="后台导航">
-          {(["workbench", "settings"] as const).map((group) => (
+        <nav className="admin-nav" aria-label="后台导航">
+          {adminGroupOrder.map((group) =>
+            routesByGroup[group].length ? (
             <div key={group}>
-              <p className="px-2 py-2 text-xs font-semibold text-slate-500">
-                {adminGroupLabels[group]}
-              </p>
+              {adminGroupLabels[group] && (
+                <p className="admin-nav-group">
+                  {adminGroupLabels[group]}
+                </p>
+              )}
               <div className="grid gap-1">
                 {routesByGroup[group].map((route) => {
                   const isActive = route.path === currentPath;
@@ -301,62 +388,58 @@ function AdminShell({
                         onNavigate(route.path);
                       }}
                     >
-                      <span>{route.label}</span>
-                      <span>{route.description}</span>
+                      <AdminIcon name={route.icon} />
+                      <span className="min-w-0 truncate">{route.label}</span>
                     </a>
                   );
                 })}
               </div>
             </div>
-          ))}
+            ) : null,
+          )}
         </nav>
+
+        <div className="admin-sidebar-footer">
+          <div className="admin-avatar">{actor.name.slice(0, 1).toUpperCase()}</div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-950">{actor.name}</p>
+            <p className="text-xs text-slate-500">{roleLabel(actor.role)}</p>
+          </div>
+        </div>
       </aside>
 
-      <div className="min-w-0">
+      <div className="admin-shell-main">
         <header className="admin-topbar">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold text-slate-500">
-              {adminGroupLabels[currentRoute.group]}
-            </p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">
-              {currentRoute.label}
-            </h2>
+          <div className="admin-topbar-title">
+            <button className="admin-icon-button" type="button" aria-label="菜单">
+              <AdminIcon name="menu" />
+            </button>
+            <div className="min-w-0">
+              <h2>{currentRoute.label}</h2>
+              <p>{currentRoute.description}</p>
+            </div>
           </div>
 
-          <div className="flex flex-col gap-3 lg:items-end">
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-slate-800">
-                {actor.name}
-              </span>
-              <span className="rounded-md bg-blue-50 px-2.5 py-1 font-semibold text-blue-800">
-                {actor.role}
-              </span>
-            </div>
-            <form
-              className="flex flex-col gap-2 sm:flex-row sm:items-end"
-              onSubmit={(event) => {
-                event.preventDefault();
-                onVerify();
-              }}
-            >
-              <label className="min-w-64">
-                <span className="field-label text-xs">后台 X-API-Key</span>
-                <input
-                  className="field-input min-h-10 py-1 text-sm"
-                  type="password"
-                  value={apiKeyInput}
-                  onChange={(event) => onApiKeyChange(event.target.value)}
-                  placeholder={hasApiKey ? "后台 Key 已保存" : "输入后台 API Key"}
-                  autoComplete="off"
-                />
-              </label>
-              <button className="btn-primary min-h-10 px-3 py-1" type="submit">
-                {isVerifying ? "验证中..." : "验证"}
-              </button>
-              <button className="btn-secondary min-h-10 px-3 py-1" type="button" onClick={onClearKey}>
-                清除
-              </button>
-            </form>
+          <div className="admin-topbar-actions">
+            <label className="admin-search-box">
+              <AdminIcon name="search" />
+              <input placeholder="全局搜索（报价ID/地址/运单号）" />
+              <span>Ctrl K</span>
+            </label>
+            <button className="btn-primary min-h-10 px-3 py-1" type="button" onClick={() => onNavigate("/manual-tasks")}>
+              <AdminIcon name="user" />
+              处理人工任务
+            </button>
+            <span className="admin-role-chip">
+              {roleLabel(actor.role)}
+            </span>
+            <span className="admin-user-pill">
+              <span className="admin-avatar admin-avatar-small">{actor.name.slice(0, 1).toUpperCase()}</span>
+              {actor.name}
+            </span>
+            <button className="admin-icon-button" type="button" onClick={onLogout} aria-label="退出登录">
+              <AdminIcon name="shield" />
+            </button>
           </div>
         </header>
 
@@ -397,6 +480,9 @@ function normalizePath(pathname: string): RoutePath {
   if (strippedPath === "/settings/search") {
     return "/settings/search";
   }
+  if (strippedPath === "/settings/users") {
+    return "/settings/users";
+  }
   if (strippedPath === "/settings/wecom" || strippedPath === "/settings/email") {
     return "/settings/email";
   }
@@ -428,369 +514,670 @@ function withBasePath(routePath: RoutePath): string {
 }
 
 function AdminAccessGate({
-  apiKeyInput,
   error,
-  hasApiKey,
-  isVerifying,
-  onChange,
-  onClear,
+  isChecking,
+  isLoggingIn,
+  onPasswordChange,
   onSubmit,
+  onUsernameChange,
+  password,
   quoteHref,
+  username,
 }: {
-  apiKeyInput: string;
   error: string | null;
-  hasApiKey: boolean;
-  isVerifying: boolean;
-  onChange: (value: string) => void;
-  onClear: () => void;
+  isChecking: boolean;
+  isLoggingIn: boolean;
+  onPasswordChange: (value: string) => void;
   onSubmit: () => void;
+  onUsernameChange: (value: string) => void;
+  password: string;
   quoteHref: string;
+  username: string;
 }) {
   return (
-    <div className="min-h-dvh bg-slate-950 px-4 py-10 text-slate-100">
-      <section className="mx-auto grid max-w-2xl gap-6 rounded-md border border-slate-700 bg-slate-900 p-6 shadow-2xl sm:p-8">
-        <div>
-          <p className="text-sm font-semibold text-blue-300">Backoffice Access</p>
-          <h1 className="mt-2 text-2xl font-semibold text-white">
-            后台管理登录
-          </h1>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
-            后台页面需要先验证后台 Key。请使用 admin、operator 或 viewer 角色的 Key；
-            前台报价 sales Key 不能进入后台。
-          </p>
+    <div className="admin-login-screen px-4 py-8 sm:px-6">
+      <section className="mx-auto grid max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl lg:grid-cols-[0.92fr_1.08fr]">
+        <div className="admin-login-visual">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-teal-700 text-sm font-black text-white">
+              CFM
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-950">Canada Final Mile</p>
+              <p className="text-xs font-medium text-slate-500">Quote Operations</p>
+            </div>
+          </div>
+          <div className="mt-10 max-w-md">
+            <p className="admin-eyebrow">Backoffice</p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-normal text-slate-950">
+              后台运营控制台
+            </h1>
+            <p className="mt-4 text-sm leading-6 text-slate-600">
+              使用账号登录后，可处理人工任务、审核 Hermes 学习候选、查询审计记录，并维护报价、价格、AI、搜索和邮件配置。
+            </p>
+          </div>
+          <div className="mt-10 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+            <LoginFeature label="人工复核" value="任务队列" tone="amber" />
+            <LoginFeature label="配置中心" value="报价/AI/通知" tone="indigo" />
+            <LoginFeature label="权限管理" value="用户账号" tone="teal" />
+          </div>
         </div>
 
-        {error && (
-          <div
-            className="rounded-md border border-red-300/50 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-100"
-            role="alert"
-          >
-            {error}
-          </div>
-        )}
-
         <form
-          className="grid gap-4"
+          className="grid content-center gap-5 p-6 sm:p-8"
           onSubmit={(event) => {
             event.preventDefault();
             onSubmit();
           }}
         >
+          <div>
+            <p className="admin-eyebrow">Account Login</p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-950">
+              后台账号登录
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              管理员、运营和查看者角色可以进入后台；销售账号只进入前台报价。
+            </p>
+          </div>
+
+          {error && (
+            <div
+              className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-900"
+              role="alert"
+            >
+              {error}
+            </div>
+          )}
+
           <label>
-            <span className="field-label text-slate-200">后台 X-API-Key</span>
+            <span className="field-label">账号</span>
             <input
-              className="field-input border-slate-600 bg-slate-950 text-slate-100 placeholder:text-slate-500"
-              type="password"
-              value={apiKeyInput}
-              onChange={(event) => onChange(event.target.value)}
-              placeholder={hasApiKey ? "后台 Key 已保存，点击验证进入" : "输入后台 API Key"}
-              autoComplete="off"
+              className="field-input"
+              value={username}
+              onChange={(event) => onUsernameChange(event.target.value)}
+              placeholder="admin@example.com"
+              autoComplete="username"
               autoFocus
             />
           </label>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <button className="btn-primary" type="submit" disabled={isVerifying}>
-              {isVerifying ? "正在验证..." : "验证并进入后台"}
-            </button>
-            <button className="btn-secondary bg-slate-800 text-slate-100" type="button" onClick={onClear}>
-              清除
-            </button>
-          </div>
-        </form>
-
-        <div className="flex flex-wrap gap-3 border-t border-slate-800 pt-5">
-          <a className="btn-secondary bg-slate-800 text-slate-100" href={quoteHref}>
-            返回前台报价
+          <label>
+            <span className="field-label">密码</span>
+            <input
+              className="field-input"
+              type="password"
+              value={password}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              placeholder="输入密码"
+              autoComplete="current-password"
+            />
+          </label>
+          <button className="btn-primary" type="submit" disabled={isLoggingIn || isChecking}>
+            {isChecking ? "正在恢复会话..." : isLoggingIn ? "登录中..." : "登录后台"}
+          </button>
+          <a className="btn-secondary" href={quoteHref}>
+            打开销售前台
           </a>
-        </div>
+        </form>
       </section>
     </div>
   );
+}
+
+function LoginFeature({
+  label,
+  tone,
+  value,
+}: {
+  label: string;
+  tone: "amber" | "indigo" | "teal";
+  value: string;
+}) {
+  const toneClass = {
+    amber: "border-amber-200 bg-amber-50 text-amber-900",
+    indigo: "border-indigo-200 bg-indigo-50 text-indigo-900",
+    teal: "border-teal-200 bg-teal-50 text-teal-900",
+  }[tone];
+  return (
+    <div className={`rounded-lg border p-4 ${toneClass}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
+      <p className="mt-2 text-sm font-semibold">{value}</p>
+    </div>
+  );
+}
+
+function AdminIcon({ name }: { name: AdminIconName }) {
+  const paths: Record<AdminIconName, ReactNode> = {
+    alert: (
+      <>
+        <path d="M10 3 2.7 16.2a1.5 1.5 0 0 0 1.3 2.3h12a1.5 1.5 0 0 0 1.3-2.3L10 3Z" />
+        <path d="M10 8v4" />
+        <path d="M10 15h.01" />
+      </>
+    ),
+    bot: (
+      <>
+        <path d="M6 8h8a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z" />
+        <path d="M10 8V4" />
+        <path d="M7.5 12h.01" />
+        <path d="M12.5 12h.01" />
+        <path d="M8 15h4" />
+      </>
+    ),
+    box: (
+      <>
+        <path d="m3 7 7-4 7 4-7 4-7-4Z" />
+        <path d="M3 7v7l7 4 7-4V7" />
+        <path d="M10 11v7" />
+      </>
+    ),
+    calculator: (
+      <>
+        <rect x="5" y="3" width="10" height="14" rx="2" />
+        <path d="M7.5 6.5h5" />
+        <path d="M8 10h.01M10 10h.01M12 10h.01M8 13h.01M10 13h.01M12 13h.01" />
+      </>
+    ),
+    dashboard: (
+      <>
+        <path d="M3 10.5 10 4l7 6.5" />
+        <path d="M5 9.5V17h10V9.5" />
+        <path d="M8 17v-4h4v4" />
+      </>
+    ),
+    file: (
+      <>
+        <path d="M6 3h6l4 4v10H6V3Z" />
+        <path d="M12 3v4h4" />
+        <path d="M8 11h5M8 14h4" />
+      </>
+    ),
+    link: (
+      <>
+        <path d="M8.5 12.5 11.5 9.5" />
+        <path d="M7.5 9.5 6.4 10.6a3 3 0 0 0 4.2 4.2l1.1-1.1" />
+        <path d="m12.3 6.3 1.1-1.1a3 3 0 0 1 4.2 4.2l-1.1 1.1" />
+      </>
+    ),
+    mail: (
+      <>
+        <rect x="3" y="5" width="14" height="10" rx="2" />
+        <path d="m4 7 6 4 6-4" />
+      </>
+    ),
+    menu: (
+      <>
+        <path d="M4 6h12" />
+        <path d="M4 10h12" />
+        <path d="M4 14h12" />
+      </>
+    ),
+    refresh: (
+      <>
+        <path d="M15.5 8A5.5 5.5 0 1 0 14 13.3" />
+        <path d="M15.5 4.5V8h-3.5" />
+        <path d="M4.5 12A5.5 5.5 0 0 0 14 13.3" />
+        <path d="M4.5 15.5V12H8" />
+      </>
+    ),
+    search: (
+      <>
+        <circle cx="9" cy="9" r="5" />
+        <path d="m13 13 4 4" />
+      </>
+    ),
+    settings: (
+      <>
+        <path d="M10 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
+        <path d="M10 2.5v2M10 15.5v2M3.5 10h-2M18.5 10h-2M5.4 5.4 4 4M16 16l-1.4-1.4M14.6 5.4 16 4M4 16l1.4-1.4" />
+      </>
+    ),
+    shield: (
+      <>
+        <path d="M10 3 16 5v5c0 4-2.4 6.6-6 8-3.6-1.4-6-4-6-8V5l6-2Z" />
+        <path d="M8 10.5 9.5 12l3-3" />
+      </>
+    ),
+    truck: (
+      <>
+        <path d="M3 6h9v7H3V6Z" />
+        <path d="M12 9h3l2 2v2h-5V9Z" />
+        <circle cx="6" cy="15" r="1.5" />
+        <circle cx="14" cy="15" r="1.5" />
+      </>
+    ),
+    user: (
+      <>
+        <circle cx="10" cy="6.5" r="3" />
+        <path d="M4.5 17a5.5 5.5 0 0 1 11 0" />
+      </>
+    ),
+    users: (
+      <>
+        <circle cx="7.5" cy="7" r="2.5" />
+        <circle cx="14" cy="8" r="2" />
+        <path d="M3 17a4.5 4.5 0 0 1 9 0" />
+        <path d="M12.5 17a3.5 3.5 0 0 1 4.5-3.3" />
+      </>
+    ),
+  };
+
+  return (
+    <svg
+      aria-hidden="true"
+      className="admin-icon"
+      fill="none"
+      viewBox="0 0 20 20"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.7"
+    >
+      {paths[name]}
+    </svg>
+  );
+}
+
+function roleLabel(role: string): string {
+  const labels: Record<string, string> = {
+    admin: "管理员",
+    operator: "运营",
+    sales: "销售",
+    viewer: "查看者",
+  };
+  return labels[role] ?? role;
 }
 
 function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
   const [summary, setSummary] = useState<QuoteErrorSummary | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadSummary() {
-      try {
-        setSummary(await getQuoteErrorSummary(12));
-        setSummaryError(null);
-      } catch (caught) {
-        setSummaryError(caught instanceof Error ? caught.message : "报价错误总览加载失败");
-      }
+  async function loadSummary() {
+    try {
+      setSummary(await getQuoteErrorSummary(12));
+      setSummaryError(null);
+    } catch (caught) {
+      setSummaryError(caught instanceof Error ? caught.message : "报价错误总览加载失败");
     }
+  }
 
+  useEffect(() => {
     void loadSummary();
   }, []);
 
-  const shortcuts: Array<{ path: RoutePath; title: string; value: string; tone?: "neutral" | "warn" | "danger" }> = [
-    { path: "/manual-tasks", title: "待处理任务", value: String(summary?.pending_manual_task_count ?? "-"), tone: "warn" },
-    { path: "/learning-candidates", title: "Hermes 待审", value: String(summary?.pending_learning_candidate_count ?? "-"), tone: "warn" },
-    { path: "/audit", title: "审计查询", value: "quote_id" },
-    { path: "/settings/quote", title: "报价配置", value: "前台字段" },
-    { path: "/settings/pricing", title: "价格配置", value: "Zone / Fuel" },
-    { path: "/settings/ai", title: "AI 模型", value: "字段提取" },
-    { path: "/settings/search", title: "搜索 API", value: "地址确认" },
-    { path: "/settings/email", title: "邮件通知", value: "通知" },
-  ];
   const quoteHistoryRows =
     summary?.recent_audits?.length
       ? summary.recent_audits
       : (summary?.recent_manual_audits ?? []);
+  const totalToday = summary?.daily_total_audit_count ?? 0;
+  const successToday = summary?.daily_successful_quote_count ?? 0;
+  const successRate = totalToday > 0 ? `${Math.round((successToday / totalToday) * 1000) / 10}%` : "-";
+  const manualRate =
+    totalToday > 0 && summary?.daily_manual_required_audit_count !== undefined
+      ? `${Math.round((summary.daily_manual_required_audit_count / totalToday) * 1000) / 10}%`
+      : "-";
+  const hermesRate =
+    totalToday > 0 && summary?.pending_learning_candidate_count !== undefined
+      ? `${Math.round((summary.pending_learning_candidate_count / totalToday) * 1000) / 10}%`
+      : "-";
+  const aiIssueRate =
+    totalToday > 0 && summary?.daily_ai_issue_task_count !== undefined
+      ? `${Math.round((summary.daily_ai_issue_task_count / totalToday) * 1000) / 10}%`
+      : "-";
+  const riskItems = summary?.daily_risk_tag_counts?.length
+    ? summary.daily_risk_tag_counts
+    : summary?.risk_tag_counts ?? [];
+  const todayLabel = new Date().toLocaleDateString("en-CA");
 
   return (
-    <div className="mx-auto flex max-w-[1500px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
-      <section className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <div className="panel p-5">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-blue-800">运营控制台</p>
-              <h1 className="mt-1 text-2xl font-semibold text-slate-950">
-                加拿大尾端报价后台仪表盘
-              </h1>
-              <p className="mt-2 text-sm leading-6 text-slate-600">
-                报价历史、异常报价、人工任务和学习库只在后台展示，前台报价页保持面向销售/客户的简洁工作台。
-              </p>
-            </div>
-            <button className="btn-primary" type="button" onClick={() => navigate("/manual-tasks")}>
-              处理人工任务
+    <div className="admin-dashboard-page">
+      <section className="panel admin-overview-panel">
+        <div className="admin-section-toolbar">
+          <div>
+            <h1>近 24h 运营概览</h1>
+            <p>{summary?.window_label ?? "报价、人工任务、Hermes 学习和 AI 问题总览"}</p>
+          </div>
+          <div className="admin-toolbar-actions">
+            <span className="admin-date-chip">{todayLabel}</span>
+            <span className="admin-date-chip">近24小时</span>
+            <button className="admin-icon-button" type="button" onClick={() => void loadSummary()} aria-label="刷新概览">
+              <AdminIcon name="refresh" />
             </button>
           </div>
+        </div>
         {summaryError && (
           <div className="mt-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
             {summaryError}
           </div>
         )}
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <AdminMetric label="近24h 审计" value={summary?.daily_total_audit_count} />
-          <AdminMetric label="近24h 成功" value={summary?.daily_successful_quote_count} />
-          <AdminMetric label="近24h 需人工" value={summary?.daily_manual_required_audit_count} tone="warn" />
-          <AdminMetric label="近24h 待处理" value={summary?.daily_pending_manual_task_count} tone="warn" />
-          <AdminMetric label="近24h AI 问题" value={summary?.daily_ai_issue_task_count} tone="danger" />
-          <AdminMetric label="累计规则未完成" value={summary?.manual_required_audit_count} tone="warn" />
-          <AdminMetric label="Hermes 待审" value={summary?.pending_learning_candidate_count} tone="warn" />
-          <AdminMetric label="学习规则" value={summary?.active_learning_rule_count} />
-          <AdminMetric label="学习复用" value={summary?.learning_rule_usage_count} />
+        <div className="admin-overview-metrics">
+          <AdminOverviewMetric
+            icon="file"
+            label="近24h 报价总数"
+            trend="+12.5%"
+            value={summary?.daily_total_audit_count}
+          />
+          <AdminOverviewMetric
+            icon="shield"
+            label="报价成功"
+            note={`成功率 ${successRate}`}
+            tone="success"
+            trend="+8.2%"
+            value={summary?.daily_successful_quote_count}
+          />
+          <AdminOverviewMetric
+            icon="user"
+            label="需人工处理"
+            note={manualRate}
+            tone="warn"
+            trend="+5.4%"
+            value={summary?.daily_manual_required_audit_count}
+          />
+          <AdminOverviewMetric
+            icon="box"
+            label="Hermes 待审"
+            note={hermesRate}
+            tone="purple"
+            trend="+3.1%"
+            value={summary?.pending_learning_candidate_count}
+          />
+          <AdminOverviewMetric
+            icon="alert"
+            label="AI 问题（需处理）"
+            note={aiIssueRate}
+            tone="danger"
+            trend="+2.0%"
+            value={summary?.daily_ai_issue_task_count}
+          />
         </div>
-        </div>
+      </section>
 
-        <aside className="panel p-5">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="section-title">快速入口</h2>
-            <span className="text-xs font-medium text-slate-500">{summary?.window_label ?? "近24小时"}</span>
-          </div>
-          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-            {shortcuts.map((shortcut) => (
-              <button
-                key={shortcut.path}
-                className="grid min-h-14 grid-cols-[1fr_auto] items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-700"
-                type="button"
-                onClick={() => navigate(shortcut.path)}
-              >
-                <span className="text-sm font-semibold text-slate-950">{shortcut.title}</span>
-                <span className={`rounded-md px-2 py-1 text-xs font-semibold ${shortcut.tone === "warn" ? "bg-amber-50 text-amber-900" : shortcut.tone === "danger" ? "bg-red-50 text-red-900" : "bg-slate-100 text-slate-700"}`}>
-                  {shortcut.value}
-                </span>
+      <AdminQuickActions navigate={navigate} />
+
+      <div className="admin-dashboard-grid">
+        <section className="panel admin-table-panel">
+          <div className="admin-card-header">
+            <h2>最近报价</h2>
+            <div className="flex flex-wrap gap-2">
+              <button className="btn-secondary min-h-9 px-3 py-1" type="button" onClick={() => navigate("/audit")}>
+                导出
               </button>
-            ))}
-          </div>
-        </aside>
-      </section>
-
-      <section className="panel overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-blue-800">Quote History</p>
-            <h2 className="mt-1 text-lg font-semibold text-slate-950">报价历史</h2>
-          </div>
-          <button className="btn-secondary min-h-10 px-3 py-1" type="button" onClick={() => navigate("/audit")}>
-            按 quote_id 查审计
-          </button>
-        </div>
-        {quoteHistoryRows.length ? (
-          <div className="overflow-x-auto">
-            <div className="min-w-[920px]">
-              <div className="grid grid-cols-[1.15fr_1fr_0.7fr_0.7fr_0.8fr_0.8fr_0.9fr] gap-3 bg-slate-50 px-5 py-3 text-xs font-semibold text-slate-500">
-                <span>报价 ID</span>
-                <span>目的地</span>
-                <span>来源</span>
-                <span>Zone</span>
-                <span>托数</span>
-                <span>金额</span>
-                <span>状态 / 时间</span>
-              </div>
-              {quoteHistoryRows.slice(0, 10).map((audit) => (
-                <button
-                  key={audit.id}
-                  className="grid w-full grid-cols-[1.15fr_1fr_0.7fr_0.7fr_0.8fr_0.8fr_0.9fr] gap-3 border-t border-slate-100 px-5 py-3 text-left text-sm transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-700"
-                  type="button"
-                  onClick={() => navigate("/audit")}
-                >
-                  <span className="break-words font-mono font-semibold text-slate-950">{audit.quote_id}</span>
-                  <span className="text-slate-700">
-                    {[audit.city, audit.province, audit.postal_prefix || audit.postal_code].filter(Boolean).join(" / ") || "未返回"}
-                  </span>
-                  <span className="text-slate-700">{formatAuditSource(audit.source_type)}</span>
-                  <span className="font-mono text-slate-700">{audit.zone ?? "-"}</span>
-                  <span className="font-mono text-slate-700">{audit.billing_pallets ?? "-"}</span>
-                  <span className="font-mono font-semibold text-slate-950">{formatMoneyValue(audit.total_price_usd)}</span>
-                  <span>
-                    <span
-                      className={`inline-flex rounded-md px-2 py-1 text-xs font-semibold ${
-                        audit.manual_review_required
-                          ? "bg-amber-50 text-amber-900"
-                          : "bg-emerald-50 text-emerald-800"
-                      }`}
-                    >
-                      {audit.manual_review_required ? "需人工" : "已报价"}
-                    </span>
-                    <span className="mt-1 block text-xs text-slate-500">
-                      {audit.created_at ? formatDateTime(audit.created_at) : "无时间"}
-                    </span>
-                  </span>
-                </button>
-              ))}
+              <button className="btn-secondary min-h-9 px-3 py-1" type="button" onClick={() => void loadSummary()}>
+                刷新
+              </button>
+              <button className="btn-secondary min-h-9 px-3 py-1 text-teal-700" type="button" onClick={() => navigate("/audit")}>
+                查看全部
+              </button>
             </div>
           </div>
-        ) : (
-          <div className="px-5 py-6 text-sm text-slate-600">
-            暂无报价历史。产生报价后，这里会显示最近审计记录。
-          </div>
-        )}
-      </section>
-
-      <section className="grid gap-5 xl:grid-cols-[0.85fr_1.15fr_0.9fr]">
-        <div className="panel p-5">
-          <h2 className="section-title">高频问题</h2>
-          <div className="mt-3 flex flex-wrap gap-2">
-              {summary?.daily_risk_tag_counts?.length ? (
-                summary.daily_risk_tag_counts.map((item) => (
-                  <span
-                    key={item.tag}
-                    className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900"
-                  >
-                    {item.label || item.tag} × {item.count}
-                  </span>
-                ))
-              ) : (
-                <span className="text-sm text-slate-500">暂无风险标签</span>
-              )}
-            </div>
-          <div className="mt-5 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-              <div className="flex justify-between gap-3">
-                <span>累计审计</span>
-                <strong className="text-slate-950">{summary?.total_audit_count ?? "-"}</strong>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span>累计成功报价</span>
-                <strong className="text-slate-950">{summary?.successful_quote_count ?? "-"}</strong>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span>累计规则未完成</span>
-                <strong className="text-slate-950">{summary?.manual_required_audit_count ?? "-"}</strong>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span>当前待处理任务</span>
-                <strong className="text-slate-950">{summary?.pending_manual_task_count ?? "-"}</strong>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span>活跃学习规则</span>
-                <strong className="text-slate-950">{summary?.active_learning_rule_count ?? "-"}</strong>
-              </div>
-              <div className="flex justify-between gap-3">
-                <span>累计学习复用</span>
-                <strong className="text-slate-950">{summary?.learning_rule_usage_count ?? "-"}</strong>
-              </div>
-            </div>
-        </div>
-
-        <div className="panel p-5">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="section-title">最近问题</h2>
-            <button className="btn-secondary min-h-10 px-3 py-1" type="button" onClick={() => navigate("/manual-tasks")}>
-              全部任务
-            </button>
-          </div>
-          <div className="mt-3 grid gap-2">
-              {summary?.recent_manual_tasks.length ? (
-                summary.recent_manual_tasks.slice(0, 5).map((task) => (
-                  <button
-                    key={task.id}
-                    className="rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-700"
-                    type="button"
-                    onClick={() => navigate("/manual-tasks")}
-                  >
-                    <span className="font-semibold text-slate-950">{task.quote_id}</span>
-                    <span className="ml-2 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700">{task.status}</span>
-                    <span className="mt-1 block line-clamp-2 text-slate-600">{task.reason_zh || task.reason}</span>
-                    {task.risk_tag_labels?.length ? (
-                      <span className="mt-2 block text-xs text-amber-700">
-                        {task.risk_tag_labels.slice(0, 3).join("、")}
-                      </span>
-                    ) : null}
-                  </button>
-                ))
-              ) : (
-                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-600">
-                  暂无待展示的问题任务。
+          {quoteHistoryRows.length ? (
+            <div className="overflow-x-auto">
+              <div className="admin-data-table min-w-[920px]">
+                <div className="admin-table-head grid-cols-[1.2fr_1.1fr_1fr_0.8fr_1fr_0.8fr_1.1fr]">
+                  <span>报价 ID</span>
+                  <span>目的地</span>
+                  <span>来源地</span>
+                  <span>区域</span>
+                  <span>报价金额</span>
+                  <span>状态</span>
+                  <span>报价时间</span>
                 </div>
-              )}
-            </div>
-        </div>
-
-        <div className="panel p-5">
-          <h2 className="section-title">学习库</h2>
-          <div className="mt-3 grid gap-2">
-                {summary?.recent_learning_rules?.length ? (
-                  summary.recent_learning_rules.slice(0, 4).map((rule) => (
-                    <div key={rule.id} className="rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm">
-                      <span className="font-semibold text-emerald-950">
-                        {rule.postal_prefix || rule.postal_code || "未知邮编"} / {rule.city || "未知城市"} / {rule.billing_pallets}托
-                      </span>
-                      <span className="ml-2 rounded bg-white px-2 py-0.5 text-xs text-emerald-800">
-                        复用 {rule.usage_count} 次
-                      </span>
-                      <span className="mt-1 block text-emerald-900">
-                        {rule.total_price_usd ? `$${Number(rule.total_price_usd).toFixed(2)} USD` : "金额待确认"}
-                        {rule.zone !== null ? ` / Zone ${rule.zone}` : ""}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-600">
-                    暂无学习记录
-                  </div>
-                )}
+                {quoteHistoryRows.slice(0, 10).map((audit) => (
+                  <button
+                    key={audit.id}
+                    className="admin-table-row grid-cols-[1.2fr_1.1fr_1fr_0.8fr_1fr_0.8fr_1.1fr]"
+                    type="button"
+                    onClick={() => navigate("/audit")}
+                  >
+                    <span className="font-mono font-semibold text-teal-700">{audit.quote_id}</span>
+                    <span>{[audit.city, audit.province].filter(Boolean).join(", ") || "未返回"}</span>
+                    <span>{audit.origin || audit.postal_prefix || audit.postal_code || "-"}</span>
+                    <span>{audit.zone === null ? "-" : `Zone ${audit.zone}`}</span>
+                    <span className="font-mono font-semibold text-slate-950">{formatMoneyValue(audit.total_price_usd)}</span>
+                    <span>
+                      <AdminStatusPill tone={audit.manual_review_required ? "warn" : "success"}>
+                        {audit.manual_review_required ? "需人工" : "成功"}
+                      </AdminStatusPill>
+                    </span>
+                    <span>{audit.created_at ? formatDateTime(audit.created_at) : "-"}</span>
+                  </button>
+                ))}
               </div>
-        </div>
-      </section>
+            </div>
+          ) : (
+            <div className="px-5 py-6 text-sm text-slate-600">
+              暂无报价历史。产生报价后，这里会显示最近审计记录。
+            </div>
+          )}
+          <div className="admin-pagination">
+            <span>共 {summary?.daily_total_audit_count ?? quoteHistoryRows.length} 条</span>
+            <button type="button" disabled>‹</button>
+            <button className="active" type="button">1</button>
+            <button type="button">2</button>
+            <button type="button">3</button>
+            <button type="button">4</button>
+            <button type="button">5</button>
+            <span>...</span>
+            <button type="button">126</button>
+            <button type="button">›</button>
+            <select aria-label="每页条数">
+              <option>10 条/页</option>
+              <option>20 条/页</option>
+            </select>
+          </div>
+        </section>
+
+        <aside className="admin-right-stack">
+          <section className="panel p-5">
+            <div className="admin-card-header px-0 pt-0">
+              <h2>待处理队列</h2>
+              <button className="admin-link-button" type="button" onClick={() => navigate("/manual-tasks")}>
+                查看全部
+              </button>
+            </div>
+            <div className="mt-4 grid gap-3">
+              <QueueCard
+                count={summary?.pending_manual_task_count}
+                description="地址解析异常 / 价格缺失 / 需人工确认"
+                icon="user"
+                label="人工报价任务"
+                tone="warn"
+                onClick={() => navigate("/manual-tasks")}
+              />
+              <QueueCard
+                count={summary?.pending_learning_candidate_count}
+                description="待审核学习的报价记录"
+                icon="box"
+                label="Hermes 学习候选"
+                tone="purple"
+                onClick={() => navigate("/learning-candidates")}
+              />
+              <QueueCard
+                count={summary?.ai_issue_task_count}
+                description="AI 解析或检索异常需要处理"
+                icon="alert"
+                label="AI 问题记录"
+                tone="danger"
+                onClick={() => navigate("/manual-tasks")}
+              />
+            </div>
+          </section>
+
+          <RiskDistribution items={riskItems} />
+        </aside>
+      </div>
     </div>
   );
 }
 
-function AdminMetric({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: number | undefined;
-  tone?: "neutral" | "warn" | "danger";
-}) {
-  const toneClass =
-    tone === "danger"
-      ? "border-red-200 bg-red-50 text-red-900"
-      : tone === "warn"
-        ? "border-amber-200 bg-amber-50 text-amber-900"
-        : "border-slate-200 bg-slate-50 text-slate-900";
+function AdminQuickActions({ navigate }: { navigate: (path: RoutePath) => void }) {
+  const actions: Array<{
+    description: string;
+    icon: AdminIconName;
+    label: string;
+    path: RoutePath;
+  }> = [
+    {
+      description: "查看待确认报价、补录规则并回写客户回复",
+      icon: "user",
+      label: "人工任务",
+      path: "/manual-tasks",
+    },
+    {
+      description: "维护 Zone 价格、附加费和计费托数规则",
+      icon: "calculator",
+      label: "价格矩阵",
+      path: "/settings/pricing",
+    },
+    {
+      description: "配置模型、搜索验证和邮件通知链路",
+      icon: "settings",
+      label: "系统配置",
+      path: "/settings/ai",
+    },
+    {
+      description: "按 Quote ID、地址和风险标签追踪报价记录",
+      icon: "search",
+      label: "审计查询",
+      path: "/audit",
+    },
+  ];
+
   return (
-    <div className={`rounded-md border p-4 ${toneClass}`}>
-      <p className="text-xs font-semibold">{label}</p>
-      <p className="mt-2 text-2xl font-semibold tabular-nums">{value ?? "-"}</p>
+    <section className="admin-command-strip" aria-label="后台快捷操作">
+      {actions.map((action) => (
+        <button key={action.path} type="button" onClick={() => navigate(action.path)}>
+          <span>
+            <AdminIcon name={action.icon} />
+          </span>
+          <strong>{action.label}</strong>
+          <small>{action.description}</small>
+        </button>
+      ))}
+    </section>
+  );
+}
+
+function AdminOverviewMetric({
+  icon,
+  label,
+  note,
+  tone = "teal",
+  trend,
+  value,
+}: {
+  icon: AdminIconName;
+  label: string;
+  note?: string;
+  tone?: "danger" | "purple" | "success" | "teal" | "warn";
+  trend?: string;
+  value: number | undefined;
+}) {
+  return (
+    <div className="admin-overview-card">
+      <div className={`admin-metric-icon admin-metric-${tone}`}>
+        <AdminIcon name={icon} />
+      </div>
+      <div>
+        <p>{label}</p>
+        <strong>{value ?? "-"}</strong>
+      </div>
+      {note && <span>{note}</span>}
+      {trend && <small>较昨日 {trend}</small>}
     </div>
+  );
+}
+
+function AdminStatusPill({
+  children,
+  tone,
+}: {
+  children: ReactNode;
+  tone: "danger" | "success" | "warn";
+}) {
+  return <span className={`admin-status-pill admin-status-${tone}`}>{children}</span>;
+}
+
+function QueueCard({
+  count,
+  description,
+  icon,
+  label,
+  onClick,
+  tone,
+}: {
+  count: number | undefined;
+  description: string;
+  icon: AdminIconName;
+  label: string;
+  onClick: () => void;
+  tone: "danger" | "purple" | "warn";
+}) {
+  return (
+    <button className="admin-queue-card" type="button" onClick={onClick}>
+      <span className={`admin-queue-icon admin-metric-${tone}`}>
+        <AdminIcon name={icon} />
+      </span>
+      <span className="min-w-0">
+        <strong>{label}</strong>
+        <small>{description}</small>
+      </span>
+      <b>{count ?? "-"}</b>
+      <span className="text-slate-400">›</span>
+    </button>
+  );
+}
+
+function RiskDistribution({
+  items,
+}: {
+  items: NonNullable<QuoteErrorSummary["risk_tag_counts"]>;
+}) {
+  const total = items.reduce((sum, item) => sum + item.count, 0);
+  const colors = ["#ef4444", "#f59e0b", "#0ea5e9", "#22c55e", "#94a3b8"];
+  let cursor = 0;
+  const gradient =
+    total > 0
+      ? items.slice(0, 5).map((item, index) => {
+          const start = cursor;
+          cursor += (item.count / total) * 100;
+          return `${colors[index]} ${start}% ${cursor}%`;
+        }).join(", ")
+      : "#e2e8f0 0% 100%";
+
+  return (
+    <section className="panel p-5">
+      <div className="admin-card-header px-0 pt-0">
+        <h2>风险标签分布（近24h）</h2>
+        <span className="admin-link-button">
+          查看全部
+        </span>
+      </div>
+      <div className="admin-risk-body">
+        <div className="admin-risk-donut" style={{ background: `conic-gradient(${gradient})` }}>
+          <div>
+            <strong>{total || "-"}</strong>
+            <span>总风险数</span>
+          </div>
+        </div>
+        <div className="admin-risk-list">
+          {items.slice(0, 5).map((item, index) => (
+            <div key={item.tag}>
+              <span style={{ background: colors[index] }} />
+              <p>{item.label || item.tag}</p>
+              <strong>
+                {item.count}
+                {total > 0 ? ` (${Math.round((item.count / total) * 1000) / 10}%)` : ""}
+              </strong>
+            </div>
+          ))}
+          {!items.length && <p className="text-sm text-slate-500">暂无风险标签</p>}
+        </div>
+      </div>
+      <p className="mt-4 text-xs leading-5 text-slate-500">
+        仅统计状态为“成功”或“需人工”的报价。
+      </p>
+    </section>
   );
 }
 

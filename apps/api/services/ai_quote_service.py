@@ -10,9 +10,11 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from apps.api.auth import CurrentActor
 from apps.api.db.repositories.ai_model_config_repository import AIModelConfigRepository
 from apps.api.db.repositories.manual_quote_task_repository import ManualQuoteTaskRepository
 from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
+from apps.api.db.repositories.sales_quote_record_repository import SalesQuoteRecordRepository
 from apps.api.db.repositories.zone_repository import ZoneRepository
 from apps.api.services.address_validation_service import (
     LocalAddressValidation,
@@ -64,7 +66,11 @@ class AIAutoQuoteResponse(BaseModel):
     address_validation: LocalAddressValidation | None = None
 
 
-def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQuoteResponse:
+def calculate_ai_auto_quote(
+    db: Session,
+    payload: AIAutoQuoteRequest,
+    actor: CurrentActor | None = None,
+) -> AIAutoQuoteResponse:
     config_repository = AIModelConfigRepository(db)
     config_record = _select_ai_config(config_repository, payload.ai_config_id)
     ai_client = OpenAICompatibleClient(
@@ -109,7 +115,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
                 },
             )
             logger.warning("AI field extraction failed; returned manual review response.", extra={"error_type": exc.__class__.__name__})
-            return AIAutoQuoteResponse(
+            response = AIAutoQuoteResponse(
                 extraction=extraction,
                 quote_result=None,
                 customer_reply=customer_reply,
@@ -118,6 +124,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
                 manual_review_required=True,
                 search_context=None,
             )
+            return _record_sales_response(db, actor, payload, response)
         logger.warning(
             "AI field extraction failed; deterministic parser completed required fields.",
             extra={"error_type": exc.__class__.__name__},
@@ -160,7 +167,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
                 ),
                 "missing-fields",
             )
-        return AIAutoQuoteResponse(
+        response = AIAutoQuoteResponse(
             extraction=extraction,
             quote_result=None,
             customer_reply=customer_reply,
@@ -170,9 +177,10 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
             search_context=search_context,
             address_validation=address_validation,
         )
+        return _record_sales_response(db, actor, payload, response)
 
     if not payload.auto_submit_when_complete:
-        return AIAutoQuoteResponse(
+        response = AIAutoQuoteResponse(
             extraction=extraction,
             quote_result=None,
             customer_reply="字段已提取完成，请确认后提交系统报价。",
@@ -187,6 +195,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
             search_context=search_context,
             address_validation=address_validation,
         )
+        return _record_sales_response(db, actor, payload, response)
 
     zone_request = _zone_request_from_extraction(extraction)
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
@@ -201,7 +210,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
     )
 
     if quote_result.manual_review_required:
-        return AIAutoQuoteResponse(
+        response = AIAutoQuoteResponse(
             extraction=extraction,
             quote_result=quote_result,
             customer_reply="这票需要人工确认后才能给客户报价，当前不要直接发送确定金额。",
@@ -211,6 +220,7 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
             search_context=search_context,
             address_validation=address_validation,
         )
+        return _record_sales_response(db, actor, payload, response)
 
     customer_reply = _build_sales_note(
         ai_client,
@@ -245,6 +255,30 @@ def calculate_ai_auto_quote(db: Session, payload: AIAutoQuoteRequest) -> AIAutoQ
             ),
             quote_result.quote_id,
         )
+    return _record_sales_response(db, actor, payload, response)
+
+
+def _record_sales_response(
+    db: Session,
+    actor: CurrentActor | None,
+    payload: AIAutoQuoteRequest,
+    response: AIAutoQuoteResponse,
+) -> AIAutoQuoteResponse:
+    if actor is None:
+        return response
+    try:
+        SalesQuoteRecordRepository(db).create_record(
+            actor=actor,
+            quote_id=response.quote_result.quote_id if response.quote_result else None,
+            status="manual_required" if response.manual_review_required else "quoted",
+            customer_message=payload.customer_message,
+            customer_reply=response.customer_reply,
+            request_json=payload.model_dump(mode="json"),
+            result_json=response.model_dump(mode="json"),
+        )
+    except Exception:
+        logger.exception("Failed to write sales quote record.")
+        db.rollback()
     return response
 
 

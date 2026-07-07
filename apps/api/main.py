@@ -15,7 +15,9 @@ from apps.api.routes.manual_tasks import router as manual_tasks_router
 from apps.api.routes.maps import router as maps_router
 from apps.api.routes.quote_configs import router as quote_configs_router
 from apps.api.routes.quotes import router as quotes_router
+from apps.api.routes.sales_records import router as sales_records_router
 from apps.api.routes.search_configs import router as search_configs_router
+from apps.api.routes.users import router as users_router
 from apps.api.routes.wecom_configs import router as wecom_configs_router
 
 
@@ -44,6 +46,7 @@ app.add_middleware(
 
 app.include_router(quotes_router)
 app.include_router(ai_quotes_router)
+app.include_router(sales_records_router)
 app.include_router(auth_router)
 app.include_router(manual_tasks_router)
 app.include_router(audit_router)
@@ -56,6 +59,7 @@ app.include_router(search_configs_router)
 app.include_router(email_configs_router)
 app.include_router(wecom_configs_router)
 app.include_router(api_keys_router)
+app.include_router(users_router)
 
 
 @app.get("/health", tags=["system"])

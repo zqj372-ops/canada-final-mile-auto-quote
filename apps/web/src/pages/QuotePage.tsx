@@ -1,19 +1,23 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import {
   calculateAIAutoQuote,
-  clearStoredApiKey,
-  getStoredApiKey,
+  clearStoredAuthToken,
+  getCurrentActor,
   getQuoteWorkbenchConfig,
+  getStoredAuthToken,
   listEmailConfigs,
-  setStoredApiKey,
+  listSalesQuoteRecords,
+  login,
+  setStoredAuthToken,
   type AIExtractedQuoteDraft,
   type AIAutoQuoteResponse,
   type AddressType,
+  type CurrentActor,
   type EmailConfigPublic,
-  type MoneyValue,
   type PackagingType,
   type QuoteSearchContext,
   type QuoteWorkbenchConfig,
+  type SalesQuoteRecord,
   type ZoneQuoteResult,
 } from "../api/client";
 import AiQuoteInputPanel from "../components/AiQuoteInputPanel";
@@ -32,37 +36,9 @@ type WorkbenchStatus =
   | "quoted"
   | "manual_required";
 
-type QuoteThemeMode = "dark" | "light";
 type SalesQuoteTab = "quote" | "records";
 type SalesQuoteRecordStatus = "quoted" | "manual_required";
 type SalesQuoteRecordFilter = SalesQuoteRecordStatus | "all";
-
-interface SalesQuoteRecord {
-  id: string;
-  quote_id: string;
-  created_at: string;
-  status: SalesQuoteRecordStatus;
-  customer_message: string;
-  customer_reply: string | null;
-  destination: string;
-  cargo_summary: string;
-  total_price_usd: MoneyValue;
-  currency_code: string;
-  zone: number | null;
-  billing_pallets: number | null;
-  confidence: number;
-  source_type: string;
-  postal_code: string | null;
-  city: string | null;
-  province: string | null;
-  risk_tags: string[];
-  missing_fields: string[];
-  manual_reason: string | null;
-}
-
-const QUOTE_THEME_STORAGE_KEY = "canada-final-mile-quote-theme-v2";
-const SALES_QUOTE_RECORDS_STORAGE_KEY = "canada-final-mile-sales-quote-records-v1";
-const SALES_QUOTE_RECORD_LIMIT = 80;
 
 export default function QuotePage({ adminHref: _adminHref }: { adminHref: string }) {
   const [config, setConfig] = useState<QuoteWorkbenchConfig | null>(null);
@@ -80,23 +56,77 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   const [emailConfigs, setEmailConfigs] = useState<EmailConfigPublic[]>([]);
   const [notifyEmail, setNotifyEmail] = useState(false);
   const [selectedEmailConfigId, setSelectedEmailConfigId] = useState("");
-  const [apiKeyInput, setApiKeyInput] = useState(() => getStoredApiKey("quote"));
-  const [hasApiKey, setHasApiKey] = useState(() => Boolean(getStoredApiKey("quote")));
-  const [themeMode, setThemeMode] = useState<QuoteThemeMode>(() => readQuoteThemeMode());
+  const [currentActor, setCurrentActor] = useState<CurrentActor | null>(null);
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(Boolean(getStoredAuthToken()));
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [activeSalesTab, setActiveSalesTab] = useState<SalesQuoteTab>("quote");
-  const [quoteRecords, setQuoteRecords] = useState<SalesQuoteRecord[]>(() => readSalesQuoteRecords());
+  const [quoteRecords, setQuoteRecords] = useState<SalesQuoteRecord[]>([]);
+  const [isLoadingRecords, setIsLoadingRecords] = useState(false);
   const [recordFilter, setRecordFilter] = useState<SalesQuoteRecordFilter>("all");
   const [recordQuery, setRecordQuery] = useState("");
-  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [selectedRecordId, setSelectedRecordId] = useState<number | null>(null);
 
   useEffect(() => {
-    void loadConfig();
-    void loadEmailConfigs();
+    void restoreSession();
   }, []);
 
-  useEffect(() => {
-    window.localStorage.setItem(QUOTE_THEME_STORAGE_KEY, themeMode);
-  }, [themeMode]);
+  async function restoreSession() {
+    if (!getStoredAuthToken()) {
+      setIsCheckingAuth(false);
+      return;
+    }
+    setAuthError(null);
+    setIsCheckingAuth(true);
+    try {
+      const actor = await getCurrentActor("quote");
+      setCurrentActor(actor);
+      await Promise.all([loadConfig(), loadEmailConfigs(), refreshSalesRecords()]);
+    } catch (caught) {
+      clearStoredAuthToken();
+      setCurrentActor(null);
+      setAuthError(caught instanceof Error ? caught.message : "登录已失效，请重新登录。");
+    } finally {
+      setIsCheckingAuth(false);
+    }
+  }
+
+  async function handleLogin() {
+    setAuthError(null);
+    if (!loginUsername.trim() || !loginPassword) {
+      setAuthError("请输入账号和密码。");
+      return;
+    }
+    setIsLoggingIn(true);
+    try {
+      const response = await login({
+        username: loginUsername.trim(),
+        password: loginPassword,
+      });
+      setStoredAuthToken(response.access_token);
+      setCurrentActor(response.actor);
+      setLoginPassword("");
+      await Promise.all([loadConfig(), loadEmailConfigs(), refreshSalesRecords()]);
+    } catch (caught) {
+      setAuthError(caught instanceof Error ? caught.message : "登录失败");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  }
+
+  function logout() {
+    clearStoredAuthToken();
+    setCurrentActor(null);
+    setConfig(null);
+    setQuoteRecords([]);
+    setSelectedRecordId(null);
+    setRawInput("");
+    setResult(null);
+    setAiResult(null);
+    setStatus("idle");
+  }
 
   async function loadConfig() {
     setError(null);
@@ -132,6 +162,17 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     }
   }
 
+  async function refreshSalesRecords() {
+    setIsLoadingRecords(true);
+    try {
+      const records = await listSalesQuoteRecords({ limit: 80 });
+      setQuoteRecords(records);
+      setSelectedRecordId((current) => current ?? records[0]?.id ?? null);
+    } finally {
+      setIsLoadingRecords(false);
+    }
+  }
+
   const parsed = useMemo(
     () => (config ? parseQuoteInput(rawInput, config) : null),
     [config, rawInput],
@@ -164,6 +205,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
           : "",
     [aiResult, config, effectiveParsed, result],
   );
+  const recordCounts = useMemo(() => countSalesQuoteRecords(quoteRecords), [quoteRecords]);
 
   function updateRawInput(value: string) {
     setRawInput(value);
@@ -225,23 +267,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
       } else {
         setStatus("quoted");
       }
-      const nextParsed = mergeParsedWithAIExtraction(
-        parseQuoteInput(rawInput.trim(), config),
-        response.extraction,
-        config,
-      );
-      const nextRecord = buildSalesQuoteRecord({
-        config,
-        customerMessage: rawInput.trim(),
-        parsed: nextParsed,
-        response,
-      });
-      setQuoteRecords((current) => {
-        const nextRecords = upsertSalesQuoteRecord(current, nextRecord);
-        persistSalesQuoteRecords(nextRecords);
-        return nextRecords;
-      });
-      setSelectedRecordId(nextRecord.id);
+      await refreshSalesRecords();
     } catch (caught) {
       setStatus("manual_required");
       setError(
@@ -286,54 +312,39 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     URL.revokeObjectURL(url);
   }
 
-  async function saveAccessKeyAndRetry() {
-    setStoredApiKey("quote", apiKeyInput);
-    setHasApiKey(Boolean(apiKeyInput.trim()));
-    await loadConfig();
-    void loadEmailConfigs();
-  }
-
-  function clearAccessKey() {
-    clearStoredApiKey("quote");
-    setApiKeyInput("");
-    setHasApiKey(false);
-    setConfig(null);
+  if (!currentActor || isCheckingAuth) {
+    return (
+      <div className="sales-frontdesk min-h-dvh">
+        <SalesLoginPanel
+          error={authError}
+          isChecking={isCheckingAuth}
+          isLoggingIn={isLoggingIn}
+          onLogin={() => {
+            void handleLogin();
+          }}
+          onPasswordChange={setLoginPassword}
+              onUsernameChange={setLoginUsername}
+              password={loginPassword}
+              username={loginUsername}
+            />
+      </div>
+    );
   }
 
   if (!config || !parsed) {
     return (
-      <div className={`ai-quote-workbench ai-quote-compact ai-theme-${themeMode} min-h-dvh px-3 py-3 sm:px-4`}>
-        <section className="ai-glass-panel mx-auto grid max-w-3xl gap-4 p-5">
-          <div className="flex items-start justify-between gap-3">
-            <h1 className="text-2xl font-semibold text-white">加拿大尾端 AI 报价系统</h1>
-            <ThemeToggle
-              themeMode={themeMode}
-              onToggle={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
-            />
-          </div>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
+      <div className="sales-frontdesk grid min-h-dvh place-items-center px-4 py-8">
+        <section className="panel mx-auto grid max-w-3xl gap-4 p-5">
+          <h1 className="text-2xl font-semibold text-slate-950">加拿大尾端 AI 报价系统</h1>
+          <p className="text-sm leading-6 text-slate-600">
             {error ? `配置加载失败：${error}` : "正在读取后台配置..."}
           </p>
-          {error?.includes("X-API-Key") && (
-            <div className="rounded-md border border-amber-300/40 bg-amber-300/10 px-4 py-3 text-sm leading-6 text-amber-50">
-              请先输入访问密钥。保存后系统会自动重新读取后台配置。
-            </div>
-          )}
-          <AccessKeyBox
-            apiKeyInput={apiKeyInput}
-            hasApiKey={hasApiKey}
-            onChange={setApiKeyInput}
-            onSave={() => {
-              void saveAccessKeyAndRetry();
-            }}
-            onClear={clearAccessKey}
-            title="前台访问密钥"
-            placeholder={hasApiKey ? "前台 Key 已保存" : "输入前台 API Key"}
-            forceOpen
-          />
           <div className="flex flex-wrap gap-3">
-            <button className="ai-primary-button" type="button" onClick={loadConfig}>
+            <button className="btn-primary" type="button" onClick={() => void loadConfig()}>
               重新加载配置
+            </button>
+            <button className="btn-secondary" type="button" onClick={logout}>
+              退出登录
             </button>
           </div>
         </section>
@@ -344,159 +355,363 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   const displayParsed = effectiveParsed ?? parsed;
 
   return (
-    <div className={`logistics-site ai-quote-workbench ai-quote-compact ai-theme-${themeMode} min-h-dvh`}>
-      <main id="top">
-        <section className="logistics-quote-section logistics-quote-section-direct" id="quote-workbench">
-          <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
-                销售前台
-              </p>
-              <h1 className="mt-1 text-2xl font-bold text-slate-950 sm:text-3xl">
-                {config.title}
-              </h1>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                {config.subtitle} 销售端只保留新建报价和本机报价记录；人工复核、规则配置和审计由后台处理。
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <AccessKeyBox
-                apiKeyInput={apiKeyInput}
-                hasApiKey={hasApiKey}
-                onChange={setApiKeyInput}
-                onSave={() => {
-                  void saveAccessKeyAndRetry();
-                }}
-                onClear={clearAccessKey}
-                title="前台访问密钥"
-                placeholder={hasApiKey ? "前台 Key 已保存" : "输入前台 API Key"}
-              />
-              <ThemeToggle
-                themeMode={themeMode}
-                onToggle={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
-              />
-              <span
-                className={`logistics-status-pill ${
-                  manualRequired ? "logistics-status-warning" : "logistics-status-ready"
-                }`}
-              >
-                {statusLabel}
-              </span>
+    <div className="sales-frontdesk min-h-dvh">
+      <div className="sales-main">
+        <header className="sales-topbar">
+          <div className="sales-brand">
+            <span className="sales-brand-mark">AI</span>
+            <div>
+              <p>AI 报价系统</p>
+              <small>Canada Final-Mile</small>
             </div>
           </div>
 
-          <div className="mb-3 flex flex-wrap gap-2">
+          <nav className="sales-tabs" aria-label="销售前台功能">
             <button
-              className={activeSalesTab === "quote" ? "ai-primary-button" : "ai-secondary-button"}
+              className={activeSalesTab === "quote" ? "sales-tab-active" : ""}
               type="button"
               onClick={() => setActiveSalesTab("quote")}
             >
-              新建报价
+              AI 报价
             </button>
             <button
-              className={activeSalesTab === "records" ? "ai-primary-button" : "ai-secondary-button"}
+              className={activeSalesTab === "records" ? "sales-tab-active" : ""}
               type="button"
               onClick={() => setActiveSalesTab("records")}
             >
-              报价记录 ({quoteRecords.length})
+              报价记录
+            </button>
+          </nav>
+
+          <div className="sales-account-bar">
+            <label className="sales-global-search">
+              <span className="sr-only">搜索销售记录</span>
+              <input
+                value={recordQuery}
+                onChange={(event) => {
+                  setRecordQuery(event.target.value);
+                  setActiveSalesTab("records");
+                }}
+                placeholder="搜索 quote_id、地址、原始询价..."
+              />
+            </label>
+            <span className="sales-user-chip" title={currentActor.name}>
+              <span className="sales-avatar sales-avatar-small">
+                {currentActor.name.slice(0, 1).toUpperCase()}
+              </span>
+              <span className="hidden sm:block">{currentActor.name}</span>
+              <span className="hidden xl:block">{roleLabel(currentActor.role)}</span>
+            </span>
+            <button className="btn-secondary min-h-10 px-3 py-1" type="button" onClick={logout}>
+              退出登录
             </button>
           </div>
+        </header>
 
+        <main id="top">
+        <section className="sales-page-heading">
+          <div className="min-w-0">
+            <h1>{activeSalesTab === "quote" ? "AI 智能报价" : "报价记录"}</h1>
+            <p>
+              {activeSalesTab === "quote"
+                ? "粘贴客户询价，系统会自动解析货物、地址与服务要求，再交给 Quote Engine 查表报价。"
+                : "回查自己的报价记录，筛选人工复核状态，并复制已生成的客户回复。"}
+            </p>
+          </div>
+          {activeSalesTab === "quote" ? (
+            <span
+              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                manualRequired
+                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
+              }`}
+            >
+              {statusLabel}
+            </span>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              <button className="btn-secondary min-h-10 px-3 py-1" type="button" onClick={() => void refreshSalesRecords()} disabled={isLoadingRecords}>
+                {isLoadingRecords ? "刷新中" : "刷新记录"}
+              </button>
+              <button className="btn-primary min-h-10 px-3 py-1" type="button" onClick={() => setActiveSalesTab("quote")}>
+                新建报价
+              </button>
+            </div>
+          )}
+        </section>
+
+        <SalesDeskStats
+          activeTab={activeSalesTab}
+          manualRequired={manualRequired}
+          recordCounts={recordCounts}
+          statusLabel={statusLabel}
+        />
+
+        <section id="quote-workbench">
           {activeSalesTab === "quote" && error && (
-            <div className="logistics-alert logistics-alert-error" role="alert">
+            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900" role="alert">
               {error}
             </div>
           )}
           {activeSalesTab === "quote" && notice && (
-            <div className="logistics-alert logistics-alert-warning" role="status">
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
               {notice}
             </div>
           )}
 
           {activeSalesTab === "quote" ? (
-            <div className="logistics-workbench-grid">
-              <div className="grid min-w-0 content-start gap-3">
-                <AiQuoteInputPanel
-                  config={config}
-                  value={rawInput}
-                  statusLabel={statusLabel}
-                  isQuoting={isSubmitting}
-                  onChange={updateRawInput}
-                  onSubmit={handleSmartQuote}
-                  onClear={clearInput}
-                  onImportText={handleImportText}
-                />
-                <NotificationPanel
-                  configs={emailConfigs}
-                  notifyEmail={notifyEmail}
-                  selectedConfigId={selectedEmailConfigId}
-                  onNotifyChange={setNotifyEmail}
-                  onConfigChange={setSelectedEmailConfigId}
-                />
-              </div>
+            <div className="grid gap-4">
+              <div className="sales-workbench-grid">
+                <div className="grid min-w-0 content-start gap-3">
+                  <AiQuoteInputPanel
+                    config={config}
+                    value={rawInput}
+                    statusLabel={statusLabel}
+                    isQuoting={isSubmitting}
+                    onChange={updateRawInput}
+                    onSubmit={handleSmartQuote}
+                    onClear={clearInput}
+                    onImportText={handleImportText}
+                  />
+                  <NotificationPanel
+                    configs={emailConfigs}
+                    notifyEmail={notifyEmail}
+                    selectedConfigId={selectedEmailConfigId}
+                    onNotifyChange={setNotifyEmail}
+                    onConfigChange={setSelectedEmailConfigId}
+                  />
+                </div>
 
-              <div className="grid min-w-0 content-start gap-3">
-                <QuotePipelinePanel
-                  hasAIResult={Boolean(aiResult)}
-                  hasSearchContext={Boolean(aiResult?.search_context)}
-                  manualRequired={manualRequired}
-                  extractionConfidence={aiResult?.extraction.confidence ?? displayParsed.confidence}
-                />
-                <div className="grid min-w-0 items-start gap-3 xl:grid-cols-[minmax(0,1.08fr)_minmax(300px,0.92fr)]">
-                  <div className="grid min-w-0 content-start gap-3">
-                    <ParsedCargoTable parsed={displayParsed} isAwaitingAI={!aiResult} />
-                    <ParsedAddressCard
-                      parsed={displayParsed}
-                      config={config}
-                      packagingType={packagingType}
-                      onPackagingTypeChange={(value) => setPackagingType(value as PackagingType)}
-                      addressType={addressType}
-                      onAddressTypeChange={(value) => setAddressType(value as AddressType)}
-                      services={services}
-                      onServiceChange={(key, checked) =>
-                        setServices((current) => ({ ...current, [key]: checked }))
-                      }
-                      detentionMinutes={detentionMinutes}
-                      onDetentionMinutesChange={setDetentionMinutes}
-                    />
-                  </div>
+                <div className="grid min-w-0 content-start gap-3">
+                  <QuotePipelinePanel
+                    hasAIResult={Boolean(aiResult)}
+                    hasSearchContext={Boolean(aiResult?.search_context)}
+                    manualRequired={manualRequired}
+                    extractionConfidence={aiResult?.extraction.confidence ?? displayParsed.confidence}
+                  />
+                  <ParsedCargoTable parsed={displayParsed} isAwaitingAI={!aiResult} />
+                  <ParsedAddressCard
+                    parsed={displayParsed}
+                    config={config}
+                    packagingType={packagingType}
+                    onPackagingTypeChange={(value) => setPackagingType(value as PackagingType)}
+                    addressType={addressType}
+                    onAddressTypeChange={(value) => setAddressType(value as AddressType)}
+                    services={services}
+                    onServiceChange={(key, checked) =>
+                      setServices((current) => ({ ...current, [key]: checked }))
+                    }
+                    detentionMinutes={detentionMinutes}
+                    onDetentionMinutesChange={setDetentionMinutes}
+                  />
+                </div>
 
-                  <div className="grid min-w-0 content-start gap-3">
-                    <QuoteCalculationPanel
-                      config={config}
-                      parsed={displayParsed}
-                      result={result}
-                      aiParsed={Boolean(aiResult)}
-                      salesText={salesText}
-                      onExport={exportQuote}
-                    />
-                    <QuoteRiskPanel risks={riskMessages} manualRequired={manualRequired} />
-                    {aiResult?.search_context && (
-                      <SearchVerificationPanel searchContext={aiResult.search_context} />
-                    )}
-                  </div>
+                <div className="grid min-w-0 content-start gap-3 sales-result-rail">
+                  <QuoteCalculationPanel
+                    config={config}
+                    parsed={displayParsed}
+                    result={result}
+                    aiParsed={Boolean(aiResult)}
+                    salesText={salesText}
+                    onExport={exportQuote}
+                  />
+                  <QuoteRiskPanel risks={riskMessages} manualRequired={manualRequired} />
+                  {aiResult?.search_context && (
+                    <SearchVerificationPanel searchContext={aiResult.search_context} />
+                  )}
                 </div>
               </div>
+              <SalesQuoteRecordsPreview
+                isLoading={isLoadingRecords}
+                records={quoteRecords}
+                onRefresh={() => {
+                  void refreshSalesRecords();
+                }}
+                onViewAll={() => setActiveSalesTab("records")}
+              />
             </div>
           ) : (
             <SalesQuoteRecordsPanel
               filter={recordFilter}
+              isLoading={isLoadingRecords}
               query={recordQuery}
               records={quoteRecords}
               selectedRecordId={selectedRecordId}
-              onClearRecords={() => {
-                setQuoteRecords([]);
-                setSelectedRecordId(null);
-                persistSalesQuoteRecords([]);
-              }}
               onFilterChange={setRecordFilter}
               onNewQuote={() => setActiveSalesTab("quote")}
               onQueryChange={setRecordQuery}
+              onRefresh={() => {
+                void refreshSalesRecords();
+              }}
               onSelectRecord={setSelectedRecordId}
             />
           )}
         </section>
-      </main>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function SalesDeskStats({
+  activeTab,
+  manualRequired,
+  recordCounts,
+  statusLabel,
+}: {
+  activeTab: SalesQuoteTab;
+  manualRequired: boolean;
+  recordCounts: Record<SalesQuoteRecordFilter, number>;
+  statusLabel: string;
+}) {
+  const items = [
+    {
+      label: "当前工作区",
+      value: activeTab === "quote" ? "AI 报价" : "报价记录",
+      tone: "info",
+    },
+    {
+      label: "报价状态",
+      value: statusLabel,
+      tone: manualRequired ? "warn" : "success",
+    },
+    {
+      label: "已报价记录",
+      value: String(recordCounts.quoted),
+      tone: "success",
+    },
+    {
+      label: "人工复核",
+      value: String(recordCounts.manual_required),
+      tone: recordCounts.manual_required ? "warn" : "neutral",
+    },
+  ];
+
+  return (
+    <section className="sales-desk-stats" aria-label="销售工作台状态">
+      {items.map((item) => (
+        <div key={item.label} className={`sales-desk-stat sales-desk-stat-${item.tone}`}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function SalesLoginPanel({
+  error,
+  isChecking,
+  isLoggingIn,
+  onLogin,
+  onPasswordChange,
+  onUsernameChange,
+  password,
+  username,
+}: {
+  error: string | null;
+  isChecking: boolean;
+  isLoggingIn: boolean;
+  onLogin: () => void;
+  onPasswordChange: (value: string) => void;
+  onUsernameChange: (value: string) => void;
+  password: string;
+  username: string;
+}) {
+  return (
+    <div className="sales-login-screen px-4 py-8">
+      <section className="sales-login-card">
+        <div>
+          <div className="sales-brand">
+            <span className="sales-brand-mark">CFM</span>
+            <div>
+              <p>Canada Final Mile</p>
+              <small>销售前台</small>
+            </div>
+          </div>
+          <h1 className="mt-10 text-3xl font-semibold tracking-normal text-slate-950">
+            AI 报价与记录工作台
+          </h1>
+          <p className="mt-4 text-sm leading-6 text-slate-600">
+            登录后直接进入新建报价和报价记录。后台配置、审计和人工复核由运营端处理。
+          </p>
+          <div className="mt-8 grid gap-3">
+            <LoginCapability label="AI 智能报价" value="粘贴客户询价，一键解析并查价" tone="teal" />
+            <LoginCapability label="报价记录" value="回查自己的历史报价和客户回复" tone="indigo" />
+            <LoginCapability label="人工复核" value="需确认的票自动进入后台队列" tone="amber" />
+          </div>
+        </div>
+
+        <form
+          className="panel grid content-center gap-5 p-6 sm:p-8"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onLogin();
+          }}
+        >
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">账号登录</p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-950">销售账号登录</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              仅销售、运营或管理员账号可以提交报价；报价记录会按当前账号显示。
+            </p>
+          </div>
+
+          {error && (
+            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm leading-6 text-rose-900">
+              {error}
+            </div>
+          )}
+
+          <label>
+            <span className="text-xs font-semibold text-slate-700">账号</span>
+            <input
+              className="field-input mt-2"
+              value={username}
+              onChange={(event) => onUsernameChange(event.target.value)}
+              placeholder="sales@example.com"
+              autoComplete="username"
+              autoFocus
+            />
+          </label>
+          <label>
+            <span className="text-xs font-semibold text-slate-700">密码</span>
+            <input
+              className="field-input mt-2"
+              type="password"
+              value={password}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              placeholder="请输入密码"
+              autoComplete="current-password"
+            />
+          </label>
+          <button className="btn-primary" type="submit" disabled={isChecking || isLoggingIn}>
+            {isChecking ? "恢复登录中..." : isLoggingIn ? "登录中..." : "登录并进入报价"}
+          </button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function LoginCapability({
+  label,
+  tone,
+  value,
+}: {
+  label: string;
+  tone: "amber" | "indigo" | "teal";
+  value: string;
+}) {
+  const toneClass = {
+    amber: "border-amber-200 bg-amber-50 text-amber-900",
+    indigo: "border-indigo-200 bg-indigo-50 text-indigo-900",
+    teal: "border-teal-200 bg-teal-50 text-teal-900",
+  }[tone];
+  return (
+    <div className={`rounded-lg border p-4 ${toneClass}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
+      <p className="mt-2 text-sm font-semibold">{value}</p>
     </div>
   );
 }
@@ -520,97 +735,19 @@ function QuotePipelinePanel({
   ];
 
   return (
-    <section className="ai-glass-panel p-4">
+    <section className="panel p-4">
       <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
         {steps.map((step) => (
-          <div key={step.label} className="rounded-md border border-white/10 bg-white/[0.04] px-2.5 py-2">
-            <p className="text-xs font-semibold text-slate-400">{step.label}</p>
-            <p className="mt-1 text-sm font-semibold text-cyan-100">{step.status}</p>
+          <div key={step.label} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2">
+            <p className="text-xs font-semibold text-slate-500">{step.label}</p>
+            <p className="mt-1 text-sm font-semibold text-slate-900">{step.status}</p>
           </div>
         ))}
       </div>
-      <p className="mt-2 text-xs leading-5 text-slate-400">
+      <p className="mt-2 text-xs leading-5 text-slate-500">
         搜索结果只用于确认地址情况，不能覆盖 Zone 价格表和 Quote Engine 金额。
       </p>
     </section>
-  );
-}
-
-function ThemeToggle({
-  themeMode,
-  onToggle,
-}: {
-  themeMode: QuoteThemeMode;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      className="ai-theme-toggle"
-      type="button"
-      onClick={onToggle}
-      aria-label={themeMode === "dark" ? "切换到白色主题" : "切换到黑色主题"}
-    >
-      {themeMode === "dark" ? "白色模式" : "黑色模式"}
-    </button>
-  );
-}
-
-function AccessKeyBox({
-  apiKeyInput,
-  hasApiKey,
-  onChange,
-  onSave,
-  onClear,
-  title = "访问密钥",
-  placeholder,
-  forceOpen = false,
-}: {
-  apiKeyInput: string;
-  hasApiKey: boolean;
-  onChange: (value: string) => void;
-  onSave: () => void;
-  onClear: () => void;
-  title?: string;
-  placeholder?: string;
-  forceOpen?: boolean;
-}) {
-  return (
-    <details
-      className="ai-access-key rounded-md border border-white/15 bg-white/[0.05] p-2 text-sm text-slate-100"
-      open={forceOpen || undefined}
-    >
-      <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 px-2 font-semibold">
-        {title}
-        <span className="text-xs text-cyan-100/70">{hasApiKey ? "已保存" : "未保存"}</span>
-      </summary>
-      <form
-        className="mt-3 grid gap-2 sm:min-w-72"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSave();
-        }}
-      >
-        <label>
-          <span className="sr-only">X-API-Key</span>
-          <input
-            className="ai-input"
-            type="password"
-            value={apiKeyInput}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder={placeholder ?? (hasApiKey ? "已保存" : "输入 X-API-Key")}
-            autoComplete="off"
-          />
-        </label>
-        <div className="grid grid-cols-2 gap-2">
-          <button className="ai-primary-button min-h-10 py-1" type="submit">
-            保存
-          </button>
-          <button className="ai-secondary-button min-h-10 py-1" type="button" onClick={onClear}>
-            清除
-          </button>
-        </div>
-      </form>
-    </details>
   );
 }
 
@@ -628,10 +765,10 @@ function NotificationPanel({
   onConfigChange: (value: string) => void;
 }) {
   return (
-    <section className="ai-glass-panel p-4">
-      <label className="flex min-h-11 items-center gap-3 text-sm font-semibold text-slate-100">
+    <section className="panel p-4">
+      <label className="flex min-h-11 items-center gap-3 text-sm font-semibold text-slate-800">
         <input
-          className="h-4 w-4 rounded border-cyan-200 bg-slate-950 text-cyan-400 focus:ring-cyan-300"
+          className="h-4 w-4 rounded border-slate-300 text-teal-700 focus:ring-teal-700"
           type="checkbox"
           checked={notifyEmail}
           onChange={(event) => onNotifyChange(event.target.checked)}
@@ -639,9 +776,9 @@ function NotificationPanel({
         报价完成后发送邮件
       </label>
       <label className="mt-3 block">
-        <span className="text-xs font-semibold text-slate-300">邮件通知配置</span>
+        <span className="text-xs font-semibold text-slate-600">邮件通知配置</span>
         <select
-          className="ai-select mt-2"
+          className="field-input mt-2"
           value={selectedConfigId}
           onChange={(event) => onConfigChange(event.target.value)}
           disabled={!notifyEmail}
@@ -659,26 +796,93 @@ function NotificationPanel({
   );
 }
 
+function SalesQuoteRecordsPreview({
+  isLoading,
+  records,
+  onRefresh,
+  onViewAll,
+}: {
+  isLoading: boolean;
+  records: SalesQuoteRecord[];
+  onRefresh: () => void;
+  onViewAll: () => void;
+}) {
+  return (
+    <section className="panel sales-records-preview overflow-hidden p-4">
+      <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Recent Quotes</p>
+          <h2 className="mt-1 text-base font-semibold text-slate-950">报价记录（最近 5 条）</h2>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button className="btn-secondary min-h-10 px-3 py-1" type="button" onClick={onRefresh} disabled={isLoading}>
+            {isLoading ? "刷新中" : "刷新记录"}
+          </button>
+          <button className="btn-primary min-h-10 px-3 py-1" type="button" onClick={onViewAll}>
+            查看全部
+          </button>
+        </div>
+      </div>
+
+      {records.length ? (
+        <div className="overflow-x-auto">
+          <div className="min-w-[760px]">
+            <div className="grid grid-cols-[1.1fr_1.5fr_0.75fr_0.8fr_0.9fr] gap-3 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-500">
+              <span>报价 ID</span>
+              <span>客户概要</span>
+              <span>状态</span>
+              <span>金额</span>
+              <span>创建时间</span>
+            </div>
+            {records.slice(0, 5).map((record) => (
+              <button
+                key={record.id}
+                className="grid w-full grid-cols-[1.1fr_1.5fr_0.75fr_0.8fr_0.9fr] gap-3 border-t border-slate-100 px-4 py-3 text-left text-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-teal-700"
+                type="button"
+                onClick={onViewAll}
+              >
+                <span className="break-all font-mono font-semibold text-slate-950">{record.quote_id || `#${record.id}`}</span>
+                <span className="truncate text-slate-700">{record.destination || record.customer_message}</span>
+                <span>
+                  <SalesRecordStatusBadge status={record.status} />
+                </span>
+                <span className="font-semibold tabular-nums text-slate-950">{formatRecordMoney(record)}</span>
+                <span className="text-xs text-slate-500">{formatRecordDate(record.created_at)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="px-4 py-6 text-sm text-slate-600">
+          完成一次报价后，这里会显示最近记录。
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SalesQuoteRecordsPanel({
   filter,
+  isLoading,
   query,
   records,
   selectedRecordId,
-  onClearRecords,
   onFilterChange,
   onNewQuote,
   onQueryChange,
+  onRefresh,
   onSelectRecord,
 }: {
   filter: SalesQuoteRecordFilter;
+  isLoading: boolean;
   query: string;
   records: SalesQuoteRecord[];
-  selectedRecordId: string | null;
-  onClearRecords: () => void;
+  selectedRecordId: number | null;
   onFilterChange: (value: SalesQuoteRecordFilter) => void;
   onNewQuote: () => void;
   onQueryChange: (value: string) => void;
-  onSelectRecord: (id: string) => void;
+  onRefresh: () => void;
+  onSelectRecord: (id: number) => void;
 }) {
   const visibleRecords = useMemo(
     () => filterSalesQuoteRecords(records, filter, query),
@@ -689,37 +893,32 @@ function SalesQuoteRecordsPanel({
   const counts = countSalesQuoteRecords(records);
 
   return (
-    <section className="ai-glass-panel p-4">
+    <section className="panel p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase text-cyan-200">销售记录</p>
-          <h2 className="mt-1 text-xl font-semibold text-white">报价记录</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-400">
-            记录保存在当前浏览器，用于销售回查自己提交过的报价；人工复核状态以后台处理结果为准。
+          <p className="text-xs font-semibold uppercase text-slate-500">销售记录</p>
+          <h2 className="mt-1 text-xl font-semibold text-slate-950">报价记录</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            按当前账号回查已提交报价；人工复核状态以后端处理结果为准。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="ai-primary-button" type="button" onClick={onNewQuote}>
+          <button className="btn-primary" type="button" onClick={onNewQuote}>
             新建报价
           </button>
-          <button
-            className="ai-secondary-button"
-            type="button"
-            onClick={onClearRecords}
-            disabled={records.length === 0}
-          >
-            清空记录
+          <button className="btn-secondary" type="button" onClick={onRefresh} disabled={isLoading}>
+            {isLoading ? "刷新中" : "刷新记录"}
           </button>
         </div>
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.2fr)]">
         <div className="grid gap-3">
-          <div className="grid gap-3 rounded-md border border-white/10 bg-white/[0.04] p-3">
+          <div className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
             <label>
-              <span className="text-xs font-semibold text-slate-300">搜索记录</span>
+              <span className="text-xs font-semibold text-slate-500">搜索记录</span>
               <input
-                className="ai-input mt-2"
+                className="field-input mt-2"
                 value={query}
                 onChange={(event) => onQueryChange(event.target.value)}
                 placeholder="quote_id / 邮编 / 城市 / 原始询价"
@@ -729,7 +928,7 @@ function SalesQuoteRecordsPanel({
               {(["all", "quoted", "manual_required"] as SalesQuoteRecordFilter[]).map((item) => (
                 <button
                   key={item}
-                  className={filter === item ? "ai-primary-button" : "ai-secondary-button"}
+                  className={filter === item ? "btn-primary" : "btn-secondary"}
                   type="button"
                   onClick={() => onFilterChange(item)}
                 >
@@ -739,31 +938,31 @@ function SalesQuoteRecordsPanel({
             </div>
           </div>
 
-          <div className="max-h-[640px] overflow-auto rounded-md border border-white/10">
+          <div className="max-h-[640px] overflow-auto rounded-md border border-slate-200">
             {visibleRecords.length ? (
               visibleRecords.map((record) => {
                 const isSelected = selectedRecord?.id === record.id;
                 return (
                   <button
                     key={record.id}
-                    className={`grid w-full gap-2 border-b border-white/10 px-3 py-3 text-left transition hover:bg-cyan-300/10 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-200 ${
-                      isSelected ? "bg-cyan-300/10" : "bg-white/[0.02]"
+                    className={`grid w-full gap-2 border-b border-slate-100 px-3 py-3 text-left transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-teal-700 ${
+                      isSelected ? "bg-slate-100" : "bg-white"
                     }`}
                     type="button"
                     onClick={() => onSelectRecord(record.id)}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <span className="min-w-0 break-all text-sm font-semibold text-white">
+                      <span className="min-w-0 break-all text-sm font-semibold text-slate-900">
                         {record.quote_id}
                       </span>
                       <SalesRecordStatusBadge status={record.status} />
                     </div>
-                    <p className="line-clamp-2 text-sm leading-5 text-slate-300">
+                    <p className="line-clamp-2 text-sm leading-5 text-slate-600">
                       {record.destination}
                     </p>
                     <div className="grid grid-cols-2 gap-2 text-xs text-slate-400">
                       <span>{formatRecordDate(record.created_at)}</span>
-                      <span className="text-right font-semibold text-cyan-100">
+                      <span className="text-right font-semibold text-slate-800">
                         {formatRecordMoney(record)}
                       </span>
                     </div>
@@ -773,11 +972,11 @@ function SalesQuoteRecordsPanel({
             ) : (
               <div className="grid min-h-52 place-items-center p-5 text-center">
                 <div>
-                  <h3 className="text-base font-semibold text-white">暂无报价记录</h3>
+                  <h3 className="text-base font-semibold text-slate-900">暂无报价记录</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-400">
                     完成一次报价后，系统会自动把结果保存到这里。
                   </p>
-                  <button className="ai-primary-button mt-4" type="button" onClick={onNewQuote}>
+                  <button className="btn-primary mt-4" type="button" onClick={onNewQuote}>
                     去报价
                   </button>
                 </div>
@@ -795,7 +994,7 @@ function SalesQuoteRecordsPanel({
 function SalesQuoteRecordDetail({ record }: { record: SalesQuoteRecord | null }) {
   if (!record) {
     return (
-      <div className="rounded-md border border-white/10 bg-white/[0.04] p-5 text-sm text-slate-400">
+      <div className="rounded-md border border-slate-200 bg-white p-5 text-sm text-slate-500">
         选择左侧记录后查看报价详情。
       </div>
     );
@@ -804,18 +1003,18 @@ function SalesQuoteRecordDetail({ record }: { record: SalesQuoteRecord | null })
   const canCopyReply = record.status === "quoted" && Boolean(record.customer_reply?.trim());
 
   return (
-    <article className="rounded-md border border-white/10 bg-white/[0.04] p-4">
+    <article className="rounded-md border border-slate-200 bg-white p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase text-slate-400">Quote ID</p>
-          <h3 className="mt-1 break-all text-lg font-semibold text-white">{record.quote_id}</h3>
-          <p className="mt-1 text-sm text-slate-400">{formatRecordDate(record.created_at)}</p>
+          <h3 className="mt-1 break-all text-lg font-semibold text-slate-900">{record.quote_id}</h3>
+          <p className="mt-1 text-sm text-slate-500">{formatRecordDate(record.created_at)}</p>
         </div>
         <SalesRecordStatusBadge status={record.status} />
       </div>
 
       {record.status === "manual_required" && (
-        <div className="mt-4 rounded-md border border-amber-300/50 bg-amber-300/10 px-3 py-2 text-sm font-semibold leading-6 text-amber-50">
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-700">
           已提交人工复核。{record.manual_reason ? `原因：${record.manual_reason}` : "请等待后台确认后再回复客户金额。"}
         </div>
       )}
@@ -831,13 +1030,13 @@ function SalesQuoteRecordDetail({ record }: { record: SalesQuoteRecord | null })
       </div>
 
       {(record.risk_tags.length > 0 || record.missing_fields.length > 0) && (
-        <div className="mt-4 rounded-md border border-white/10 bg-white/[0.04] p-3">
-          <h4 className="text-sm font-semibold text-cyan-100">风险与缺失字段</h4>
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+          <h4 className="text-sm font-semibold text-amber-700">风险与缺失字段</h4>
           <div className="mt-3 flex flex-wrap gap-2">
             {[...record.missing_fields, ...record.risk_tags].map((tag) => (
               <span
                 key={tag}
-                className="rounded-md border border-amber-300/40 bg-amber-300/10 px-2 py-1 text-xs font-semibold text-amber-50"
+                className="rounded-md border border-amber-300/50 bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800"
               >
                 {tag}
               </span>
@@ -847,15 +1046,15 @@ function SalesQuoteRecordDetail({ record }: { record: SalesQuoteRecord | null })
       )}
 
       <div className="mt-4 grid gap-3 xl:grid-cols-2">
-        <div className="rounded-md border border-white/10 bg-white/[0.04] p-3">
-          <h4 className="text-sm font-semibold text-white">客户原始询价</h4>
-          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-300">
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <h4 className="text-sm font-semibold text-slate-700">客户原始询价</h4>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
             {record.customer_message}
           </pre>
         </div>
-        <div className="rounded-md border border-white/10 bg-white/[0.04] p-3">
-          <h4 className="text-sm font-semibold text-white">客户回复</h4>
-          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-300">
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <h4 className="text-sm font-semibold text-slate-700">客户回复</h4>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
             {record.customer_reply || "人工复核单不生成可直接发送的报价话术。"}
           </pre>
           <div className="mt-3">
@@ -879,22 +1078,22 @@ function RecordMetric({
   wide?: boolean;
 }) {
   return (
-    <div className={`rounded-md border border-white/10 bg-white/[0.04] p-2.5 ${wide ? "sm:col-span-2" : ""}`}>
-      <dt className="text-xs font-medium text-slate-400">{label}</dt>
-      <dd className={`mt-1 break-words text-sm font-semibold tabular-nums ${strong ? "text-cyan-100" : "text-white"}`}>
+    <div className={`rounded-md border border-slate-200 bg-white p-2.5 ${wide ? "sm:col-span-2" : ""}`}>
+      <dt className="text-xs font-medium text-slate-500">{label}</dt>
+      <dd className={`mt-1 break-words text-sm font-semibold tabular-nums ${strong ? "text-slate-900" : "text-slate-800"}`}>
         {value}
       </dd>
     </div>
   );
 }
 
-function SalesRecordStatusBadge({ status }: { status: SalesQuoteRecordStatus }) {
+function SalesRecordStatusBadge({ status }: { status: string }) {
   return (
     <span
       className={`shrink-0 rounded-md border px-2 py-1 text-xs font-semibold ${
         status === "quoted"
-          ? "border-emerald-300/50 bg-emerald-300/10 text-emerald-100"
-          : "border-amber-300/50 bg-amber-300/10 text-amber-50"
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : "border-amber-200 bg-amber-50 text-amber-700"
       }`}
     >
       {status === "quoted" ? "已报价" : "人工复核"}
@@ -1078,31 +1277,31 @@ function SearchVerificationPanel({ searchContext }: { searchContext: QuoteSearch
   const summary = summarizeAddressSearch(searchContext);
 
   return (
-    <section className="ai-glass-panel p-4">
+    <section className="panel p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase text-cyan-200">搜索验证</p>
-          <h2 className="mt-1 text-lg font-semibold text-white">地址情况确认</h2>
+          <p className="text-xs font-semibold uppercase text-slate-500">搜索验证</p>
+          <h2 className="mt-1 text-lg font-semibold text-slate-950">地址情况确认</h2>
         </div>
-        <span className="shrink-0 rounded-full border border-cyan-300/40 bg-cyan-300/10 px-2.5 py-1 text-xs font-semibold text-cyan-100">
+        <span className="shrink-0 rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-xs font-semibold text-cyan-700">
           {searchContext.provider}
         </span>
       </div>
-      <p className="mt-2 text-xs leading-5 text-slate-400">
+      <p className="mt-2 text-xs leading-5 text-slate-500">
         {searchContext.note}
       </p>
-      <div className="mt-3 rounded-md border border-white/10 bg-white/[0.04] p-3">
-        <h3 className="text-sm font-semibold text-white">地址情况</h3>
+      <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <h3 className="text-sm font-semibold text-slate-700">地址情况</h3>
         {summary.error ? (
-          <p className="mt-2 rounded-md border border-red-300/40 bg-red-500/10 p-2 text-sm leading-6 text-red-100">
+          <p className="mt-2 rounded-md border border-red-200 bg-red-50 p-2 text-sm leading-6 text-red-700">
             {summary.text}
           </p>
         ) : (
-          <p className="mt-2 text-sm leading-6 text-slate-300">
+          <p className="mt-2 text-sm leading-6 text-slate-700">
             {summary.text}
           </p>
         )}
-        <p className="mt-2 text-xs leading-5 text-slate-400">
+        <p className="mt-2 text-xs leading-5 text-slate-500">
           搜索结果只作为人工判断线索，不会改变系统报价金额。
         </p>
       </div>
@@ -1194,96 +1393,6 @@ function round1(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-function buildSalesQuoteRecord({
-  config,
-  customerMessage,
-  parsed,
-  response,
-}: {
-  config: QuoteWorkbenchConfig;
-  customerMessage: string;
-  parsed: ParsedQuoteInput;
-  response: AIAutoQuoteResponse;
-}): SalesQuoteRecord {
-  const quote = response.quote_result;
-  const status: SalesQuoteRecordStatus =
-    response.manual_review_required || quote?.manual_review_required || !quote
-      ? "manual_required"
-      : "quoted";
-  const quoteId = quote?.quote_id ?? `local-${Date.now()}`;
-  const missingFields = response.missing_fields.map(formatMissingField);
-  const manualReason =
-    status === "manual_required"
-      ? missingFields.length
-        ? `缺少 ${missingFields.join("、")}`
-        : quote?.matched_rule || response.internal_note || "价格表未命中或需要人工确认"
-      : null;
-
-  return {
-    id: quoteId,
-    quote_id: quoteId,
-    created_at: new Date().toISOString(),
-    status,
-    customer_message: customerMessage,
-    customer_reply:
-      response.customer_reply && status === "quoted"
-        ? response.customer_reply
-        : status === "quoted"
-          ? buildSalesText(config, parsed, quote)
-          : null,
-    destination: formatRecordDestination(parsed, response, quote),
-    cargo_summary: formatRecordCargoSummary(parsed, response),
-    total_price_usd: quote?.total_price_usd ?? null,
-    currency_code: config.copy_template.currency_code,
-    zone: quote?.zone ?? null,
-    billing_pallets: quote?.billing_pallets ?? null,
-    confidence: quote?.confidence ?? response.extraction.confidence ?? parsed.confidence,
-    source_type: quote?.source_type ?? "manual_required",
-    postal_code: quote?.postal_code ?? response.extraction.postal_code ?? parsed.address.postal_code,
-    city: quote?.city ?? response.extraction.city ?? parsed.address.city,
-    province: quote?.province ?? response.extraction.province ?? parsed.address.province_code,
-    risk_tags: quote?.risk_tags ?? [],
-    missing_fields: missingFields,
-    manual_reason: manualReason,
-  };
-}
-
-function formatRecordDestination(
-  parsed: ParsedQuoteInput,
-  response: AIAutoQuoteResponse,
-  quote: ZoneQuoteResult | null,
-): string {
-  return [
-    response.extraction.address_line || parsed.address.address_line,
-    quote?.preferred_city || quote?.city || response.extraction.city || parsed.address.city,
-    quote?.province || response.extraction.province || parsed.address.province_code,
-    response.extraction.postal_code || quote?.postal_code || parsed.address.postal_code,
-  ]
-    .filter(Boolean)
-    .join(", ") || "目的地待确认";
-}
-
-function formatRecordCargoSummary(parsed: ParsedQuoteInput, response: AIAutoQuoteResponse): string {
-  const pieceCount = response.extraction.piece_count ?? parsed.piece_count;
-  const cbm = toNumber(response.extraction.cbm) ?? parsed.total_cbm;
-  const weight = toNumber(response.extraction.weight_kg) ?? parsed.total_weight_kg;
-  return [
-    pieceCount ? `${pieceCount} 件` : "件数待确认",
-    cbm ? `${cbm.toFixed(3)} CBM` : "CBM 待确认",
-    weight ? `${weight.toFixed(1)} KG` : "重量待确认",
-  ].join(" / ");
-}
-
-function upsertSalesQuoteRecord(
-  records: SalesQuoteRecord[],
-  record: SalesQuoteRecord,
-): SalesQuoteRecord[] {
-  return [
-    record,
-    ...records.filter((item) => item.id !== record.id && item.quote_id !== record.quote_id),
-  ].slice(0, SALES_QUOTE_RECORD_LIMIT);
-}
-
 function filterSalesQuoteRecords(
   records: SalesQuoteRecord[],
   filter: SalesQuoteRecordFilter,
@@ -1345,7 +1454,10 @@ function formatRecordMoney(record: SalesQuoteRecord): string {
     : `${record.currency_code} ${value}`;
 }
 
-function formatRecordDate(value: string): string {
+function formatRecordDate(value: string | null): string {
+  if (!value) {
+    return "-";
+  }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value || "-";
@@ -1371,56 +1483,12 @@ function formatRecordSourceType(sourceType: string): string {
   return sourceType || "待匹配";
 }
 
-function readSalesQuoteRecords(): SalesQuoteRecord[] {
-  if (typeof window === "undefined") {
-    return [];
-  }
-  try {
-    const raw = window.localStorage.getItem(SALES_QUOTE_RECORDS_STORAGE_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed.filter(isSalesQuoteRecord).slice(0, SALES_QUOTE_RECORD_LIMIT);
-  } catch {
-    return [];
-  }
-}
-
-function persistSalesQuoteRecords(records: SalesQuoteRecord[]): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(
-    SALES_QUOTE_RECORDS_STORAGE_KEY,
-    JSON.stringify(records.slice(0, SALES_QUOTE_RECORD_LIMIT)),
-  );
-}
-
-function isSalesQuoteRecord(value: unknown): value is SalesQuoteRecord {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record.id === "string" &&
-    typeof record.quote_id === "string" &&
-    typeof record.created_at === "string" &&
-    (record.status === "quoted" || record.status === "manual_required") &&
-    typeof record.customer_message === "string" &&
-    typeof record.destination === "string" &&
-    typeof record.cargo_summary === "string" &&
-    typeof record.currency_code === "string"
-  );
-}
-
-function readQuoteThemeMode(): QuoteThemeMode {
-  if (typeof window === "undefined") {
-    return "light";
-  }
-  const stored = window.localStorage.getItem(QUOTE_THEME_STORAGE_KEY);
-  return stored === "dark" ? "dark" : "light";
+function roleLabel(role: string): string {
+  const labels: Record<string, string> = {
+    admin: "管理员",
+    operator: "运营",
+    sales: "销售",
+    viewer: "查看者",
+  };
+  return labels[role] ?? role;
 }

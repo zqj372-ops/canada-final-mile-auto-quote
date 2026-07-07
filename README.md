@@ -248,12 +248,22 @@ project name，避免影响同机其他容器：
 
 ```bash
 cp infra/.env.prod.example .env.prod
-# 修改 .env.prod 中的 POSTGRES_PASSWORD / DATABASE_URL / AI_CONFIG_SECRET
+# 修改 .env.prod 中的 POSTGRES_PASSWORD / DATABASE_URL / AI_CONFIG_SECRET / AUTH_TOKEN_SECRET
 docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml up -d --build
 docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml exec api \
-  python scripts/create_api_key.py --name Admin --role admin
+  python scripts/create_user.py \
+    --username admin@example.com \
+    --password 'change-this-admin-password' \
+    --display-name Admin \
+    --role admin \
+    --update-if-exists
 docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml exec api \
-  python scripts/create_api_key.py --name SalesWorkbench --role sales
+  python scripts/create_user.py \
+    --username sales@example.com \
+    --password 'change-this-sales-password' \
+    --display-name Sales \
+    --role sales \
+    --update-if-exists
 ```
 
 生产部署默认：
@@ -261,8 +271,9 @@ docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod
 - Web 工作台：只绑定服务器本机 `127.0.0.1:WEB_PORT`，默认 `18080`。
 - API：只绑定服务器本机 `127.0.0.1:API_PORT`，默认 `18000`。
 - 前端通过 `/api` 反代访问后端，不需要浏览器直连 API 端口。
-- 生产环境应保持 `DEV_AUTH_DISABLED=false`；前台 `/quote` 保存 sales Key，后台
-  `/admin` 保存 admin/operator/viewer Key。
+- 生产环境应保持 `DEV_AUTH_DISABLED=false`；前台 `/quote` 使用销售、运营或管理员
+  账号登录，后台 `/admin` 使用管理员、运营或查看者账号登录。
+- 旧的 API Key 仍可用于接口级自动化调用；Web 前后台默认走账号密码登录。
 - 如果挂在已有域名子路径下，可设置 `VITE_APP_BASE_PATH=/canada-quote/`
   和 `VITE_API_BASE_URL=/canada-quote-api` 后重建 Web 容器。
 
