@@ -6,6 +6,8 @@ from math import ceil
 FLEXIBLE_PACKAGING = {"编织袋", "柔性包装", "woven bag", "flexible packaging", "bag"}
 WOODEN_CRATE = {"木箱", "crate", "wooden crate"}
 HARD_LONG_PIECE_THRESHOLD_CM = Decimal("240")
+SUSPICIOUS_LONG_PIECE_MIN_PALLETS = 50
+SUSPICIOUS_LONG_PIECE_MULTIPLIER = 10
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,7 @@ def calculate_billing_pallets(
         wooden_crate_pallets = piece_count * 2 if is_long_piece else piece_count
 
     explicit = explicit_pallet_count or 0
+    normal_basis_pallets = max(volume_pallets, weight_pallets, explicit)
     components = {
         "volume_pallets": volume_pallets,
         "weight_pallets": weight_pallets,
@@ -56,6 +59,19 @@ def calculate_billing_pallets(
         "wooden_crate_pallets": wooden_crate_pallets,
         "explicit_pallet_count": explicit,
     }
+    if _is_suspicious_long_piece_count(long_piece_pallets, normal_basis_pallets):
+        components["normal_basis_pallets"] = normal_basis_pallets
+        return PalletCalculationResult(
+            billing_pallets=None,
+            components=components,
+            manual_review_required=True,
+            risk_tags=("long_piece_count_suspicious",),
+            internal_note=(
+                f"超长件数量/件数异常：最长边 {longest_side_cm} cm、件数 {piece_count} "
+                f"会推导 {long_piece_pallets} 托，需人工确认实际件数或显式托数。"
+            ),
+        )
+
     billing_pallets = max(components.values())
     if billing_pallets <= 0:
         return PalletCalculationResult(
@@ -67,3 +83,13 @@ def calculate_billing_pallets(
         )
 
     return PalletCalculationResult(billing_pallets=billing_pallets, components=components)
+
+
+def _is_suspicious_long_piece_count(long_piece_pallets: int, normal_basis_pallets: int) -> bool:
+    if long_piece_pallets <= 0:
+        return False
+    threshold = max(
+        SUSPICIOUS_LONG_PIECE_MIN_PALLETS,
+        normal_basis_pallets * SUSPICIOUS_LONG_PIECE_MULTIPLIER,
+    )
+    return long_piece_pallets > threshold

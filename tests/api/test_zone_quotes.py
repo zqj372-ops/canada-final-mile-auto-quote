@@ -315,6 +315,59 @@ def test_hard_long_piece_over_240cm_counts_two_pallets_per_piece() -> None:
     assert body["base_price_usd"] == "135.00"
 
 
+def test_suspicious_long_piece_count_requires_manual_before_price_lookup() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "V5L 4X5", "preferred_city": "Vancouver", "province": "BC"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "V5L",
+                "city": "VANCOUVER",
+                "province": "BC",
+                "origin": "calgary",
+                "zone": 5,
+                "match_level": "test",
+                "note": "",
+            },
+        ],
+        prices=[
+            {
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("180.00"),
+                "source": "test",
+                "last_updated": "2026-06-03",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="1300 Stewart St",
+            postal_code="V5L 4X5",
+            city="Vancouver",
+            province="BC",
+            cbm=1.62,
+            weight_kg=1340,
+            piece_count=2250,
+            longest_side_cm=300,
+            requires_appointment=False,
+        ),
+    )
+
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["manual_review_required"] is True
+    assert body["billing_pallets"] is None
+    assert body["pallet_breakdown"]["long_piece_pallets"] == 4500
+    assert body["pallet_breakdown"]["normal_basis_pallets"] == 3
+    assert "long_piece_count_suspicious" in body["risk_tags"]
+    assert not body["matched_rule"].startswith("Zone 价格矩阵缺少价格")
+
+
 def test_missing_zone_returns_manual_required() -> None:
     client = build_client()
 

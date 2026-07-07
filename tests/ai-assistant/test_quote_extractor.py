@@ -210,6 +210,29 @@ def test_deterministic_extraction_overrides_ai_weight_as_piece_count() -> None:
     assert draft.longest_side_cm == Decimal("270.0")
 
 
+def test_deterministic_extraction_clears_suspicious_model_piece_count() -> None:
+    raw = """
+    1300 Stewart St
+    Vancouver BC V5L 4X5
+    1.62CBM 1340kg
+    最长边约300cm
+    """
+
+    draft = apply_deterministic_extraction(
+        AIExtractedQuoteDraft(
+            piece_count=2250,
+            cbm=Decimal("1.62"),
+            weight_kg=Decimal("1340"),
+            longest_side_cm=Decimal("300"),
+            confidence=85,
+        ),
+        raw,
+    )
+
+    assert draft.piece_count is None
+    assert "suspicious model piece_count=2250" in (draft.extraction_notes or "")
+
+
 def test_deterministic_extraction_reads_dimension_weight_table_with_labeled_address() -> None:
     raw = """
     国家：CA

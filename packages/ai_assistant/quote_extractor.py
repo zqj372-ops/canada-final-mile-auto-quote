@@ -60,6 +60,8 @@ REQUIRED_FIELDS = {
 ALLOWED_PACKAGING_TYPES = {"carton", "wooden_crate", "pallet", "woven_bag", "flexible_packaging", "unknown"}
 ALLOWED_ADDRESS_TYPES = {"commercial", "residential", "private", "rural_residential"}
 POSTAL_CODE_PATTERN = re.compile(r"[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d")
+SUSPICIOUS_MODEL_PIECE_COUNT = 1000
+SUSPICIOUS_PIECES_PER_CBM = Decimal("500")
 PROVINCE_ALIASES = {
     "alberta": "AB",
     "ab": "AB",
@@ -147,12 +149,38 @@ def apply_deterministic_extraction(draft: AIExtractedQuoteDraft, customer_messag
     notes = list(filter(None, [draft.extraction_notes]))
     if parsed["notes"]:
         notes.append(parsed["notes"])
+    suspicious_note = _clear_suspicious_model_piece_count(draft, customer_message)
+    if suspicious_note:
+        notes.append(suspicious_note)
     if notes:
         draft.extraction_notes = " | ".join(notes)
     if parsed["piece_count"] and draft.confidence < 75:
         draft.confidence = max(draft.confidence, 75)
     _clear_placeholder_fields(draft)
     return draft
+
+
+def _clear_suspicious_model_piece_count(
+    draft: AIExtractedQuoteDraft,
+    customer_message: str,
+) -> str | None:
+    if draft.piece_count is None or draft.piece_count < SUSPICIOUS_MODEL_PIECE_COUNT:
+        return None
+    if _find_explicit_piece_count(customer_message) is not None:
+        return None
+
+    cbm = draft.cbm or Decimal("0")
+    pieces_per_cbm = Decimal(draft.piece_count) / cbm if cbm > 0 else Decimal("0")
+    is_long_piece = bool(draft.longest_side_cm is not None and draft.longest_side_cm >= Decimal("240"))
+    if not is_long_piece and pieces_per_cbm <= SUSPICIOUS_PIECES_PER_CBM:
+        return None
+
+    original_piece_count = draft.piece_count
+    draft.piece_count = None
+    return (
+        f"Ignored suspicious model piece_count={original_piece_count}; "
+        "original text did not explicitly confirm that many shipping pieces."
+    )
 
 
 def missing_required_fields(draft: AIExtractedQuoteDraft) -> set[str]:

@@ -204,6 +204,7 @@ function formatPalletBreakdown(breakdown: Record<string, number> | null | undefi
     long_piece_pallets: "超长",
     wooden_crate_pallets: "木箱",
     explicit_pallet_count: "显式",
+    normal_basis_pallets: "基础",
   };
   return Object.entries(breakdown)
     .map(([key, value]) => `${labels[key] || key}:${value}`)

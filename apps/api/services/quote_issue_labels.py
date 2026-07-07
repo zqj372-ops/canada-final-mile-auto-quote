@@ -11,6 +11,7 @@ RISK_TAG_LABELS: dict[str, str] = {
     "learned_from_manual_task": "来源为已处理人工任务",
     "billing_pallets_manual_required": "计费托数需人工确认",
     "missing_billable_pallet_basis": "缺少计费托数依据",
+    "long_piece_count_suspicious": "超长件数量异常",
     "flat_rate_packaging_required": "特殊包装需按整托/人工确认",
     "stale_origin_overridden": "始发仓已按省份规则覆盖",
     "split_record_conflict": "邮编存在拆分记录冲突",

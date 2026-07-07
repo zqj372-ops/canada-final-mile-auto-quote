@@ -511,7 +511,7 @@ function buildInquiryDetails(task: ManualQuoteTask): {
     detailItem("最大单边 cm", firstValue(source.longest_side_cm, request?.longest_side_cm), formatNumber),
     detailItem("包装类型", packagingLabel(stringValue(firstValue(source.packaging_type, request?.packaging_type)))),
     detailItem("显式托数", firstValue(source.explicit_pallet_count, request?.explicit_pallet_count)),
-    detailItem("计费托数", resultRecord.billing_pallets),
+    detailItem("计费托数", formatBillingPallets(resultRecord.billing_pallets, palletBreakdown)),
     detailItem("托数拆分", formatPalletBreakdown(palletBreakdown)),
   ];
 
@@ -680,16 +680,69 @@ function formatPalletBreakdown(value: JsonRecord | null): string {
     return "未返回";
   }
   const labels: Record<string, string> = {
+    volume_pallets: "体积",
     cbm_pallets: "体积",
     weight_pallets: "重量",
+    long_piece_pallets: "超长",
     oversized_pallets: "超长",
     wooden_crate_pallets: "木箱",
     explicit_pallet_count: "显式",
+    normal_basis_pallets: "基础",
     billing_pallets: "计费",
   };
   return Object.entries(value)
-    .map(([key, entryValue]) => `${labels[key] ?? key}: ${displayValue(entryValue)}`)
+    .map(([key, entryValue]) => `${labels[key] ?? key}: ${formatPalletComponent(key, entryValue, value)}`)
     .join(" / ");
+}
+
+function formatBillingPallets(value: unknown, breakdown: JsonRecord | null): string {
+  const suspiciousLongPiecePallets = getSuspiciousLongPiecePallets(breakdown);
+  if (suspiciousLongPiecePallets !== null) {
+    const normalBasis = numberValue(breakdown?.normal_basis_pallets)
+      ?? maxFinite([
+        numberValue(breakdown?.volume_pallets),
+        numberValue(breakdown?.weight_pallets),
+        numberValue(breakdown?.explicit_pallet_count),
+      ]);
+    return normalBasis !== null
+      ? `异常 ${suspiciousLongPiecePallets} 托，需复核件数/最长边；基础约 ${normalBasis} 托`
+      : `异常 ${suspiciousLongPiecePallets} 托，需复核件数/最长边`;
+  }
+  return displayValue(value);
+}
+
+function formatPalletComponent(key: string, value: unknown, breakdown: JsonRecord): string {
+  const formatted = displayValue(value);
+  if (key !== "long_piece_pallets") {
+    return formatted;
+  }
+  const suspiciousLongPiecePallets = getSuspiciousLongPiecePallets(breakdown);
+  return suspiciousLongPiecePallets !== null ? `${formatted}（异常需复核）` : formatted;
+}
+
+function getSuspiciousLongPiecePallets(breakdown: JsonRecord | null): number | null {
+  const longPiecePallets = numberValue(breakdown?.long_piece_pallets);
+  if (longPiecePallets === null || longPiecePallets < 50) {
+    return null;
+  }
+  const normalBasis = numberValue(breakdown?.normal_basis_pallets)
+    ?? maxFinite([
+      numberValue(breakdown?.volume_pallets),
+      numberValue(breakdown?.weight_pallets),
+      numberValue(breakdown?.explicit_pallet_count),
+    ]);
+  const threshold = Math.max(50, (normalBasis ?? 0) * 10);
+  return longPiecePallets > threshold ? longPiecePallets : null;
+}
+
+function numberValue(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function maxFinite(values: Array<number | null>): number | null {
+  const finiteValues = values.filter((value): value is number => value !== null);
+  return finiteValues.length ? Math.max(...finiteValues) : null;
 }
 
 function formatAccessorials(value: JsonRecord | null): string {
