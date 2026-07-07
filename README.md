@@ -43,6 +43,7 @@ packages/shared/                   共享常量
 data/                              原始数据、模板和脱敏样例占位
 docs/                              产品、规则、数据结构和 AI 防幻觉文档
 infra/                             Docker Compose 和 Postgres 初始化表
+ops/hermes/                        Hermes Agent 只读运维诊断脚本和提示词
 reference/canada-final-mile/       已归档的业务资料和查表数据
 tests/                             MVP 单元测试
 ```
@@ -101,6 +102,7 @@ VITE_API_BASE_URL=http://localhost:8000 npm run dev
 - `/settings/ai`：维护 OpenAI-compatible 模型配置，支持输入 API Key 自动获取模型列表并导入。
 - `/settings/search`：维护 Tavily 等搜索 API Key，用于 AI 自动报价时查询地址和行情参考。
 - `/settings/wecom`：维护企业微信群机器人 Webhook 配置。
+- `/settings/email`：维护邮件通知配置，作为人工任务和报价通知的主要通道。
 
 `/quote` 是中文 AI 报价工作台：销售粘贴尺寸、重量、地址和邮编，页面只做字段识别
 和展示，价格仍由后端 `POST /quotes/zone-calculate` 计算。包装类型、地址类型、风险
@@ -133,6 +135,36 @@ alembic upgrade head
 使用 SQLite 内存库，并由 `Base.metadata.create_all()` 自动建表。
 如果某个开发库已经由 `init.sql` 初始化到当前结构，可先执行 `alembic stamp head`
 标记版本；之后再用 `alembic upgrade head` 应用新增 migration。
+
+## Hermes Agent 运维助手
+
+服务器上可安装 NousResearch Hermes Agent 作为报价服务的只读运维副驾驶。仓库内
+`ops/hermes/` 提供固定诊断脚本和提示词，减少 Hermes 临时拼命令造成误判。
+
+常用命令：
+
+```bash
+ops/hermes/scripts/check_health.sh
+ops/hermes/scripts/check_recent_errors.sh 120
+ops/hermes/scripts/check_manual_tasks.sh
+ops/hermes/scripts/check_learning_candidates.sh
+ops/hermes/scripts/check_zone_match.sh S7K Saskatoon SK
+ops/hermes/scripts/quote_debug_snapshot.sh <quote_id>
+ops/hermes/run_daily_report.sh
+```
+
+默认面向 Oracle 部署：
+
+```text
+HERMES_PUBLIC_URL=https://quote.freightclaw.net
+HERMES_COMPOSE_PROJECT=canada_quote_oracle
+HERMES_COMPOSE_FILE=infra/docker-compose.prod.yml
+HERMES_ENV_FILE=.env.prod
+```
+
+Hermes 只能诊断、总结、提出修复建议；不能编造价格，不能改写报价金额，不能输出
+密钥或解密后的配置。报价金额仍然只能来自 Quote Engine、Zone 价格矩阵或已审核的
+`learned_quote_rules`。
 
 ### 参考数据导入
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from time import perf_counter
 from typing import Any, Protocol
 
@@ -104,9 +105,13 @@ def _extract_openai_content(data: dict[str, Any]) -> str:
     message = first.get("message")
     if isinstance(message, dict):
         content = message.get("content")
-        return content if isinstance(content, str) else ""
+        return _strip_think_tags(content) if isinstance(content, str) else ""
     text = first.get("text")
-    return text if isinstance(text, str) else ""
+    return _strip_think_tags(text) if isinstance(text, str) else ""
+
+
+def _strip_think_tags(content: str) -> str:
+    return re.sub(r"<think>.*?</think>", "", content, flags=re.IGNORECASE | re.DOTALL).strip()
 
 
 def _safe_error_body(text: str) -> str:

@@ -120,7 +120,7 @@ PROVIDER_PRESETS: dict[str, AIProviderPreset] = {
         label="MiniMax",
         base_url="https://api.minimax.chat/v1",
         api_key_hint="...",
-        recommended_models=["abab6.5s-chat", "abab6.5-chat"],
+        recommended_models=["MiniMax-M3", "MiniMax-M2.7-highspeed", "MiniMax-M2.7", "MiniMax-M2.5-highspeed"],
     ),
     "custom": AIProviderPreset(
         provider="custom",
