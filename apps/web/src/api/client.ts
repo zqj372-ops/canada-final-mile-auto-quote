@@ -473,6 +473,13 @@ export interface SalesQuoteRecord {
   result_json: JsonValue;
 }
 
+export interface SalesQuoteManualPricePayload {
+  total_price_usd: number;
+  override_note: string;
+  customer_reply?: string | null;
+  confirmed: boolean;
+}
+
 export interface RiskTagCount {
   tag: string;
   label?: string;
@@ -904,6 +911,16 @@ export function listSalesQuoteRecords(params: {
   }
   const query = search.toString();
   return request<SalesQuoteRecord[]>(`/quotes/sales-records${query ? `?${query}` : ""}`, {}, "quote");
+}
+
+export function updateSalesQuoteManualPrice(
+  recordId: number,
+  payload: SalesQuoteManualPricePayload,
+): Promise<SalesQuoteRecord> {
+  return request<SalesQuoteRecord>(`/quotes/sales-records/${recordId}/manual-price`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function listHermesLearningCandidates(params: {

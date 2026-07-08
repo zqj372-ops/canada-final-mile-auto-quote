@@ -5,6 +5,7 @@ RISK_TAG_LABELS: dict[str, str] = {
     "zone_price_not_found": "未命中 Zone 价格矩阵",
     "city_zone_fallback": "按城市/省份匹配 Zone",
     "city_zone_prefix_family_fallback": "按同邮编族缩小城市 Zone",
+    "city_zone_prefix_family_low_support": "同邮编族锚点证据不足",
     "postal_family_fallback": "按同省邮编族模糊匹配 Zone",
     "nearest_postal_prefix_fallback": "采用最近邮编前缀锚点",
     "learned_quote_reused": "复用人工确认学习记录",

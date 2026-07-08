@@ -89,7 +89,17 @@ def _manual_next_action(result_json: dict[str, Any]) -> str:
     origin = _text(result_json.get("origin"))
     zone = result_json.get("zone")
     billing_pallets = result_json.get("billing_pallets")
+    match_trace = result_json.get("match_trace") if isinstance(result_json.get("match_trace"), dict) else {}
+    suggested_origin = _text(match_trace.get("suggested_origin"))
+    suggested_zone = match_trace.get("suggested_zone")
+    suggested_prefix = _text(match_trace.get("suggested_postal_prefix"))
     risk_tags = result_json.get("risk_tags") if isinstance(result_json.get("risk_tags"), list) else []
+    if "city_zone_prefix_family_low_support" in risk_tags and suggested_origin and suggested_zone is not None:
+        return (
+            f"系统只找到相邻邮编锚点 {suggested_prefix or '-'} -> "
+            f"{origin_label(suggested_origin) or suggested_origin} Zone {suggested_zone}，"
+            "证据不足，需人工确认后再决定是否发布为 Hermes 学习经验。"
+        )
     if "zone_price_not_found" in risk_tags and origin and zone is not None:
         return f"建议先核对 {origin_label(origin) or origin} Zone {zone} 的 {billing_pallets or '对应'} 托价格矩阵，确认后补价。"
     if "zone_not_found" in risk_tags or origin is None or zone is None:

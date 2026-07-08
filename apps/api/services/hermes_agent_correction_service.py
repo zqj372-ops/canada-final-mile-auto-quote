@@ -45,6 +45,8 @@ def apply_hermes_agent_correction_if_available(
 ) -> ZoneQuoteResult:
     if not result.manual_review_required or result.billing_pallets is None:
         return result
+    if "city_zone_prefix_family_low_support" in result.risk_tags:
+        return result
 
     try:
         service = HermesAgentCorrectionService(db, pricing_config=pricing_config)

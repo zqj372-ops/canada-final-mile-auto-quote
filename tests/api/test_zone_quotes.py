@@ -644,17 +644,82 @@ def test_city_zone_fallback_prefers_requested_postal_prefix_family() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "zone_matrix"
+    assert body["source_type"] == "manual_required"
     assert body["preferred_city"] == "Richmond"
     assert body["city"] == "Richmond"
     assert body["province"] == "BC"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 5
+    assert body["origin"] is None
+    assert body["zone"] is None
     assert body["billing_pallets"] == 2
-    assert body["base_price_usd"] == "365.00"
-    assert "city_zone_fallback" in body["risk_tags"]
-    assert "city_zone_prefix_family_fallback" in body["risk_tags"]
-    assert body["manual_review_required"] is False
+    assert body["base_price_usd"] is None
+    assert "city_zone_prefix_family_low_support" in body["risk_tags"]
+    assert body["match_trace"]["suggested_origin"] == "calgary"
+    assert body["match_trace"]["suggested_zone"] == 5
+    assert body["manual_review_required"] is True
+
+
+def test_city_zone_fallback_with_conflicting_single_anchor_requires_manual_review() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "V5J 5M8", "preferred_city": "Burnaby", "province": "BC"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "V3J",
+                "city": "BURNABY",
+                "province": "BC",
+                "origin": "toronto",
+                "zone": 10,
+                "match_level": "legacy_anchor",
+                "note": "conflicting legacy Burnaby anchor",
+            },
+            {
+                "postal_prefix": "V5H",
+                "city": "BURNABY",
+                "province": "BC",
+                "origin": "calgary",
+                "zone": 5,
+                "match_level": "reference",
+                "note": "",
+            },
+        ],
+        prices=[
+            {
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 1,
+                "base_price_usd": Decimal("240.00"),
+                "source": "test",
+                "last_updated": "2026-06-03",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="8125 N Fraser Wy, Amaya dairy",
+            postal_code="V5J 5M8",
+            city="Burnaby",
+            province="BC",
+            cbm=0.88,
+            weight_kg=80,
+            piece_count=1,
+            packaging_type="unknown",
+            longest_side_cm=110,
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "city_zone_prefix_family_low_support"
+    assert body["billing_pallets"] == 1
+    assert body["total_price_usd"] is None
+    assert "city_zone_prefix_family_low_support" in body["risk_tags"]
+    assert body["match_trace"]["suggested_origin"] == "calgary"
+    assert body["match_trace"]["suggested_zone"] == 5
 
 
 def test_ab_city_fallback_prefers_expected_origin_anchor_over_stale_toronto() -> None:

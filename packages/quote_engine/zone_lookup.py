@@ -377,6 +377,35 @@ def lookup_zone_by_city_province(
         )
 
     original = _choose_best_rule(match_rules)
+    is_trusted_city_anchor = (original.match_level or "").lower() == "trusted_city_anchor"
+    if prefix_family_label and len(match_rules) == 1 and len(filtered) > len(match_rules) and not is_trusted_city_anchor:
+        return ZoneLookupDecision(
+            manual_required=True,
+            matched_rule=(
+                f"邮编前缀 {prefix or '未知'} 未命中；城市 {city} + {normalized_province} "
+                f"只剩单个相邻邮编族锚点 {original.postal_prefix} -> {original.origin} Zone {original.zone}，"
+                "且存在被过滤的冲突锚点，需要人工确认。"
+            ),
+            risk_tags=("zone_not_found", "city_zone_prefix_family_low_support"),
+            matched_by="city_zone_prefix_family_low_support",
+            candidate_count=len(match_rules),
+            match_trace={
+                "fsa": prefix,
+                "input_city": city,
+                "province": normalized_province,
+                "candidate_count": len(match_rules),
+                "city_filtered_count": len(filtered),
+                "expected_origin": expected_origin,
+                "origin_preference_applied": origin_preference_applied,
+                "prefix_family": prefix_family_label,
+                "suggested_origin": original.origin,
+                "suggested_zone": original.zone,
+                "suggested_postal_prefix": original.postal_prefix,
+                "suggested_city": original.city,
+                "matched_by": "city_zone_prefix_family_low_support",
+            },
+        )
+
     rule, risk_tags = _apply_origin_overrides(original)
     fallback_detail = (
         f"，按同邮编族 {prefix_family_label} 缩小城市分区"

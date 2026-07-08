@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from decimal import Decimal
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -61,6 +64,59 @@ class SalesQuoteRecordRepository:
                 query.order_by(SalesQuoteRecord.created_at.desc(), SalesQuoteRecord.id.desc()).limit(safe_limit)
             )
         )
+
+    def get_record(self, record_id: int) -> SalesQuoteRecord | None:
+        return self.session.get(SalesQuoteRecord, record_id)
+
+    def apply_manual_price(
+        self,
+        *,
+        record: SalesQuoteRecord,
+        actor: CurrentActor,
+        total_price_usd: Decimal,
+        override_note: str,
+        customer_reply: str | None,
+    ) -> SalesQuoteRecord:
+        result_json = dict(record.result_json or {})
+        quote_result = _object_or_empty(result_json.get("quote_result")).copy()
+        previous_total = quote_result.get("total_price_usd")
+        price_text = str(total_price_usd.quantize(Decimal("0.01")))
+
+        quote_result.update(
+            {
+                "source_type": "manual_override",
+                "manual_review_required": False,
+                "total_price_usd": price_text,
+                "confidence": max(int(quote_result.get("confidence") or 0), 100),
+                "matched_rule": "manual_override",
+                "internal_note": f"Manual price override by {actor.name}: {override_note}",
+            }
+        )
+        risk_tags = _string_list(quote_result.get("risk_tags"))
+        if "manual_price_override" not in risk_tags:
+            risk_tags.append("manual_price_override")
+        quote_result["risk_tags"] = risk_tags
+
+        result_json["quote_result"] = quote_result
+        result_json["manual_review_required"] = False
+        result_json["customer_reply"] = customer_reply or _build_manual_customer_reply(record, price_text)
+        result_json["manual_override"] = {
+            "total_price_usd": price_text,
+            "previous_total_price_usd": previous_total,
+            "override_note": override_note,
+            "actor_name": actor.name,
+            "actor_role": actor.role,
+            "updated_at": datetime.now(UTC).isoformat(),
+            "reminder": "人工确认价只更新本次报价记录，不修改 Zone 价格矩阵。",
+        }
+
+        record.status = "quoted"
+        record.customer_reply = str(result_json["customer_reply"])
+        record.result_json = result_json
+        self.session.add(record)
+        self.session.commit()
+        self.session.refresh(record)
+        return record
 
 
 def sales_quote_record_to_dict(record: SalesQuoteRecord) -> dict[str, object]:
@@ -140,3 +196,20 @@ def _manual_reason(status: str, quote_result: dict[str, object], missing_fields:
         return f"缺少 {', '.join(missing_fields)}"
     matched_rule = quote_result.get("matched_rule")
     return str(matched_rule) if matched_rule else "需要人工确认"
+
+
+def _build_manual_customer_reply(record: SalesQuoteRecord, price_text: str) -> str:
+    return "\n".join(
+        [
+            "加拿大尾端派送报价如下：",
+            f"目的地：{_destination(_object_or_empty(record.result_json.get('quote_result')), _object_or_empty(record.result_json.get('extraction')))}",
+            f"报价合计：USD {price_text}",
+            "注：不带尾板，自卸货",
+            "- 送货到门口路边，不含其他操作",
+            "- 无卸货平台需尾板 +50USD/票",
+            "- 需手叉车配合 +50USD/票",
+            "- 免费等待30分钟，超时35USD/半小时",
+            "- 价格以供应商实测地址及卡车准入情况为准",
+            "- 下单引用单号，未引用加收50人民币/票服务费",
+        ]
+    )
