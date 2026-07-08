@@ -426,6 +426,7 @@ export interface QuoteAuditLog {
   quote_id: string;
   request_json: JsonValue;
   result_json: JsonValue;
+  quote_logic?: JsonValue;
   source_type: string;
   postal_code: string | null;
   postal_prefix: string | null;
@@ -872,6 +873,18 @@ export function updateManualTask(
 
 export function getQuoteAudit(quoteId: string): Promise<QuoteAuditLog> {
   return request<QuoteAuditLog>(`/quotes/audit/${encodeURIComponent(quoteId)}`);
+}
+
+export function listQuoteAudits(params: { limit?: number; query?: string } = {}): Promise<QuoteAuditLog[]> {
+  const search = new URLSearchParams();
+  if (params.limit) {
+    search.set("limit", String(params.limit));
+  }
+  if (params.query?.trim()) {
+    search.set("query", params.query.trim());
+  }
+  const query = search.toString();
+  return request<QuoteAuditLog[]>(`/quotes/audits${query ? `?${query}` : ""}`);
 }
 
 export function getQuoteErrorSummary(limit = 20): Promise<QuoteErrorSummary> {

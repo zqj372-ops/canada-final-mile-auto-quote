@@ -492,9 +492,9 @@ function ManualTaskLearningBridge({
         )}
       </div>
       <div className="mt-3 grid gap-2 text-xs font-semibold text-slate-700 sm:grid-cols-3">
-        <HermesStep active done label="1 人工确认" />
-        <HermesStep active={status.step >= 2} done={status.step > 2} label="2 生成候选" />
-        <HermesStep active={status.step >= 3} done={status.done} label="3 批准复用" />
+        <HermesStep active done={status.step > 1} label="1 系统建议" />
+        <HermesStep active={status.step >= 2} done={status.step > 2} label="2 人工确认" />
+        <HermesStep active={status.step >= 3} done={status.done} label="3 发布学习" />
       </div>
       {candidate && (
         <div className="mt-3 grid gap-2 rounded-md bg-white/70 p-2 text-sm sm:grid-cols-2">
@@ -544,6 +544,7 @@ function HermesStep({ active, done, label }: { active: boolean; done: boolean; l
 
 function InquiryDetails({ task }: { task: ManualQuoteTask }) {
   const details = buildInquiryDetails(task);
+  const logic = quoteLogicFromTask(task);
 
   return (
     <section className="mt-5 rounded-md border border-blue-100 bg-blue-50/40 p-4">
@@ -570,6 +571,8 @@ function InquiryDetails({ task }: { task: ManualQuoteTask }) {
         </div>
       )}
 
+      <QuoteSuggestionCard logic={logic} task={task} />
+
       <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-3">
         <DetailGroup title="货物信息" items={details.cargoItems} />
         <DetailGroup title="地址信息" items={details.addressItems} />
@@ -594,6 +597,39 @@ function InquiryDetails({ task }: { task: ManualQuoteTask }) {
         <JsonDetails title="结果 JSON" value={task.result_json} />
       </div>
     </section>
+  );
+}
+
+function QuoteSuggestionCard({ logic, task }: { logic: JsonRecord | null; task: ManualQuoteTask }) {
+  const steps = arrayOfStrings(logic?.steps);
+  const headline = stringValue(logic?.headline) || task.reason_zh || task.reason;
+  return (
+    <div className="mt-4 rounded-md border border-teal-200 bg-teal-50/70 p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-teal-700">系统建议</p>
+          <h4 className="mt-1 text-sm font-semibold leading-6 text-slate-950">{headline}</h4>
+          <p className="mt-1 text-sm leading-5 text-slate-600">
+            {stringValue(logic?.next_action) || "请人工确认 Zone、托数、地址类型和金额后再处理。"}
+          </p>
+        </div>
+        <span className="inline-flex w-fit rounded-full border border-teal-300 bg-white px-3 py-1 text-xs font-semibold text-teal-800">
+          先建议 / 后审核
+        </span>
+      </div>
+      {steps.length > 0 && (
+        <ol className="mt-3 grid gap-2 text-sm leading-5 text-slate-700">
+          {steps.map((step, index) => (
+            <li key={`${index}-${step}`} className="flex gap-2">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-700 text-xs font-semibold text-white">
+                {index + 1}
+              </span>
+              <span>{step}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   );
 }
 
@@ -709,7 +745,7 @@ function hermesBridgeStatus(
         description: `已发布为学习规则 #${candidate.promoted_rule_id ?? "-"}，后续仅在 Zone/价格表未命中时复用。`,
         done: true,
         step: 3,
-        title: "已进入 Hermes 并批准复用",
+        title: "人工已确认，Hermes 已发布复用",
       };
     }
     return {
@@ -717,7 +753,7 @@ function hermesBridgeStatus(
       description:
         candidate.status === "rejected"
           ? "这条候选已被拒绝，不会进入自动复用规则。"
-          : "这条人工任务已生成 Hermes 待审核候选，批准后才会被自动报价复用。",
+          : "人工确认后的建议已进入 Hermes 待审核候选，批准后才会被自动报价复用。",
       done: false,
       step: candidate.status === "rejected" ? 2 : 3,
       title: `已生成候选 #${candidate.id} / ${candidateStatusLabel(candidate.status)}`,
@@ -738,16 +774,16 @@ function hermesBridgeStatus(
   if (!draftIsResolved) {
     return {
       className: "border-slate-200 bg-slate-50",
-      description: "先填写人工确认金额，并把处理状态保存为“已解决”。",
+      description: "系统建议已生成，请先人工确认金额和原因，再保存处理结果。",
       done: false,
       step: 1,
-      title: "尚未进入 Hermes",
+      title: "系统建议待人工确认",
     };
   }
   if (!hasPrice) {
     return {
       className: "border-amber-200 bg-amber-50",
-      description: "状态已选“已解决”，但还没有人工确认金额；保存前不会生成 Hermes 候选。",
+      description: "状态已选“已解决”，但还没有人工确认金额；确认价格后才会进入 Hermes 候选。",
       done: false,
       step: 1,
       title: "缺人工确认金额",
@@ -781,11 +817,11 @@ function hermesBridgeStatus(
     };
   }
   return {
-    className: "border-blue-200 bg-blue-50",
-    description: "保存后会自动生成 Hermes 待审核候选；候选批准前不会影响自动报价。",
+      className: "border-blue-200 bg-blue-50",
+    description: "保存人工确认结果后会进入 Hermes 待审核候选；候选批准前不会影响自动报价。",
     done: false,
     step: 2,
-    title: "保存后生成 Hermes 候选",
+    title: "确认后生成 Hermes 候选",
   };
 }
 
@@ -873,6 +909,12 @@ function asRecord(value: unknown): JsonRecord | null {
     return null;
   }
   return value as JsonRecord;
+}
+
+function quoteLogicFromTask(task: ManualQuoteTask): JsonRecord | null {
+  const result = asRecord(task.result_json);
+  const trace = asRecord(result?.match_trace);
+  return asRecord(trace?.quote_logic);
 }
 
 function stringValue(value: unknown): string | null {

@@ -18,19 +18,19 @@ const tabs: Array<{
   {
     id: "manual",
     label: "人工任务",
-    summary: "处理 manual_required、补价格、生成后续学习候选",
+    summary: "先看系统建议，再人工确认金额和处理结论",
     metric: "复核",
   },
   {
     id: "hermes",
     label: "Hermes 学习",
-    summary: "审核人工确认后的学习候选，决定是否发布复用",
+    summary: "审核已确认建议，决定是否发布为可复用纠错经验",
     metric: "学习",
   },
   {
     id: "audit",
     label: "审计查询",
-    summary: "按 quote_id 回看报价输入、结果和 Agent 纠错来源",
+    summary: "查看报价列表、价格来源和每票为什么这样算",
     metric: "追溯",
   },
 ];
@@ -59,7 +59,7 @@ export default function OperationsWorkbenchPage({
               后台处理工作台
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              把人工复核、Hermes 学习候选和报价审计合并在一个页面。先处理异常票，再决定是否进入学习，最后可用审计追溯每一次报价为什么放行或拦截。
+              把人工复核、Hermes 学习候选和报价审计合并在一个页面。系统先给建议和报价逻辑，人工再确认或否决，确认后的经验才进入 Hermes 学习并可被后续报价复用。
             </p>
           </div>
 

@@ -14,6 +14,7 @@ from apps.api.db.repositories.rate_rule_repository import RateRuleRepository
 from apps.api.db.repositories.zone_repository import ZoneRepository
 from apps.api.services.hermes_agent_correction_service import apply_hermes_agent_correction_if_available
 from apps.api.services.notification_service import notify_manual_required, notify_quote_success
+from apps.api.services.quote_logic_explainer import attach_zone_quote_logic
 from packages.quote_engine.engine import QuoteEngine
 from packages.quote_engine.models import QuoteCalculationRequest, QuoteResult, ShipmentInput
 from packages.quote_engine.zone_engine import ZoneQuoteEngine
@@ -43,6 +44,7 @@ def calculate_zone_quote(
     result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
     result = apply_hermes_agent_correction_if_available(db, payload, result, pricing_config=pricing_config)
     result = apply_learned_quote_if_available(db, payload, result)
+    result = attach_zone_quote_logic(payload, result)
     record_zone_quote_side_effects(
         db,
         payload,

@@ -1,5 +1,5 @@
-import { FormEvent, useState } from "react";
-import { getQuoteAudit, type QuoteAuditLog } from "../api/client";
+import { FormEvent, useEffect, useState } from "react";
+import { getQuoteAudit, listQuoteAudits, type JsonValue, type QuoteAuditLog } from "../api/client";
 import RiskTags from "../components/RiskTags";
 
 interface AuditPageProps {
@@ -9,14 +9,35 @@ interface AuditPageProps {
 export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
   const [quoteId, setQuoteId] = useState("");
   const [record, setRecord] = useState<QuoteAuditLog | null>(null);
+  const [records, setRecords] = useState<QuoteAuditLog[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isListLoading, setIsListLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void loadRecentAudits();
+  }, []);
+
+  async function loadRecentAudits(search = "") {
+    setIsListLoading(true);
+    try {
+      const response = await listQuoteAudits({ limit: 40, query: search });
+      setRecords(response);
+      if (!record && response.length > 0) {
+        setRecord(response[0]);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "审计列表加载失败");
+    } finally {
+      setIsListLoading(false);
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmed = quoteId.trim();
     if (!trimmed) {
-      setError("请输入 quote_id");
+      await loadRecentAudits();
       return;
     }
 
@@ -56,7 +77,7 @@ export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
               className="field-input"
               value={quoteId}
               onChange={(event) => setQuoteId(event.target.value)}
-              placeholder="输入报价 ID"
+              placeholder="输入 8 位报价 ID，也可留空刷新最近列表"
             />
           </label>
           <button className="btn-primary" type="submit" disabled={isLoading}>
@@ -84,6 +105,8 @@ export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
 
           <div className="grid gap-6 p-5 xl:grid-cols-[0.85fr_1.15fr]">
             <div className="space-y-5">
+              <QuoteLogicCard record={record} />
+
               <div>
                 <h3 className="section-title">审计字段</h3>
                 <dl className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -129,8 +152,16 @@ export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
             </div>
 
             <div className="grid gap-5">
-              <JsonBlock title="请求原文 JSON" value={record.request_json} />
-              <JsonBlock title="报价结果 JSON" value={record.result_json} />
+              <ReadableRequestCard record={record} />
+              <details className="rounded-md border border-slate-200 bg-slate-50 p-4">
+                <summary className="cursor-pointer text-sm font-semibold text-slate-900">
+                  调试 JSON
+                </summary>
+                <div className="mt-4 grid gap-5">
+                  <JsonBlock title="请求原文 JSON" value={record.request_json} />
+                  <JsonBlock title="报价结果 JSON" value={record.result_json} />
+                </div>
+              </details>
             </div>
           </div>
         </section>
@@ -139,7 +170,130 @@ export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
           输入报价 ID 后可查看原始请求、后端结果和落库的关键报价字段。
         </section>
       )}
+
+      <section className="panel overflow-hidden">
+        <div className="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="section-title">最近审计列表</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              新报价会使用 8 位数字报价 ID；旧 UUID 记录仍可查询。
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => loadRecentAudits(quoteId)}
+            disabled={isListLoading}
+          >
+            {isListLoading ? "刷新中..." : "刷新列表"}
+          </button>
+        </div>
+        <div className="divide-y divide-slate-200">
+          {records.length === 0 ? (
+            <div className="px-5 py-6 text-sm text-slate-500">暂无审计记录。</div>
+          ) : (
+            records.map((item) => (
+              <button
+                key={`${item.id}-${item.quote_id}`}
+                type="button"
+                className={`grid w-full gap-3 px-5 py-4 text-left transition hover:bg-slate-50 lg:grid-cols-[9rem_1fr_7rem_7rem_8rem] lg:items-center ${
+                  record?.id === item.id ? "bg-teal-50/70" : "bg-white"
+                }`}
+                onClick={() => {
+                  setRecord(item);
+                  setQuoteId(item.quote_id);
+                }}
+              >
+                <div>
+                  <p className="font-mono text-sm font-semibold text-slate-950">{item.quote_id}</p>
+                  <p className="mt-1 text-xs text-slate-500">{formatDate(item.created_at)}</p>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    {item.postal_prefix || "-"} / {item.city || "-"} / {item.province || "-"}
+                  </p>
+                  <p className="mt-1 line-clamp-1 text-xs text-slate-500">
+                    {logicHeadline(item) || sourceTypeLabel(item.source_type)}
+                  </p>
+                </div>
+                <StatusBadge manual={item.manual_review_required} />
+                <div className="text-sm font-semibold text-slate-900">
+                  {item.origin || "-"} {item.zone === null ? "" : `Z${item.zone}`}
+                </div>
+                <div className="text-sm font-semibold text-slate-950">{formatMoney(item.total_price_usd)}</div>
+              </button>
+            ))
+          )}
+        </div>
+      </section>
     </div>
+  );
+}
+
+function QuoteLogicCard({ record }: { record: QuoteAuditLog }) {
+  const logic = asRecord(record.quote_logic);
+  const steps = readStringList(logic.steps);
+  return (
+    <div className="rounded-md border border-teal-200 bg-teal-50/70 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-teal-800">报价逻辑说明</p>
+          <h3 className="mt-1 text-lg font-semibold text-slate-950">
+            {readText(logic.headline) || logicHeadline(record) || "系统未返回报价逻辑"}
+          </h3>
+        </div>
+        <StatusBadge manual={record.manual_review_required} />
+      </div>
+      <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+        <FieldValue label="价格来源" value={readText(logic.price_source) || sourceTypeLabel(record.source_type)} />
+        <FieldValue label="线路/分区" value={readText(logic.route) || `${record.origin || "-"} / ${record.zone ?? "-"}`} />
+        <FieldValue label="下一步" value={readText(logic.next_action) || "按审计结果处理"} />
+      </dl>
+      {steps.length > 0 && (
+        <ol className="mt-4 space-y-2 text-sm leading-6 text-slate-700">
+          {steps.map((step, index) => (
+            <li key={`${index}-${step}`} className="flex gap-2">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-600 text-xs font-semibold text-white">
+                {index + 1}
+              </span>
+              <span>{step}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function ReadableRequestCard({ record }: { record: QuoteAuditLog }) {
+  const request = asRecord(record.request_json);
+  const result = asRecord(record.result_json);
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-4">
+      <h3 className="section-title">询价明细</h3>
+      <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+        <FieldValue label="地址" value={readText(request.address_line) || "-"} />
+        <FieldValue label="邮编" value={readText(request.postal_code) || record.postal_code || "-"} />
+        <FieldValue label="城市/省份" value={`${record.city || readText(request.city) || "-"} / ${record.province || readText(request.province) || "-"}`} />
+        <FieldValue label="货物" value={`${readText(request.cbm) || "-"} CBM / ${readText(request.weight_kg) || "-"} KG / ${readText(request.piece_count) || "-"}件`} />
+        <FieldValue label="计费托数" value={formatNullable(record.billing_pallets)} />
+        <FieldValue label="托数拆分" value={readText(result.pallet_breakdown) || formatPalletBreakdown(asRecord(result.pallet_breakdown))} />
+      </dl>
+    </div>
+  );
+}
+
+function StatusBadge({ manual }: { manual: boolean }) {
+  return (
+    <span
+      className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-semibold ${
+        manual
+          ? "border-amber-300 bg-amber-50 text-amber-800"
+          : "border-emerald-300 bg-emerald-50 text-emerald-800"
+      }`}
+    >
+      {manual ? "需人工确认" : "已报价"}
+    </span>
   );
 }
 
@@ -161,6 +315,40 @@ function JsonBlock({ title, value }: { title: string; value: unknown }) {
       </pre>
     </div>
   );
+}
+
+function logicHeadline(record: QuoteAuditLog): string {
+  const logic = asRecord(record.quote_logic);
+  return readText(logic.headline) || "";
+}
+
+function asRecord(value: JsonValue | unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function readText(value: unknown): string {
+  if (value === null || value === undefined || value === "") {
+    return "";
+  }
+  if (typeof value === "object") {
+    return "";
+  }
+  return String(value);
+}
+
+function readStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => readText(item)).filter(Boolean);
+}
+
+function formatPalletBreakdown(value: Record<string, unknown>): string {
+  const entries = Object.entries(value).filter(([, entryValue]) => entryValue !== null && entryValue !== undefined);
+  if (!entries.length) {
+    return "-";
+  }
+  return entries.map(([key, entryValue]) => `${key}:${entryValue}`).join(" / ");
 }
 
 function formatNullable(value: string | number | null): string {

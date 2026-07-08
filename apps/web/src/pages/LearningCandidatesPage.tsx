@@ -146,7 +146,7 @@ export default function LearningCandidatesPage({
             自学习候选审核
           </h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            人工任务 resolved 后只会生成候选。批准后才发布为可复用学习规则；Hermes 不直接改价格表，也不直接算价。
+            系统报价时先给出建议，人工确认后才会进入这里。批准后才发布为可复用学习规则；Hermes 不直接改价格表，也不直接算价。
           </p>
         </div>
         <button className="btn-secondary" type="button" onClick={() => void loadCandidates()}>
@@ -199,7 +199,7 @@ export default function LearningCandidatesPage({
           <div className="border-b border-slate-200 px-4 py-3">
             <h2 className="section-title">候选列表</h2>
             <p className="mt-1 text-sm text-slate-600">
-              只审核重复出现且人工已确认的异常报价。单票不确定时直接拒绝或保持待审。
+              这里只审核“已有人确认过金额”的建议。报价现场的建议请先在人工任务里确认，单票不确定时直接拒绝或保持待审。
             </p>
           </div>
           {isLoading ? (
@@ -350,7 +350,7 @@ function CandidateDetails({
       </div>
 
       <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-950">
-        Hermes 只生成建议。批准后的学习规则只会在 Zone/价格表未命中时复用，不会覆盖正常 Zone Matrix 报价。
+        Hermes 的顺序是先给建议，再由人工审核确认。批准后的学习规则只会在 Zone/价格表未命中时复用，不会覆盖正常 Zone Matrix 报价。
       </div>
 
       <LearningProposalCard candidate={candidate} />

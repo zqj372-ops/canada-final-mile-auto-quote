@@ -1,11 +1,11 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import StrEnum
-from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from packages.address_normalizer import normalize_city, normalize_postal_code, normalize_province
+from packages.quote_engine.quote_id import generate_quote_id
 
 
 class ZoneQuoteSourceType(StrEnum):
@@ -67,7 +67,7 @@ class ZoneQuoteRequest(BaseModel):
 
 
 class ZoneQuoteResult(BaseModel):
-    quote_id: str = Field(default_factory=lambda: str(uuid4()))
+    quote_id: str = Field(default_factory=generate_quote_id)
     source_type: ZoneQuoteSourceType
     confidence: int = Field(ge=0, le=100)
     postal_code: str | None = None

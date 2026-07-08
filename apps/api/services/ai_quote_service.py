@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from uuid import uuid4
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,6 +20,7 @@ from apps.api.services.address_validation_service import (
 )
 from apps.api.services.hermes_agent_correction_service import apply_hermes_agent_correction_if_available
 from apps.api.services.notification_service import notify_ai_missing_fields, notify_ai_quote_success
+from apps.api.services.quote_logic_explainer import attach_zone_quote_logic
 from apps.api.services.quote_service import apply_learned_quote_if_available, record_zone_quote_side_effects, try_notification
 from apps.api.services.search_context_service import QuoteSearchContext, build_quote_search_context
 from packages.ai_assistant.model_client import AIMessage, OpenAICompatibleClient, config_from_record
@@ -35,6 +35,7 @@ from packages.ai_assistant.quote_extractor import (
     missing_required_fields,
 )
 from packages.quote_engine.zone_engine import ZoneQuoteEngine
+from packages.quote_engine.quote_id import generate_quote_id
 from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult
 
 
@@ -98,7 +99,7 @@ def calculate_ai_auto_quote(
             )
             _record_ai_review_task(
                 db,
-                quote_id=f"ai_error_{uuid4()}",
+                quote_id=generate_quote_id(),
                 reason="AI 字段提取失败，已转人工复核",
                 risk_tags=["ai_extraction_failed"],
                 request_json={
@@ -138,7 +139,7 @@ def calculate_ai_auto_quote(
         customer_reply = build_follow_up_question(missing_fields)
         _record_ai_review_task(
             db,
-            quote_id=f"ai_missing_{uuid4()}",
+            quote_id=generate_quote_id(),
             reason=f"AI 解析缺少字段：{', '.join(missing_fields)}",
             risk_tags=["ai_missing_fields", *missing_fields],
             request_json={
@@ -202,6 +203,7 @@ def calculate_ai_auto_quote(
     quote_result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(zone_request)
     quote_result = apply_hermes_agent_correction_if_available(db, zone_request, quote_result, pricing_config=pricing_config)
     quote_result = apply_learned_quote_if_available(db, zone_request, quote_result)
+    quote_result = attach_zone_quote_logic(zone_request, quote_result)
     record_zone_quote_side_effects(
         db,
         zone_request,

@@ -105,10 +105,17 @@ def test_zone_calculate_success_writes_audit_log() -> None:
     assert audit.status_code == 200
     body = audit.json()
     assert body["quote_id"] == quote["quote_id"]
+    assert body["quote_id"].isdigit()
+    assert len(body["quote_id"]) == 8
     assert body["source_type"] == "zone_matrix"
     assert body["postal_prefix"] == "L4K"
     assert body["total_price_usd"] == "212.00"
     assert body["manual_review_required"] is False
+    assert body["quote_logic"]["status"] == "quoted"
+    assert "Zone 价格矩阵" in body["quote_logic"]["price_source"]
+
+    audits = client.get("/quotes/audits").json()
+    assert audits[0]["quote_id"] == quote["quote_id"]
 
 
 def test_manual_required_writes_audit_log() -> None:
@@ -121,6 +128,8 @@ def test_manual_required_writes_audit_log() -> None:
     assert audit["quote_id"] == quote["quote_id"]
     assert audit["manual_review_required"] is True
     assert audit["total_price_usd"] is None
+    assert audit["quote_logic"]["status"] == "manual_required"
+    assert "核对" in audit["quote_logic"]["next_action"]
 
 
 def test_manual_required_creates_manual_quote_task() -> None:
