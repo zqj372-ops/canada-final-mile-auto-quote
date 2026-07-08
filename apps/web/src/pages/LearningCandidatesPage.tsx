@@ -11,7 +11,13 @@ import RiskTags from "../components/RiskTags";
 
 type CandidateFilter = "pending_review" | "approved" | "rejected" | "all";
 
-export default function LearningCandidatesPage() {
+interface LearningCandidatesPageProps {
+  embedded?: boolean;
+}
+
+export default function LearningCandidatesPage({
+  embedded = false,
+}: LearningCandidatesPageProps = {}) {
   const [candidates, setCandidates] = useState<HermesLearningCandidate[]>([]);
   const [selected, setSelected] = useState<HermesLearningCandidate | null>(null);
   const [filter, setFilter] = useState<CandidateFilter>("pending_review");
@@ -131,7 +137,8 @@ export default function LearningCandidatesPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-[1500px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
+    <div className={embedded ? "flex flex-col gap-5" : "mx-auto flex max-w-[1500px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8"}>
+      {!embedded && (
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <p className="text-sm font-medium text-blue-800">Hermes Learning</p>
@@ -146,6 +153,7 @@ export default function LearningCandidatesPage() {
           刷新
         </button>
       </header>
+      )}
 
       <section className="panel p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

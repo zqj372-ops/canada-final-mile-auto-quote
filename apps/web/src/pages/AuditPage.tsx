@@ -2,7 +2,11 @@ import { FormEvent, useState } from "react";
 import { getQuoteAudit, type QuoteAuditLog } from "../api/client";
 import RiskTags from "../components/RiskTags";
 
-export default function AuditPage() {
+interface AuditPageProps {
+  embedded?: boolean;
+}
+
+export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
   const [quoteId, setQuoteId] = useState("");
   const [record, setRecord] = useState<QuoteAuditLog | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -31,7 +35,8 @@ export default function AuditPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+    <div className={embedded ? "flex flex-col gap-5" : "mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8"}>
+      {!embedded && (
       <header>
         <p className="text-sm font-medium text-blue-800">Audit</p>
         <h1 className="mt-1 text-2xl font-semibold text-slate-950">
@@ -41,6 +46,7 @@ export default function AuditPage() {
           用 quote_id 追溯一次报价为什么成功或为什么进入人工池，包括邮编、城市、Zone、托数和后端返回的完整 JSON。
         </p>
       </header>
+      )}
 
       <section className="panel p-5">
         <form className="flex flex-col gap-3 md:flex-row md:items-end" onSubmit={handleSubmit}>

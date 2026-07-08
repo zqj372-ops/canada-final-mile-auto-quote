@@ -13,10 +13,8 @@ import {
 } from "./api/client";
 import AIQuotePage from "./pages/AIQuotePage";
 import AISettingsPage from "./pages/AISettingsPage";
-import AuditPage from "./pages/AuditPage";
 import EmailSettingsPage from "./pages/EmailSettingsPage";
-import LearningCandidatesPage from "./pages/LearningCandidatesPage";
-import ManualTasksPage from "./pages/ManualTasksPage";
+import OperationsWorkbenchPage from "./pages/OperationsWorkbenchPage";
 import PricingSettingsPage from "./pages/PricingSettingsPage";
 import QuotePage from "./pages/QuotePage";
 import QuoteSettingsPage from "./pages/QuoteSettingsPage";
@@ -27,6 +25,7 @@ type RoutePath =
   | "/quote"
   | "/admin"
   | "/ai-quote"
+  | "/ops"
   | "/manual-tasks"
   | "/learning-candidates"
   | "/audit"
@@ -75,9 +74,7 @@ const adminRoutes: Array<{
   { path: "/admin", label: "运营控制台", description: "总览", group: "overview", icon: "dashboard" },
   { path: "/ai-quote", label: "AI 报价", description: "调试", group: "core", icon: "bot" },
   { path: "/quote", label: "销售前台", description: "报价", group: "core", icon: "truck" },
-  { path: "/manual-tasks", label: "人工任务", description: "复核", group: "manual", icon: "user" },
-  { path: "/learning-candidates", label: "学习候选", description: "Hermes", group: "manual", icon: "box" },
-  { path: "/audit", label: "审计查询", description: "日志", group: "audit", icon: "search" },
+  { path: "/ops", label: "处理工作台", description: "复核/Hermes/审计", group: "manual", icon: "user" },
   { path: "/settings/quote", label: "报价规则", description: "前台", group: "pricing", icon: "file" },
   { path: "/settings/pricing", label: "价格矩阵", description: "Zone", group: "pricing", icon: "calculator" },
   { path: "/settings/ai", label: "AI 模型配置", description: "模型", group: "system", icon: "settings" },
@@ -158,14 +155,17 @@ export default function App() {
     if (path === "/ai-quote") {
       return <AIQuotePage />;
     }
+    if (path === "/ops") {
+      return <OperationsWorkbenchPage initialTab="manual" />;
+    }
     if (path === "/manual-tasks") {
-      return <ManualTasksPage />;
+      return <OperationsWorkbenchPage initialTab="manual" />;
     }
     if (path === "/learning-candidates") {
-      return <LearningCandidatesPage />;
+      return <OperationsWorkbenchPage initialTab="hermes" />;
     }
     if (path === "/audit") {
-      return <AuditPage />;
+      return <OperationsWorkbenchPage initialTab="audit" />;
     }
     if (path === "/settings/ai") {
       return <AISettingsPage />;
@@ -334,7 +334,9 @@ function AdminShell({
   onNavigate: (path: RoutePath) => void;
 }) {
   const currentRoute =
-    adminRoutes.find((route) => route.path === currentPath) ?? adminRoutes[0];
+    adminRoutes.find((route) => route.path === currentPath)
+    ?? (isOperationsPath(currentPath) ? adminRoutes.find((route) => route.path === "/ops") : undefined)
+    ?? adminRoutes[0];
   const visibleRoutes = adminRoutes.filter((route) => !route.adminOnly || actor.role === "admin");
   const routesByGroup = visibleRoutes.reduce<Record<AdminRouteGroup, typeof adminRoutes>>(
     (groups, route) => {
@@ -376,7 +378,7 @@ function AdminShell({
               )}
               <div className="grid gap-1">
                 {routesByGroup[group].map((route) => {
-                  const isActive = route.path === currentPath;
+                  const isActive = route.path === currentPath || (route.path === "/ops" && isOperationsPath(currentPath));
                   return (
                     <a
                       key={route.path}
@@ -426,9 +428,9 @@ function AdminShell({
               <input placeholder="全局搜索（报价ID/地址/运单号）" />
               <span>Ctrl K</span>
             </label>
-            <button className="btn-primary min-h-10 px-3 py-1" type="button" onClick={() => onNavigate("/manual-tasks")}>
+            <button className="btn-primary min-h-10 px-3 py-1" type="button" onClick={() => onNavigate("/ops")}>
               <AdminIcon name="user" />
-              处理人工任务
+              处理工作台
             </button>
             <span className="admin-role-chip">
               {roleLabel(actor.role)}
@@ -468,6 +470,9 @@ function normalizePath(pathname: string): RoutePath {
   if (strippedPath === "/audit") {
     return "/audit";
   }
+  if (strippedPath === "/ops") {
+    return "/ops";
+  }
   if (strippedPath === "/settings/ai") {
     return "/settings/ai";
   }
@@ -487,6 +492,10 @@ function normalizePath(pathname: string): RoutePath {
     return "/settings/email";
   }
   return "/quote";
+}
+
+function isOperationsPath(path: RoutePath): boolean {
+  return path === "/ops" || path === "/manual-tasks" || path === "/learning-candidates" || path === "/audit";
 }
 
 function normalizeBasePath(basePath: string): string {

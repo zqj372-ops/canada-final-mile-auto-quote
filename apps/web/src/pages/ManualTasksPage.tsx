@@ -14,6 +14,11 @@ import RiskTags from "../components/RiskTags";
 type TaskFilter = "pending" | "resolved" | "all";
 type TaskStatus = "pending" | "in_progress" | "resolved" | "cancelled";
 
+interface ManualTasksPageProps {
+  embedded?: boolean;
+  onOpenHermes?: () => void;
+}
+
 interface TaskDraft {
   status: string;
   assigned_to: string;
@@ -21,7 +26,10 @@ interface TaskDraft {
   resolved_note: string;
 }
 
-export default function ManualTasksPage() {
+export default function ManualTasksPage({
+  embedded = false,
+  onOpenHermes,
+}: ManualTasksPageProps = {}) {
   const [tasks, setTasks] = useState<ManualQuoteTask[]>([]);
   const [drafts, setDrafts] = useState<Record<number, TaskDraft>>({});
   const [filter, setFilter] = useState<TaskFilter>("pending");
@@ -172,7 +180,8 @@ export default function ManualTasksPage() {
   }
 
   return (
-    <div className="manual-tasks-page">
+    <div className={`manual-tasks-page ${embedded ? "manual-tasks-page-embedded" : ""}`}>
+      {!embedded && (
       <header className="admin-page-header">
         <div>
           <h1>人工任务</h1>
@@ -192,6 +201,7 @@ export default function ManualTasksPage() {
           </button>
         </div>
       </header>
+      )}
 
       <div className="manual-tabs" role="tablist" aria-label="任务状态筛选">
         {(["pending", "resolved", "all"] as TaskFilter[]).map((item) => (
@@ -282,6 +292,7 @@ export default function ManualTasksPage() {
             <ManualTaskLearningBridge
               candidate={selectedLearningCandidate}
               draft={selectedDraft}
+              onOpenHermes={onOpenHermes}
               task={selectedTask}
             />
 
@@ -444,10 +455,12 @@ function briefDestination(details: ReturnType<typeof buildInquiryDetails>): stri
 function ManualTaskLearningBridge({
   candidate,
   draft,
+  onOpenHermes,
   task,
 }: {
   candidate: HermesLearningCandidate | null;
   draft: TaskDraft;
+  onOpenHermes?: () => void;
   task: ManualQuoteTask;
 }) {
   const status = hermesBridgeStatus(task, draft, candidate);
@@ -461,12 +474,22 @@ function ManualTaskLearningBridge({
           <h4 className="mt-1 text-sm font-semibold text-slate-950">{status.title}</h4>
           <p className="mt-1 text-sm leading-5 text-slate-600">{status.description}</p>
         </div>
-        <a
-          className="inline-flex min-h-9 w-fit items-center justify-center rounded-md border border-blue-200 bg-white px-3 text-sm font-semibold text-blue-800 hover:bg-blue-50"
-          href={withBasePath("/learning-candidates")}
-        >
-          打开 Hermes
-        </a>
+        {onOpenHermes ? (
+          <button
+            className="inline-flex min-h-9 w-fit items-center justify-center rounded-md border border-blue-200 bg-white px-3 text-sm font-semibold text-blue-800 hover:bg-blue-50"
+            type="button"
+            onClick={onOpenHermes}
+          >
+            打开 Hermes
+          </button>
+        ) : (
+          <a
+            className="inline-flex min-h-9 w-fit items-center justify-center rounded-md border border-blue-200 bg-white px-3 text-sm font-semibold text-blue-800 hover:bg-blue-50"
+            href={withBasePath("/learning-candidates")}
+          >
+            打开 Hermes
+          </a>
+        )}
       </div>
       <div className="mt-3 grid gap-2 text-xs font-semibold text-slate-700 sm:grid-cols-3">
         <HermesStep active done label="1 人工确认" />
