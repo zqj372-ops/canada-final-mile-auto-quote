@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import AuditPage from "./AuditPage";
+import HermesDiagnosticsPage from "./HermesDiagnosticsPage";
 import LearningCandidatesPage from "./LearningCandidatesPage";
 import ManualTasksPage from "./ManualTasksPage";
 
-type OperationsTab = "manual" | "hermes" | "audit";
+type OperationsTab = "manual" | "diagnostics" | "hermes" | "audit";
 
 interface OperationsWorkbenchPageProps {
   initialTab?: OperationsTab;
@@ -22,9 +23,15 @@ const tabs: Array<{
     metric: "复核",
   },
   {
+    id: "diagnostics",
+    label: "诊断队列",
+    summary: "每票报价的结构化诊断包，供 Hermes Agent 只读分析",
+    metric: "建议",
+  },
+  {
     id: "hermes",
     label: "Hermes 学习",
-    summary: "审核已确认建议，决定是否发布为可复用纠错经验",
+    summary: "审核人工确认后的学习候选，决定是否发布复用",
     metric: "学习",
   },
   {
@@ -59,11 +66,11 @@ export default function OperationsWorkbenchPage({
               后台处理工作台
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              把人工复核、Hermes 学习候选和报价审计合并在一个页面。系统先给建议和报价逻辑，人工再确认或否决，确认后的经验才进入 Hermes 学习并可被后续报价复用。
+              把人工复核、Hermes 诊断建议、学习候选和报价审计合并在一个页面。系统先落诊断包，Hermes 只给建议，人工确认后才进入学习并可被后续报价复用。
             </p>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-3 xl:min-w-[34rem]">
+          <div className="grid gap-2 sm:grid-cols-2 xl:min-w-[44rem] xl:grid-cols-4">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -109,8 +116,9 @@ export default function OperationsWorkbenchPage({
         </div>
 
         {activeTab === "manual" && (
-          <ManualTasksPage embedded onOpenHermes={() => setActiveTab("hermes")} />
+          <ManualTasksPage embedded onOpenHermes={() => setActiveTab("diagnostics")} />
         )}
+        {activeTab === "diagnostics" && <HermesDiagnosticsPage embedded />}
         {activeTab === "hermes" && <LearningCandidatesPage embedded />}
         {activeTab === "audit" && <AuditPage embedded />}
       </section>

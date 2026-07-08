@@ -568,6 +568,38 @@ export interface HermesLearningCandidate {
   updated_at: string | null;
 }
 
+export interface HermesDiagnosticRecord {
+  id: number;
+  quote_id: string;
+  quote_status: string;
+  source_type: string;
+  status: string;
+  diagnostic_package: Record<string, JsonValue>;
+  agent_suggestion: Record<string, JsonValue> | null;
+  agent_error: string | null;
+  suggested_action: string | null;
+  confidence: number | null;
+  recommend_manual_review: boolean | null;
+  recommend_learning_candidate: boolean | null;
+  learning_candidate_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface HermesDiagnosticSuggestionPayload {
+  suggested_action?: string;
+  can_auto_correct?: boolean;
+  confidence?: number;
+  reason_zh: string;
+  suggested_origin?: string | null;
+  suggested_zone?: number | null;
+  missing_table?: string | null;
+  recommend_manual_review?: boolean;
+  recommend_learning_candidate?: boolean;
+  evidence_ids?: string[];
+  notes?: string[];
+}
+
 export interface HermesCandidateReviewPayload {
   review_note?: string | null;
 }
@@ -958,6 +990,37 @@ export function listHermesLearningCandidates(params: {
 
 export function getHermesLearningCandidate(candidateId: number): Promise<HermesLearningCandidate> {
   return request<HermesLearningCandidate>(`/quotes/learning-candidates/${candidateId}`);
+}
+
+export function listHermesDiagnostics(params: {
+  status?: string;
+  quote_id?: string;
+  limit?: number;
+} = {}): Promise<HermesDiagnosticRecord[]> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      search.set(key, String(value));
+    }
+  });
+  const query = search.toString();
+  return request<HermesDiagnosticRecord[]>(
+    `/quotes/hermes-diagnostics${query ? `?${query}` : ""}`,
+  );
+}
+
+export function getHermesDiagnostic(diagnosticId: number): Promise<HermesDiagnosticRecord> {
+  return request<HermesDiagnosticRecord>(`/quotes/hermes-diagnostics/${diagnosticId}`);
+}
+
+export function submitHermesDiagnosticSuggestion(
+  diagnosticId: number,
+  payload: HermesDiagnosticSuggestionPayload,
+): Promise<HermesDiagnosticRecord> {
+  return request<HermesDiagnosticRecord>(`/quotes/hermes-diagnostics/${diagnosticId}/suggestion`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function approveHermesLearningCandidate(

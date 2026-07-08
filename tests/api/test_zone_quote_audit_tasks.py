@@ -10,7 +10,6 @@ from sqlalchemy.pool import StaticPool
 from apps.api.db.models import Base, LearnedQuoteRule, PostalCodeCityLookup, QuoteRuleConfig, ZoneLookupRule, ZonePriceMatrix
 from apps.api.db.session import get_db
 from apps.api.main import app
-from apps.api.services.hermes_agent_correction_service import AgentDecision, HermesAgentCorrectionService
 
 
 def build_client(
@@ -116,6 +115,13 @@ def test_zone_calculate_success_writes_audit_log() -> None:
 
     audits = client.get("/quotes/audits").json()
     assert audits[0]["quote_id"] == quote["quote_id"]
+
+    diagnostics = client.get(f"/quotes/hermes-diagnostics?quote_id={quote['quote_id']}").json()
+    assert len(diagnostics) == 1
+    diagnostic_package = diagnostics[0]["diagnostic_package"]
+    assert diagnostics[0]["quote_status"] == "quoted"
+    assert diagnostic_package["quote_result"]["source_type"] == "zone_matrix"
+    assert diagnostic_package["price_matrix"]["exact_price_found"] is True
 
 
 def test_manual_required_writes_audit_log() -> None:
@@ -266,38 +272,18 @@ def test_resolved_manual_task_learning_respects_billing_pallets() -> None:
     assert body["billing_pallets"] == 1
 
 
-def test_hermes_agent_corrects_zone_gap_with_validated_zone_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_agent_decision(self, request, result, evidence):  # noqa: ANN001
-        return AgentDecision(
-            action="use_zone_matrix",
-            confidence=76,
-            reason_zh="MB 省份应走 Calgary，证据中存在 Calgary Zone 5 且价格矩阵有 1 托价格。",
-            origin="calgary",
-            zone=5,
-        )
-
-    monkeypatch.setattr(HermesAgentCorrectionService, "_ask_agent", fake_agent_decision)
+def test_zone_gap_creates_hermes_diagnostic_without_changing_quote() -> None:
     client = build_client(
         include_zone_rule=False,
         zone_rule_rows=[
             {
-                "postal_prefix": "R4H",
+                "postal_prefix": "R3A",
                 "city": "HEADINGLEY",
                 "province": "MB",
                 "origin": "calgary",
                 "zone": 5,
                 "match_level": "test",
-                "note": "MB expected-origin evidence for Hermes Agent.",
-            }
-        ],
-        price_rows=[
-            {
-                "origin": "calgary",
-                "zone": 5,
-                "billing_pallets": 1,
-                "base_price_usd": Decimal("200.00"),
-                "source": "test",
-                "last_updated": "2026-06-03",
+                "note": "MB expected-origin evidence for Hermes diagnostics.",
             }
         ],
     )
@@ -318,98 +304,47 @@ def test_hermes_agent_corrects_zone_gap_with_validated_zone_matrix(monkeypatch: 
     )
 
     body = response.json()
-    assert body["source_type"] == "hermes_agent_correction"
-    assert body["manual_review_required"] is False
+    assert body["source_type"] == "manual_required"
+    assert body["manual_review_required"] is True
     assert body["origin"] == "calgary"
     assert body["zone"] == 5
     assert body["billing_pallets"] == 1
-    assert body["base_price_usd"] == "200.00"
-    assert body["fuel_usd"] == "70.00"
-    assert body["total_price_usd"] == "270.00"
-    assert "hermes_agent_correction" in body["risk_tags"]
-    assert "hermes_agent_zone_matrix" in body["risk_tags"]
+    assert body["total_price_usd"] is None
+
+    diagnostics = client.get(f"/quotes/hermes-diagnostics?quote_id={body['quote_id']}").json()
+    assert len(diagnostics) == 1
+    diagnostic = diagnostics[0]
+    assert diagnostic["quote_id"] == body["quote_id"]
+    assert diagnostic["status"] == "pending"
+    assert diagnostic["quote_status"] == "manual_required"
+
+    package = diagnostic["diagnostic_package"]
+    assert package["raw_input"] is None
+    assert package["address"]["postal_prefix"] == "R3T"
+    assert package["address"]["expected_origin_by_province"] == "calgary"
+    assert package["zone_hit"]["source_type"] == "manual_required"
+    assert package["failure"]["manual_review_required"] is True
+    assert package["price_matrix"]["exact_price_found"] is False
+    assert package["neighboring_fsa"][0]["postal_prefix"] == "R3A"
+    assert package["neighboring_fsa"][0]["origin"] == "calgary"
+    assert package["neighboring_fsa"][0]["zone"] == 5
+    assert package["neighboring_fsa"][0]["has_price_for_billing_pallets"] is False
+    assert package["neighboring_fsa"][0]["base_price_usd"] is None
+    assert "allowed_outputs" in package["agent_contract"]
 
 
-def test_hermes_agent_receives_curated_safe_options_for_postal_gap(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_agent_decision(self, request, result, evidence):  # noqa: ANN001
-        safe_options = evidence["curated_safe_options"]
-        assert safe_options
-        assert safe_options[0]["origin"] == "calgary"
-        assert safe_options[0]["zone"] == 5
-        assert safe_options[0]["supporting_prefixes"] == ["R2E", "R2P"]
-        return AgentDecision(
-            action="use_zone_matrix",
-            confidence=safe_options[0]["confidence_ceiling"],
-            reason_zh="Hermes Agent 采用后端预筛的最近邮编锚点 R2E/R2P，且均为 Calgary Zone 5。",
-            origin=safe_options[0]["origin"],
-            zone=safe_options[0]["zone"],
-        )
-
-    monkeypatch.setattr(HermesAgentCorrectionService, "_ask_agent", fake_agent_decision)
+def test_hermes_diagnostic_suggestion_is_stored_but_does_not_change_quote() -> None:
     client = build_client(
         include_zone_rule=False,
         zone_rule_rows=[
             {
-                "postal_prefix": "R2C",
+                "postal_prefix": "R3A",
                 "city": "WINNIPEG",
                 "province": "MB",
-                "origin": "toronto",
-                "zone": 12,
+                "origin": "calgary",
+                "zone": 5,
                 "match_level": "legacy",
-                "note": "legacy wrong-origin Winnipeg row",
-            },
-            {
-                "postal_prefix": "R2E",
-                "city": "EAST ST PAUL",
-                "province": "MB",
-                "origin": "calgary",
-                "zone": 5,
-                "match_level": "metro",
-                "note": "Winnipeg metro expected-origin anchor",
-            },
-            {
-                "postal_prefix": "R2P",
-                "city": "WEST ST PAUL",
-                "province": "MB",
-                "origin": "calgary",
-                "zone": 5,
-                "match_level": "metro",
-                "note": "Winnipeg metro expected-origin anchor",
-            },
-            {
-                "postal_prefix": "R0A",
-                "city": "NIVERVILLE",
-                "province": "MB",
-                "origin": "calgary",
-                "zone": 9,
-                "match_level": "remote",
-                "note": "farther Manitoba anchor should not be preferred",
-            },
-        ],
-        price_rows=[
-            {
-                "origin": "toronto",
-                "zone": 12,
-                "billing_pallets": 1,
-                "base_price_usd": Decimal("420.00"),
-                "source": "test",
-                "last_updated": "2026-06-03",
-            },
-            {
-                "origin": "calgary",
-                "zone": 5,
-                "billing_pallets": 1,
-                "base_price_usd": Decimal("240.00"),
-                "source": "test",
-                "last_updated": "2026-06-03",
-            },
-            {
-                "origin": "calgary",
-                "zone": 9,
-                "billing_pallets": 1,
-                "base_price_usd": Decimal("395.00"),
-                "source": "test",
-                "last_updated": "2026-06-03",
+                "note": "Winnipeg expected-origin anchor",
             },
         ],
     )
@@ -430,12 +365,37 @@ def test_hermes_agent_receives_curated_safe_options_for_postal_gap(monkeypatch: 
     )
 
     body = response.json()
-    assert body["source_type"] == "hermes_agent_correction"
-    assert body["manual_review_required"] is False
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 5
-    assert body["base_price_usd"] == "240.00"
-    assert body["total_price_usd"] == "324.00"
+    assert body["source_type"] == "manual_required"
+    assert body["manual_review_required"] is True
+
+    diagnostic = client.get(f"/quotes/hermes-diagnostics?quote_id={body['quote_id']}").json()[0]
+    suggestion = client.post(
+        f"/quotes/hermes-diagnostics/{diagnostic['id']}/suggestion",
+        json={
+            "suggested_action": "suggest_zone_matrix",
+            "can_auto_correct": True,
+            "confidence": 72,
+            "reason_zh": "相邻 R3A 为 Calgary Zone 5，但价格矩阵缺 1 托价格；需人工确认后才能学习。",
+            "suggested_origin": "calgary",
+            "suggested_zone": 5,
+            "missing_table": "zone_price_matrix",
+            "recommend_manual_review": True,
+            "recommend_learning_candidate": True,
+            "evidence_ids": ["zone_rule:R3A"],
+        },
+    ).json()
+
+    assert suggestion["status"] == "completed"
+    assert suggestion["suggested_action"] == "suggest_zone_matrix"
+    assert suggestion["confidence"] == 72
+    assert suggestion["recommend_manual_review"] is True
+    assert suggestion["recommend_learning_candidate"] is True
+    assert suggestion["agent_suggestion"]["can_auto_correct"] is True
+
+    audit = client.get(f"/quotes/audit/{body['quote_id']}").json()
+    assert audit["source_type"] == "manual_required"
+    assert audit["manual_review_required"] is True
+    assert audit["total_price_usd"] is None
 
 
 def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:

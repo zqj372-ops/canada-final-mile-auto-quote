@@ -1,6 +1,7 @@
 # Hermes 自学习候选机制
 
 Hermes 是报价经验学习层，不是报价引擎。它只能从人工复核结果中生成候选建议，不能直接计算、修改或放行价格。
+旧的同步 Agent 纠错能力已降级为“LLM 辅助建议”，不再接入主报价链路。
 
 ## 核心边界
 
@@ -11,6 +12,7 @@ Hermes 是报价经验学习层，不是报价引擎。它只能从人工复核�
 - 只有后台 operator/admin 批准后，候选才会发布为 `learned_quote_rules.active`。
 - 学习规则只在原始 Quote Engine 返回 `manual_required` 后尝试复用。
 - 搜索和地图结果只能确认地址情况，不能作为价格来源。
+- `hermes_diagnostic_queue` 是 Hermes Agent 的只读输入队列；Agent 建议不能直接改变报价结果。
 
 ## 数据流
 
@@ -19,6 +21,8 @@ Hermes 是报价经验学习层，不是报价引擎。它只能从人工复核�
   -> AI/规则解析字段
   -> Zone Quote Engine 确定性报价
   -> 成功则返回 zone_matrix
+  -> 成功/失败都写入 hermes_diagnostic_queue
+  -> Hermes Agent 只读诊断包并输出建议
   -> 未命中则 manual_required + manual_quote_tasks
   -> 运营人工处理并填写 resolved_price_usd
   -> Hermes 生成 hermes_learning_candidates.pending_review
@@ -26,6 +30,10 @@ Hermes 是报价经验学习层，不是报价引擎。它只能从人工复核�
   -> 批准后写入 learned_quote_rules.active
   -> 后续同类 manual_required 可复用学习规则
 ```
+
+诊断包包含原始输入、解析结果、邮编、城市、省份、Zone 命中、价格矩阵、失败原因、
+相邻 FSA、历史人工确认和私有地址参考小上下文。报价接口不会等待 Hermes Agent，
+避免外部模型慢响应影响销售前台。
 
 ## 候选状态
 

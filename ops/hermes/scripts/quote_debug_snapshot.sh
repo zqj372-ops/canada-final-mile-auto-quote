@@ -54,6 +54,45 @@ order by id desc;
 "
 
 echo
+echo "== Hermes diagnostic queue =="
+db_query "
+select
+  id,
+  quote_id,
+  quote_status,
+  source_type,
+  status,
+  suggested_action,
+  confidence,
+  recommend_manual_review,
+  recommend_learning_candidate,
+  learning_candidate_id,
+  created_at,
+  updated_at
+from hermes_diagnostic_queue
+where quote_id = '${SAFE_QUOTE_ID}'
+order by id desc;
+"
+
+echo
+echo "== Hermes diagnostic package, compact =="
+db_query "
+select
+  diagnostic_package_json -> 'address' as address,
+  diagnostic_package_json -> 'zone_hit' as zone_hit,
+  diagnostic_package_json -> 'price_matrix' as price_matrix,
+  diagnostic_package_json -> 'failure' as failure,
+  diagnostic_package_json -> 'neighboring_fsa' as neighboring_fsa,
+  diagnostic_package_json -> 'historical_manual_confirmations' as manual_history,
+  agent_suggestion_json as agent_suggestion,
+  agent_error
+from hermes_diagnostic_queue
+where quote_id = '${SAFE_QUOTE_ID}'
+order by id desc
+limit 1;
+"
+
+echo
 echo "== Hermes candidate =="
 db_query "
 select

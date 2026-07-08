@@ -547,7 +547,7 @@ function sourceTypeLabel(value: string | null): string {
     manual_required: "系统未命中，进入人工复核",
     zone_matrix: "Zone 价格矩阵命中",
     learned_manual_quote: "已发布学习规则命中",
-    hermes_agent_correction: "Hermes Agent 已纠错",
+    hermes_agent_correction: "历史 LLM 已建议",
   };
   return value ? labels[value] ?? value : "未记录";
 }

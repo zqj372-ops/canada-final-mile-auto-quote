@@ -27,6 +27,7 @@ type RoutePath =
   | "/ai-quote"
   | "/ops"
   | "/manual-tasks"
+  | "/hermes-diagnostics"
   | "/learning-candidates"
   | "/audit"
   | "/settings/quote"
@@ -74,7 +75,7 @@ const adminRoutes: Array<{
   { path: "/admin", label: "运营控制台", description: "总览", group: "overview", icon: "dashboard" },
   { path: "/ai-quote", label: "AI 报价", description: "调试", group: "core", icon: "bot" },
   { path: "/quote", label: "销售前台", description: "报价", group: "core", icon: "truck" },
-  { path: "/ops", label: "处理工作台", description: "复核/Hermes/审计", group: "manual", icon: "user" },
+  { path: "/ops", label: "处理工作台", description: "复核/诊断/学习", group: "manual", icon: "user" },
   { path: "/settings/quote", label: "报价规则", description: "前台", group: "pricing", icon: "file" },
   { path: "/settings/pricing", label: "价格矩阵", description: "Zone", group: "pricing", icon: "calculator" },
   { path: "/settings/ai", label: "AI 模型配置", description: "模型", group: "system", icon: "settings" },
@@ -160,6 +161,9 @@ export default function App() {
     }
     if (path === "/manual-tasks") {
       return <OperationsWorkbenchPage initialTab="manual" />;
+    }
+    if (path === "/hermes-diagnostics") {
+      return <OperationsWorkbenchPage initialTab="diagnostics" />;
     }
     if (path === "/learning-candidates") {
       return <OperationsWorkbenchPage initialTab="hermes" />;
@@ -458,6 +462,9 @@ function normalizePath(pathname: string): RoutePath {
   if (strippedPath === "/manual-tasks") {
     return "/manual-tasks";
   }
+  if (strippedPath === "/hermes-diagnostics") {
+    return "/hermes-diagnostics";
+  }
   if (strippedPath === "/learning-candidates") {
     return "/learning-candidates";
   }
@@ -495,7 +502,13 @@ function normalizePath(pathname: string): RoutePath {
 }
 
 function isOperationsPath(path: RoutePath): boolean {
-  return path === "/ops" || path === "/manual-tasks" || path === "/learning-candidates" || path === "/audit";
+  return (
+    path === "/ops" ||
+    path === "/manual-tasks" ||
+    path === "/hermes-diagnostics" ||
+    path === "/learning-candidates" ||
+    path === "/audit"
+  );
 }
 
 function normalizeBasePath(basePath: string): string {
@@ -562,7 +575,7 @@ function AdminAccessGate({
               后台运营控制台
             </h1>
             <p className="mt-4 text-sm leading-6 text-slate-600">
-              使用账号登录后，可处理人工任务、审核 Hermes 学习候选、查询审计记录，并维护报价、价格、AI、搜索和邮件配置。
+              使用账号登录后，可处理人工任务、查看 Hermes 诊断建议、审核学习候选、查询审计记录，并维护报价、价格、AI、搜索和邮件配置。
             </p>
           </div>
           <div className="mt-10 grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
@@ -1195,7 +1208,8 @@ function formatAuditSource(value: string): string {
     zone_matrix: "Zone 矩阵",
     manual_required: "人工复核",
     learned_manual_quote: "学习库",
-    hermes_agent_correction: "Agent 纠错",
+    llm_auxiliary_advice: "LLM 建议",
+    hermes_agent_correction: "LLM 建议",
     postal_code: "邮编",
     fsa: "FSA",
     city: "城市",

@@ -18,7 +18,6 @@ from apps.api.services.address_validation_service import (
     LocalAddressValidation,
     build_local_address_validation_from_extraction,
 )
-from apps.api.services.hermes_agent_correction_service import apply_hermes_agent_correction_if_available
 from apps.api.services.notification_service import notify_ai_missing_fields, notify_ai_quote_success
 from apps.api.services.quote_logic_explainer import attach_zone_quote_logic
 from apps.api.services.quote_service import apply_learned_quote_if_available, record_zone_quote_side_effects, try_notification
@@ -201,13 +200,15 @@ def calculate_ai_auto_quote(
     zone_request = _zone_request_from_extraction(extraction)
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     quote_result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(zone_request)
-    quote_result = apply_hermes_agent_correction_if_available(db, zone_request, quote_result, pricing_config=pricing_config)
     quote_result = apply_learned_quote_if_available(db, zone_request, quote_result)
     quote_result = attach_zone_quote_logic(zone_request, quote_result)
     record_zone_quote_side_effects(
         db,
         zone_request,
         quote_result,
+        raw_input=payload.customer_message,
+        extraction=extraction.model_dump(mode="json"),
+        source="ai_auto_quote",
         manual_email_config_id=payload.email_config_id,
         manual_wecom_bot_id=payload.wecom_bot_id,
     )

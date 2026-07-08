@@ -110,8 +110,9 @@ def _manual_next_action(result_json: dict[str, Any]) -> str:
 def _source_label(source_type: str) -> str:
     return {
         "zone_matrix": "Zone 价格矩阵",
-        "hermes_agent_correction": "Hermes Agent 建议，后端价格矩阵校验后放行",
-        "learned_manual_quote": "人工确认后的 Hermes 学习规则",
+        "llm_auxiliary_advice": "LLM 辅助建议，后端曾校验后放行",
+        "hermes_agent_correction": "历史 LLM 辅助建议，后端曾校验后放行",
+        "learned_manual_quote": "人工确认后的学习规则",
         "manual_required": "需要人工确认",
     }.get(source_type, source_type)
 

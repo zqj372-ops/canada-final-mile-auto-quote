@@ -12,7 +12,7 @@ from apps.api.db.repositories.quote_audit_repository import QuoteAuditRepository
 from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
 from apps.api.db.repositories.rate_rule_repository import RateRuleRepository
 from apps.api.db.repositories.zone_repository import ZoneRepository
-from apps.api.services.hermes_agent_correction_service import apply_hermes_agent_correction_if_available
+from apps.api.services.hermes_diagnostic_service import enqueue_quote_diagnostic
 from apps.api.services.notification_service import notify_manual_required, notify_quote_success
 from apps.api.services.quote_logic_explainer import attach_zone_quote_logic
 from packages.quote_engine.engine import QuoteEngine
@@ -42,13 +42,13 @@ def calculate_zone_quote(
 ) -> ZoneQuoteResult:
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
-    result = apply_hermes_agent_correction_if_available(db, payload, result, pricing_config=pricing_config)
     result = apply_learned_quote_if_available(db, payload, result)
     result = attach_zone_quote_logic(payload, result)
     record_zone_quote_side_effects(
         db,
         payload,
         result,
+        source="zone_quote",
         manual_email_config_id=email_config_id,
         manual_wecom_bot_id=wecom_bot_id,
     )
@@ -94,6 +94,9 @@ def record_zone_quote_side_effects(
     payload: ZoneQuoteRequest,
     result: ZoneQuoteResult,
     *,
+    raw_input: str | None = None,
+    extraction: dict[str, object] | None = None,
+    source: str = "zone_quote",
     manual_email_config_id: int | None = None,
     manual_wecom_bot_id: int | None = None,
 ) -> None:
@@ -102,6 +105,15 @@ def record_zone_quote_side_effects(
     except Exception:
         logger.exception("Failed to write zone quote audit log.", extra={"quote_id": result.quote_id})
         db.rollback()
+
+    enqueue_quote_diagnostic(
+        db,
+        payload,
+        result,
+        raw_input=raw_input,
+        extraction=extraction,
+        source=source,
+    )
 
     if not result.manual_review_required:
         return
@@ -173,7 +185,7 @@ def _result_from_learned_rule(
             f"{rule.postal_code or rule.postal_prefix or 'unknown'} + {rule.billing_pallets} pallets"
         ),
         internal_note=(
-            "Hermes 已在报价时用已审核人工规则纠错；不是 AI 计算，也没有改写 Zone 价格表。"
+            "已审核人工学习规则在报价时被复用；不是 AI 计算，也没有改写 Zone 价格表。"
             if is_corrective_override
             else "报价来自人工确认后的学习库，不是 AI 计算；建议运营定期复核并转入正式 Zone 价格表。"
         ),

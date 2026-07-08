@@ -32,3 +32,5 @@ data/raw/*
 !data/raw/.gitkeep
 data/samples/*
 !data/samples/.gitkeep
+outputs/
+reference/private_address_agent_pack/

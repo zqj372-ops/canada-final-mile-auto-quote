@@ -17,6 +17,8 @@ FSA 匹配、确定性报价、AI 输出保护做稳，避免任何模型编造�
 - 报价必须由确定性 Quote Engine 计算。
 - AI 只能基于 `quote_result` 解释报价、生成销售备注、提示风险。
 - 未命中价格库时返回 `manual_required`，不输出客户报价金额。
+- 旧的同步“Agent 纠错”已降级为 `LLM 辅助建议`，不再作为主报价链路自动改价。
+- 每次报价都会写入 `hermes_diagnostic_queue`，Hermes Agent 只读诊断包并输出建议。
 - Hermes 自学习只生成候选建议；人工审核通过前，不会改写报价规则或自动放行价格。
 
 报价链路：
@@ -147,6 +149,7 @@ alembic upgrade head
 ops/hermes/scripts/check_health.sh
 ops/hermes/scripts/check_recent_errors.sh 120
 ops/hermes/scripts/check_manual_tasks.sh
+ops/hermes/scripts/check_hermes_diagnostics.sh pending 20
 ops/hermes/scripts/check_learning_candidates.sh
 ops/hermes/scripts/check_zone_match.sh S7K Saskatoon SK
 ops/hermes/scripts/quote_debug_snapshot.sh <quote_id>
@@ -165,6 +168,22 @@ HERMES_ENV_FILE=.env.prod
 Hermes 只能诊断、总结、提出修复建议；不能编造价格，不能改写报价金额，不能输出
 密钥或解密后的配置。报价金额仍然只能来自 Quote Engine、Zone 价格矩阵或已审核的
 `learned_quote_rules`。
+
+新的 Hermes 运行边界：
+
+```text
+报价成功/失败
+-> 写入 hermes_diagnostic_queue
+-> Hermes Agent 只读诊断包
+-> 输出是否可纠错、建议 Zone、缺失表、是否建议人工、是否建议学习
+-> 人工确认价格
+-> 生成 hermes_learning_candidates
+-> 审核批准后发布 learned_quote_rules
+```
+
+诊断包会包含原始输入、解析结果、邮编/城市/省份、Zone 命中、价格矩阵、
+失败原因、相邻 FSA、历史人工确认和私有地址参考包的小上下文。主报价接口不会等待
+Hermes Agent，避免慢响应或 504。
 
 ### 参考数据导入
 

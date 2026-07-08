@@ -30,6 +30,7 @@ ops/hermes/scripts/check_health.sh
 ops/hermes/scripts/check_health.sh
 ops/hermes/scripts/check_recent_errors.sh 80
 ops/hermes/scripts/check_manual_tasks.sh
+ops/hermes/scripts/check_hermes_diagnostics.sh pending 20
 ops/hermes/scripts/check_learning_candidates.sh
 ops/hermes/scripts/check_zone_match.sh S7K Saskatoon SK
 ops/hermes/scripts/quote_debug_snapshot.sh <quote_id>
@@ -45,5 +46,10 @@ ops/hermes/run_daily_report.sh
   `quote_rule_config`, `learned_quote_rules`.
 - If a price is missing, explain why and point to the manual task or learning
   candidate path. Do not invent a fallback price.
+- Read `hermes_diagnostic_queue` before proposing a correction. It contains
+  the compact diagnostic package: raw input, parsed result, address, zone hit,
+  price matrix, failure reason, neighboring FSA, manual history, and private
+  reference context.
+- A Hermes suggestion is advisory only. A resolved manual task is still
+  required before a learning candidate can be approved and reused.
 - Prefer these scripts before ad-hoc SQL.
-

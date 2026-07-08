@@ -10,6 +10,7 @@ from packages.quote_engine.quote_id import generate_quote_id
 
 class ZoneQuoteSourceType(StrEnum):
     ZONE_MATRIX = "zone_matrix"
+    LLM_AUXILIARY_ADVICE = "llm_auxiliary_advice"
     HERMES_AGENT_CORRECTION = "hermes_agent_correction"
     LEARNED_MANUAL_QUOTE = "learned_manual_quote"
     MANUAL_REQUIRED = "manual_required"

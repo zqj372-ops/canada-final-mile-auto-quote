@@ -9,6 +9,7 @@ from apps.api.routes.api_keys import router as api_keys_router
 from apps.api.routes.auth import router as auth_router
 from apps.api.routes.audit import router as audit_router
 from apps.api.routes.email_configs import router as email_configs_router
+from apps.api.routes.hermes_diagnostics import router as hermes_diagnostics_router
 from apps.api.routes.hermes_learning import router as hermes_learning_router
 from apps.api.routes.imports import router as imports_router
 from apps.api.routes.manual_tasks import router as manual_tasks_router
@@ -50,6 +51,7 @@ app.include_router(sales_records_router)
 app.include_router(auth_router)
 app.include_router(manual_tasks_router)
 app.include_router(audit_router)
+app.include_router(hermes_diagnostics_router)
 app.include_router(hermes_learning_router)
 app.include_router(maps_router)
 app.include_router(imports_router)

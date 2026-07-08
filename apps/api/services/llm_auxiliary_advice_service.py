@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class AgentDecision:
+class LLMAuxiliaryAdviceDecision:
     action: str
     confidence: int
     reason_zh: str
@@ -36,7 +36,7 @@ class AgentDecision:
     manual_task_id: int | None = None
 
 
-def apply_hermes_agent_correction_if_available(
+def apply_llm_auxiliary_advice_if_available(
     db: Session,
     request: ZoneQuoteRequest,
     result: ZoneQuoteResult,
@@ -49,15 +49,15 @@ def apply_hermes_agent_correction_if_available(
         return result
 
     try:
-        service = HermesAgentCorrectionService(db, pricing_config=pricing_config)
+        service = LLMAuxiliaryAdviceService(db, pricing_config=pricing_config)
         return service.correct(request, result)
     except Exception:
-        logger.exception("Hermes Agent correction failed.", extra={"quote_id": result.quote_id})
+        logger.exception("LLM 辅助建议 correction failed.", extra={"quote_id": result.quote_id})
         db.rollback()
         return result
 
 
-class HermesAgentCorrectionService:
+class LLMAuxiliaryAdviceService:
     def __init__(self, db: Session, *, pricing_config: ZonePricingConfig):
         self.db = db
         self.pricing_config = pricing_config
@@ -82,7 +82,7 @@ class HermesAgentCorrectionService:
         request: ZoneQuoteRequest,
         result: ZoneQuoteResult,
         evidence: dict[str, object],
-    ) -> AgentDecision | None:
+    ) -> LLMAuxiliaryAdviceDecision | None:
         config_repository = AIModelConfigRepository(self.db)
         config_record = config_repository.get_default_config(purpose="general")
         if config_record is None:
@@ -93,7 +93,7 @@ class HermesAgentCorrectionService:
         )
         response = client.complete(
             [
-                AIMessage(role="system", content=_HERMES_AGENT_SYSTEM_PROMPT),
+                AIMessage(role="system", content=_LLM_AUXILIARY_ADVICE_SYSTEM_PROMPT),
                 AIMessage(
                     role="user",
                     content=json.dumps(
@@ -117,15 +117,15 @@ class HermesAgentCorrectionService:
             ]
         )
         if response.error:
-            logger.warning("Hermes Agent model call failed.", extra={"quote_id": result.quote_id, "error": response.error})
+            logger.warning("LLM 辅助建议 model call failed.", extra={"quote_id": result.quote_id, "error": response.error})
             return None
         data = _parse_json_object(response.content)
         if data is None:
             return None
-        return AgentDecision(
+        return LLMAuxiliaryAdviceDecision(
             action=str(data.get("action") or "no_action"),
             confidence=_bounded_int(data.get("confidence"), default=0),
-            reason_zh=str(data.get("reason_zh") or "Hermes Agent 未提供原因。")[:500],
+            reason_zh=str(data.get("reason_zh") or "LLM 辅助建议 未提供原因。")[:500],
             origin=normalize_origin(str(data["origin"])) if data.get("origin") else None,
             zone=_int_value(data.get("zone")),
             manual_task_id=_int_value(data.get("manual_task_id")),
@@ -255,7 +255,7 @@ class HermesAgentCorrectionService:
         self,
         request: ZoneQuoteRequest,
         original: ZoneQuoteResult,
-        decision: AgentDecision,
+        decision: LLMAuxiliaryAdviceDecision,
         evidence: dict[str, object],
     ) -> ZoneQuoteResult:
         if not decision.origin or decision.zone is None or original.billing_pallets is None:
@@ -277,7 +277,7 @@ class HermesAgentCorrectionService:
         )
         corrected = original.model_copy(
             update={
-                "source_type": ZoneQuoteSourceType.HERMES_AGENT_CORRECTION,
+                "source_type": ZoneQuoteSourceType.LLM_AUXILIARY_ADVICE,
                 "confidence": max(50, min(decision.confidence, 82)),
                 "origin": decision.origin,
                 "zone": decision.zone,
@@ -286,14 +286,14 @@ class HermesAgentCorrectionService:
                 "accessorials": pricing.accessorials,
                 "total_price_usd": pricing.total_price_usd,
                 "manual_review_required": False,
-                "risk_tags": sorted(set([*original.risk_tags, "hermes_agent_correction", "hermes_agent_zone_matrix"])),
+                "risk_tags": sorted(set([*original.risk_tags, "llm_auxiliary_advice", "llm_auxiliary_zone_matrix"])),
                 "matched_rule": (
-                    f"hermes_agent_correction + {decision.origin} Zone {decision.zone} + "
+                    f"llm_auxiliary_advice + {decision.origin} Zone {decision.zone} + "
                     f"{original.billing_pallets} pallets"
                 ),
-                "matched_by": "hermes_agent_zone_matrix",
+                "matched_by": "llm_auxiliary_zone_matrix",
                 "internal_note": (
-                    "Hermes Agent 基于 Zone 证据提出纠错，后端校验 origin/zone/price_matrix 后放行；"
+                    "LLM 辅助建议 基于 Zone 证据提出纠错，后端校验 origin/zone/price_matrix 后放行；"
                     f"原因：{decision.reason_zh}"
                 ),
             }
@@ -305,7 +305,7 @@ class HermesAgentCorrectionService:
         self,
         request: ZoneQuoteRequest,
         original: ZoneQuoteResult,
-        decision: AgentDecision,
+        decision: LLMAuxiliaryAdviceDecision,
         evidence: dict[str, object],
     ) -> ZoneQuoteResult:
         task = _manual_task_from_evidence(evidence, decision.manual_task_id)
@@ -316,7 +316,7 @@ class HermesAgentCorrectionService:
         zone = _int_value(task.get("zone")) or original.zone
         corrected = original.model_copy(
             update={
-                "source_type": ZoneQuoteSourceType.HERMES_AGENT_CORRECTION,
+                "source_type": ZoneQuoteSourceType.LLM_AUXILIARY_ADVICE,
                 "confidence": max(50, min(decision.confidence, 80)),
                 "origin": origin,
                 "zone": zone,
@@ -325,17 +325,17 @@ class HermesAgentCorrectionService:
                 "accessorials": {},
                 "total_price_usd": total_price,
                 "manual_review_required": False,
-                "risk_tags": sorted(set([*original.risk_tags, "hermes_agent_correction", "hermes_agent_manual_history"])),
-                "matched_rule": f"hermes_agent_correction + manual_task {decision.manual_task_id}",
-                "matched_by": "hermes_agent_manual_history",
-                "internal_note": f"Hermes Agent 复用已解决人工任务并通过后端校验；原因：{decision.reason_zh}",
+                "risk_tags": sorted(set([*original.risk_tags, "llm_auxiliary_advice", "llm_auxiliary_manual_history"])),
+                "matched_rule": f"llm_auxiliary_advice + manual_task {decision.manual_task_id}",
+                "matched_by": "llm_auxiliary_manual_history",
+                "internal_note": f"LLM 辅助建议 复用已解决人工任务并通过后端校验；原因：{decision.reason_zh}",
             }
         )
         corrected.sales_note = _manual_history_sales_note(request, corrected)
         return corrected
 
 
-_HERMES_AGENT_SYSTEM_PROMPT = """你是 Hermes Agent，负责加拿大尾端报价的智能纠错。
+_LLM_AUXILIARY_ADVICE_SYSTEM_PROMPT = """你是 LLM 辅助建议，负责加拿大尾端报价的智能纠错。
 你不能发明价格，不能修改客户货物数据，不能绕过后端校验。
 你只能在给定 evidence 中选择：
 1. use_zone_matrix：选择 evidence.zone_options 里已有的 origin + zone，且必须 has_price_for_billing_pallets=true。
