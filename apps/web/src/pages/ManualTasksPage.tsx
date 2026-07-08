@@ -587,7 +587,7 @@ function InquiryDetails({ task }: { task: ManualQuoteTask }) {
 
       <QuoteSuggestionCard logic={logic} task={task} />
 
-      <div className="mt-4 grid min-w-0 gap-3 lg:grid-cols-3">
+      <div className="mt-4 grid min-w-0 gap-3 min-[1360px]:grid-cols-2 min-[1720px]:grid-cols-3">
         <DetailGroup title="货物信息" items={details.cargoItems} />
         <DetailGroup title="地址信息" items={details.addressItems} />
         <DetailGroup title="报价/服务信息" items={details.serviceItems} />
@@ -653,9 +653,9 @@ function DetailGroup({ title, items }: { title: string; items: Array<{ label: st
       <h4 className="text-sm font-semibold text-slate-950">{title}</h4>
       <dl className="mt-3 grid gap-2">
         {items.map((item) => (
-          <div key={item.label} className="grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] gap-2 text-sm">
-            <dt className="text-slate-500">{item.label}</dt>
-            <dd className="min-w-0 break-words font-medium leading-5 text-slate-900 [overflow-wrap:anywhere]">
+          <div key={item.label} className="grid min-w-0 gap-1 text-sm sm:grid-cols-[5.5rem_minmax(0,1fr)] sm:gap-2">
+            <dt className="whitespace-nowrap text-slate-500">{item.label}</dt>
+            <dd className="min-w-0 whitespace-normal break-words font-medium leading-5 text-slate-900">
               {item.value}
             </dd>
           </div>
