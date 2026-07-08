@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from inspect import signature
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -222,12 +221,7 @@ def calculate_ai_auto_quote(
         )
         return _record_sales_response(db, actor, payload, response)
 
-    customer_reply = _build_sales_note(
-        ai_client,
-        quote_result,
-        search_context=search_context,
-        address_validation=address_validation,
-    )
+    customer_reply = quote_result.sales_note or "报价已由系统规则锁定，请以页面报价结果为准。"
     quote_result.sales_note = customer_reply
     response = AIAutoQuoteResponse(
         extraction=extraction,
@@ -235,9 +229,9 @@ def calculate_ai_auto_quote(
         customer_reply=customer_reply,
         internal_note=(
             "AI extraction failed; deterministic parser generated the locked quote_result. "
-            "AI sales note was generated from locked quote_result only."
+            "AI sales note generation was skipped to avoid external timeout."
             if extraction_error
-            else "AI sales note was generated from locked quote_result only."
+            else "Sales note came from deterministic Zone Quote Engine."
         ),
         missing_fields=[],
         manual_review_required=False,
@@ -365,22 +359,6 @@ def _zone_request_from_extraction(extraction: AIExtractedQuoteDraft) -> ZoneQuot
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Extracted quote fields failed validation: {exc}") from exc
-
-
-def _build_sales_note(
-    ai_client: OpenAICompatibleClient,
-    quote_result: ZoneQuoteResult,
-    *,
-    search_context: QuoteSearchContext | None,
-    address_validation: LocalAddressValidation | None,
-) -> str:
-    parameters = signature(_build_guarded_sales_note).parameters
-    kwargs: dict[str, object] = {}
-    if "search_context" in parameters:
-        kwargs["search_context"] = search_context
-    if "address_validation" in parameters:
-        kwargs["address_validation"] = address_validation
-    return _build_guarded_sales_note(ai_client, quote_result, **kwargs)
 
 
 def _build_guarded_sales_note(

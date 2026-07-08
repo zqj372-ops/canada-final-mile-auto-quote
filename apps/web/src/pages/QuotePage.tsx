@@ -245,7 +245,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
           auto_submit_when_complete: true,
           notify_email: notifyEmail,
           email_config_id: selectedEmailConfigId ? Number(selectedEmailConfigId) : null,
-          enable_search_context: true,
+          enable_search_context: false,
         },
         "quote",
       );

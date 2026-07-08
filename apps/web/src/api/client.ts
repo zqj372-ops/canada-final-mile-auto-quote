@@ -764,9 +764,15 @@ function sanitizeErrorText(value: string, fallback: string): string {
   if (/<html[\s>]/i.test(compact) || /<!doctype html/i.test(compact)) {
     const title = compact.match(/<title>(.*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim();
     if (title) {
+      if (/504|gateway\s*time-?out/i.test(title)) {
+        return "报价请求超过网关等待时间，系统未生成可靠报价。请稍后重试；如已进入人工任务池，请由人工确认后再发客户。";
+      }
       return `外部服务返回错误：${title}`;
     }
     return fallback || "外部服务返回 HTML 错误页";
+  }
+  if (/504|gateway\s*time-?out/i.test(compact)) {
+    return "报价请求超过网关等待时间，系统未生成可靠报价。请稍后重试；如已进入人工任务池，请由人工确认后再发客户。";
   }
   if (/^error code:\s*502/i.test(compact)) {
     return "外部服务或反向代理暂时返回 502，请稍后重试或进入人工复核。";
