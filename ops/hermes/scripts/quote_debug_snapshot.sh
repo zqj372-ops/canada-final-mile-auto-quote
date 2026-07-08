@@ -68,7 +68,7 @@ select
   origin,
   zone,
   billing_pallets,
-  confirmed_total_price_usd,
+  resolved_total_price_usd,
   reviewed_by,
   reviewed_at,
   left(coalesce(review_note, ''), 200) as review_note
@@ -111,4 +111,3 @@ where quote_id = '${SAFE_QUOTE_ID}'
 order by id desc
 limit 1;
 "
-

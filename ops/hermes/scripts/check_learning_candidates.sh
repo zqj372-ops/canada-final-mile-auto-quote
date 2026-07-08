@@ -24,7 +24,7 @@ select
   city,
   province,
   billing_pallets,
-  confirmed_total_price_usd,
+  resolved_total_price_usd,
   updated_at
 from hermes_learning_candidates
 order by updated_at desc nulls last, id desc
@@ -53,4 +53,3 @@ where status = 'active'
 order by usage_count desc, updated_at desc nulls last, id desc
 limit 20;
 "
-
