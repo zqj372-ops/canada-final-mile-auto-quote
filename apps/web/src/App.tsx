@@ -1186,6 +1186,7 @@ function formatAuditSource(value: string): string {
     zone_matrix: "Zone 矩阵",
     manual_required: "人工复核",
     learned_manual_quote: "学习库",
+    hermes_agent_correction: "Agent 纠错",
     postal_code: "邮编",
     fsa: "FSA",
     city: "城市",

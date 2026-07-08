@@ -10,6 +10,7 @@ from packages.address_normalizer import normalize_city, normalize_postal_code, n
 
 class ZoneQuoteSourceType(StrEnum):
     ZONE_MATRIX = "zone_matrix"
+    HERMES_AGENT_CORRECTION = "hermes_agent_correction"
     LEARNED_MANUAL_QUOTE = "learned_manual_quote"
     MANUAL_REQUIRED = "manual_required"
 

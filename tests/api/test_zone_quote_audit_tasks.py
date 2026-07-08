@@ -1,6 +1,7 @@
 from decimal import Decimal
 from collections.abc import Generator
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -9,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from apps.api.db.models import Base, LearnedQuoteRule, PostalCodeCityLookup, QuoteRuleConfig, ZoneLookupRule, ZonePriceMatrix
 from apps.api.db.session import get_db
 from apps.api.main import app
+from apps.api.services.hermes_agent_correction_service import AgentDecision, HermesAgentCorrectionService
 
 
 def build_client(
@@ -16,6 +18,8 @@ def build_client(
     include_zone_rule: bool = True,
     config_rows: list[dict[str, object]] | None = None,
     learned_rows: list[dict[str, object]] | None = None,
+    zone_rule_rows: list[dict[str, object]] | None = None,
+    price_rows: list[dict[str, object]] | None = None,
 ) -> TestClient:
     engine = create_engine(
         "sqlite+pysqlite://",
@@ -39,6 +43,8 @@ def build_client(
                     note="",
                 )
             )
+        for row in zone_rule_rows or []:
+            session.add(ZoneLookupRule(**row))
         session.add(
             ZonePriceMatrix(
                 origin="toronto",
@@ -49,6 +55,8 @@ def build_client(
                 last_updated="2026-06-03",
             )
         )
+        for row in price_rows or []:
+            session.add(ZonePriceMatrix(**row))
         for row in config_rows or []:
             session.add(QuoteRuleConfig(**row))
         for row in learned_rows or []:
@@ -249,28 +257,40 @@ def test_resolved_manual_task_learning_respects_billing_pallets() -> None:
     assert body["billing_pallets"] == 1
 
 
-def test_hermes_learned_rule_corrects_missing_postal_family_zone_gap() -> None:
+def test_hermes_agent_corrects_zone_gap_with_validated_zone_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_agent_decision(self, request, result, evidence):  # noqa: ANN001
+        return AgentDecision(
+            action="use_zone_matrix",
+            confidence=76,
+            reason_zh="MB 省份应走 Calgary，证据中存在 Calgary Zone 5 且价格矩阵有 1 托价格。",
+            origin="calgary",
+            zone=5,
+        )
+
+    monkeypatch.setattr(HermesAgentCorrectionService, "_ask_agent", fake_agent_decision)
     client = build_client(
-        learned_rows=[
+        include_zone_rule=False,
+        zone_rule_rows=[
             {
-                "source_task_id": 501,
-                "quote_id": "manual-winnipeg-r2",
-                "scope": "postal_prefix_city",
-                "postal_code": None,
-                "postal_prefix": "R2J",
-                "city": "Winnipeg",
+                "postal_prefix": "R4H",
+                "city": "HEADINGLEY",
                 "province": "MB",
                 "origin": "calgary",
                 "zone": 5,
-                "billing_pallets": 1,
-                "total_price_usd": Decimal("210.00"),
-                "base_price_usd": Decimal("210.00"),
-                "confidence": 68,
-                "status": "active",
-                "usage_count": 0,
-                "note": "Approved Winnipeg R-family fallback.",
+                "match_level": "test",
+                "note": "MB expected-origin evidence for Hermes Agent.",
             }
-        ]
+        ],
+        price_rows=[
+            {
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 1,
+                "base_price_usd": Decimal("200.00"),
+                "source": "test",
+                "last_updated": "2026-06-03",
+            }
+        ],
     )
 
     response = client.post(
@@ -289,14 +309,16 @@ def test_hermes_learned_rule_corrects_missing_postal_family_zone_gap() -> None:
     )
 
     body = response.json()
-    assert body["source_type"] == "learned_manual_quote"
+    assert body["source_type"] == "hermes_agent_correction"
     assert body["manual_review_required"] is False
     assert body["origin"] == "calgary"
     assert body["zone"] == 5
     assert body["billing_pallets"] == 1
-    assert body["total_price_usd"] == "210.00"
-    assert "score 72" in body["matched_rule"]
-    assert "hermes_zone_gap_correction" in body["risk_tags"]
+    assert body["base_price_usd"] == "200.00"
+    assert body["fuel_usd"] == "70.00"
+    assert body["total_price_usd"] == "270.00"
+    assert "hermes_agent_correction" in body["risk_tags"]
+    assert "hermes_agent_zone_matrix" in body["risk_tags"]
 
 
 def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:

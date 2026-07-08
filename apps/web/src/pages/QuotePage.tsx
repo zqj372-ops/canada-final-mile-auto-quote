@@ -1477,6 +1477,9 @@ function formatRecordSourceType(sourceType: string): string {
   if (sourceType === "learned_manual_quote") {
     return "人工确认学习库";
   }
+  if (sourceType === "hermes_agent_correction") {
+    return "Hermes Agent 纠错";
+  }
   if (sourceType === "manual_required") {
     return "需要人工复核";
   }

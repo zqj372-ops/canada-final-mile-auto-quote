@@ -177,6 +177,7 @@ function sourceTypeLabel(value: string): string {
     zone_matrix: "Zone 价格矩阵",
     manual_required: "需要人工报价",
     learned_manual_quote: "人工学习规则",
+    hermes_agent_correction: "Hermes Agent 纠错",
     fsa: "FSA 规则",
     postal_code: "邮编精确规则",
     city: "城市规则",

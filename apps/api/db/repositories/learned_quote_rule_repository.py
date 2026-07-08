@@ -100,7 +100,7 @@ class LearnedQuoteRuleRepository:
         scored = [
             (score, record)
             for record in records
-            if (score := _match_score(record, postal_code, postal_prefix, city, province, result)) > 0
+            if (score := _match_score(record, postal_code, postal_prefix, city, province)) > 0
         ]
         if not scored:
             return None
@@ -221,7 +221,6 @@ def _match_score(
     postal_prefix: str | None,
     city: str | None,
     province: str | None,
-    result: ZoneQuoteResult,
 ) -> int:
     if record.postal_code and postal_code and record.postal_code == postal_code:
         return 100
@@ -230,40 +229,7 @@ def _match_score(
             return 90
         if record.city is None and record.province and record.province == province:
             return 80
-    if result.manual_review_required and _is_zone_gap(result) and _same_city_province(record, city, province):
-        if _same_postal_family(record.postal_prefix, postal_prefix, length=2):
-            return 76
-        if _same_postal_family(record.postal_prefix, postal_prefix, length=1):
-            return 72
-        if record.scope == "city_province":
-            return 70
     return 0
-
-
-def _same_city_province(record: LearnedQuoteRule, city: str | None, province: str | None) -> bool:
-    return bool(record.city and city and record.city == city and record.province and record.province == province)
-
-
-def _same_postal_family(left: str | None, right: str | None, *, length: int) -> bool:
-    if not left or not right:
-        return False
-    return left[:length].upper() == right[:length].upper()
-
-
-def _is_zone_gap(result: ZoneQuoteResult) -> bool:
-    gap_match_types = {
-        "zone_not_found",
-        "province_not_found",
-        "city_not_found",
-        "city_fallback_not_found",
-        "city_fallback_expected_origin_not_found",
-        "city_fallback_split_record_conflict",
-        "postal_family_missing_context",
-        "postal_family_not_found",
-        "postal_family_expected_origin_not_found",
-        "postal_family_split_record_conflict",
-    }
-    return result.matched_by in gap_match_types or "zone_not_found" in result.risk_tags
 
 
 def _string(value: object) -> str | None:

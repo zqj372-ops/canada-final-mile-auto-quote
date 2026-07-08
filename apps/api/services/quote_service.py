@@ -12,6 +12,7 @@ from apps.api.db.repositories.quote_audit_repository import QuoteAuditRepository
 from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
 from apps.api.db.repositories.rate_rule_repository import RateRuleRepository
 from apps.api.db.repositories.zone_repository import ZoneRepository
+from apps.api.services.hermes_agent_correction_service import apply_hermes_agent_correction_if_available
 from apps.api.services.notification_service import notify_manual_required, notify_quote_success
 from packages.quote_engine.engine import QuoteEngine
 from packages.quote_engine.models import QuoteCalculationRequest, QuoteResult, ShipmentInput
@@ -40,6 +41,7 @@ def calculate_zone_quote(
 ) -> ZoneQuoteResult:
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
+    result = apply_hermes_agent_correction_if_available(db, payload, result, pricing_config=pricing_config)
     result = apply_learned_quote_if_available(db, payload, result)
     record_zone_quote_side_effects(
         db,
@@ -145,9 +147,6 @@ def _result_from_learned_rule(
     if is_corrective_override:
         risk_tags.extend(original.risk_tags)
         risk_tags.append("hermes_corrective_override")
-    elif match_score < 80:
-        risk_tags.extend(original.risk_tags)
-        risk_tags.append("hermes_zone_gap_correction")
     result = ZoneQuoteResult(
         quote_id=original.quote_id,
         source_type=ZoneQuoteSourceType.LEARNED_MANUAL_QUOTE,

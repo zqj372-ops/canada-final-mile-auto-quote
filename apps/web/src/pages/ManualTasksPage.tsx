@@ -940,6 +940,7 @@ function sourceTypeLabel(value: string | null): string | null {
     zone_matrix: "Zone 价格矩阵",
     manual_required: "需要人工报价",
     learned_manual_quote: "人工学习规则",
+    hermes_agent_correction: "Hermes Agent 纠错",
   };
   return labels[value] ? `${labels[value]} / ${value}` : value;
 }
