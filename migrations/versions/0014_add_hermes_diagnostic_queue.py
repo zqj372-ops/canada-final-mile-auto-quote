@@ -1,7 +1,7 @@
 """Add Hermes diagnostic queue.
 
 Revision ID: 0014_add_hermes_diagnostic_queue
-Revises: 0013_add_users_and_sales_quote_records
+Revises: 0013_users_sales_records
 Create Date: 2026-07-08
 """
 
@@ -12,7 +12,7 @@ from alembic import op
 
 
 revision: str = "0014_add_hermes_diagnostic_queue"
-down_revision: str | None = "0013_add_users_and_sales_quote_records"
+down_revision: str | None = "0013_users_sales_records"
 branch_labels: str | None = None
 depends_on: str | None = None
 
