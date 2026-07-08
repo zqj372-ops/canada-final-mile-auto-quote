@@ -186,6 +186,25 @@ def test_deterministic_extraction_does_not_read_cbm_decimal_as_piece_count() -> 
     assert draft.longest_side_cm == Decimal("144.0")
 
 
+def test_deterministic_extraction_keeps_dimension_quantities_without_item_weight() -> None:
+    raw = """
+    加拿大地址：3771 Jacombs Rd #340. Richmond,
+    BC V6V 2L9
+    品名：玻璃纤维增强水泥
+    尺寸：113*79*12cm  14箱   63*63*11cm  28箱
+    总重：2.73cbm  579kg
+    """
+
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    assert draft.piece_count == 42
+    assert draft.cbm == Decimal("2.730")
+    assert draft.weight_kg == Decimal("579.0")
+    assert draft.longest_side_cm == Decimal("113.0")
+    assert draft.postal_code == "V6V 2L9"
+    assert draft.province == "BC"
+
+
 def test_deterministic_extraction_overrides_ai_weight_as_piece_count() -> None:
     raw = """
     体积重量：2700*1100*1700mm 5.1CBM  重量： 共1630KG

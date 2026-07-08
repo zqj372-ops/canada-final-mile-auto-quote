@@ -405,8 +405,10 @@ def _parse_measurement_line(line: str, *, allow_numeric_table: bool = False) -> 
         r"(?P<height>\d+(?:\.\d+)?)\s*(?P<height_unit>mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸)?",
         re.IGNORECASE,
     )
-    for match in dimension_pattern.finditer(normalized):
-        item = _item_from_dimension_match(normalized, match)
+    matches = list(dimension_pattern.finditer(normalized))
+    for index, match in enumerate(matches):
+        next_dimension_start = matches[index + 1].start() if index + 1 < len(matches) else None
+        item = _item_from_dimension_match(normalized, match, next_dimension_start=next_dimension_start)
         if item:
             items.append(item)
 
@@ -483,11 +485,15 @@ def _parse_numeric_table_measurement_line(line: str) -> list[dict[str, Any]]:
     ]
 
 
-def _item_from_dimension_match(line: str, match: re.Match[str]) -> dict[str, Any] | None:
-    weight = _find_weight_after(line, match.end())
-    if weight is None:
-        return None
-    quantity = Decimal(_find_quantity(line, match.start(), weight["end"]))
+def _item_from_dimension_match(
+    line: str,
+    match: re.Match[str],
+    *,
+    next_dimension_start: int | None = None,
+) -> dict[str, Any] | None:
+    weight = _find_item_weight(line, match.start(), match.end(), next_dimension_start)
+    item_end = weight["end"] if weight else match.end()
+    quantity = Decimal(_find_quantity(line, match.start(), item_end))
     fallback_unit = _resolve_dimension_unit(
         match.group("height_unit") or match.group("width_unit") or match.group("length_unit"),
         match.group("length"),
@@ -499,29 +505,52 @@ def _item_from_dimension_match(line: str, match: re.Match[str]) -> dict[str, Any
         "length_cm": _to_cm(match.group("length"), match.group("length_unit") or fallback_unit),
         "width_cm": _to_cm(match.group("width"), match.group("width_unit") or fallback_unit),
         "height_cm": _to_cm(match.group("height"), match.group("height_unit") or fallback_unit),
-        "weight_kg": weight["weight_kg"],
+        "weight_kg": weight["weight_kg"] if weight else Decimal("0"),
     }
 
 
-def _find_weight_after(line: str, start: int) -> dict[str, Any] | None:
+def _find_item_weight(
+    line: str,
+    dimension_start: int,
+    dimension_end: int,
+    next_dimension_start: int | None,
+) -> dict[str, Any] | None:
+    local_limit = next_dimension_start if next_dimension_start is not None else len(line)
+    local_weight = _find_weight_in_segment(line[dimension_end:local_limit], offset=dimension_end)
+    if local_weight is not None:
+        return local_weight
+
+    prefix_start = max(0, dimension_start - 48)
+    return _find_weight_in_segment(line[prefix_start:dimension_start], offset=prefix_start)
+
+
+def _find_weight_in_segment(segment: str, *, offset: int) -> dict[str, Any] | None:
     weight_pattern = re.compile(
         r"(?P<weight>\d+(?:\.\d+)?)\s*(?P<unit>kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)(?=$|[^A-Za-z])",
         re.IGNORECASE,
     )
-    match = weight_pattern.search(line, pos=start)
+    match = weight_pattern.search(segment)
     if match is None:
-        match = weight_pattern.search(line)
-    if match is None:
+        return None
+    before_weight = segment[: match.start()]
+    if re.search(r"(?:总重|总重量|重量合计|合计|总计)\s*[:：]?\s*$", before_weight, re.IGNORECASE):
         return None
     return {
         "weight_kg": _to_kg(match.group("weight"), match.group("unit")),
-        "end": match.end(),
+        "end": offset + match.end(),
     }
 
 
 def _find_quantity(line: str, dimension_start: int, item_end: int) -> int:
     prefix = line[max(0, dimension_start - 24) : dimension_start]
     suffix = line[item_end : item_end + 32]
+    suffix_quantity_match = re.search(
+        r"(?P<qty>\d{1,5})\s*(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托|pallets?)",
+        suffix,
+        re.IGNORECASE,
+    )
+    if suffix_quantity_match:
+        return max(1, int(suffix_quantity_match.group("qty")))
     prefix_match = re.search(
         r"(?P<qty>\d{1,5})\s*(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托|pallets?)\s*$",
         prefix,
@@ -530,19 +559,12 @@ def _find_quantity(line: str, dimension_start: int, item_end: int) -> int:
     if prefix_match:
         return max(1, int(prefix_match.group("qty")))
     suffix_match = re.search(
-        r"(?:x|×|qty|quantity|数量|件数|pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托|pallets?)\s*(?P<qty>\d{1,5})\b",
+        r"(?:x|×|qty|quantity|数量|件数)\s*(?P<qty>\d{1,5})\b",
         suffix,
         re.IGNORECASE,
     )
     if suffix_match:
         return max(1, int(suffix_match.group("qty")))
-    suffix_quantity_match = re.search(
-        r"(?P<qty>\d{1,5})\s*(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托|pallets?)",
-        suffix,
-        re.IGNORECASE,
-    )
-    if suffix_quantity_match:
-        return max(1, int(suffix_quantity_match.group("qty")))
     return 1
 
 

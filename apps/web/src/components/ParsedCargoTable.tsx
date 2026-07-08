@@ -56,7 +56,9 @@ export default function ParsedCargoTable({
                   <td className="px-3 py-2 tabular-nums">{item.length_cm} cm</td>
                   <td className="px-3 py-2 tabular-nums">{item.width_cm} cm</td>
                   <td className="px-3 py-2 tabular-nums">{item.height_cm} cm</td>
-                  <td className="px-3 py-2 tabular-nums">{item.weight_kg.toFixed(1)} KG</td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {item.weight_kg !== null ? `${item.weight_kg.toFixed(1)} KG` : "待确认"}
+                  </td>
                   <td className="px-3 py-2 tabular-nums">{item.cbm.toFixed(3)} CBM</td>
                 </tr>
               ))

@@ -6,7 +6,7 @@ export interface ParsedCargoItem {
   length_cm: number;
   width_cm: number;
   height_cm: number;
-  weight_kg: number;
+  weight_kg: number | null;
   cbm: number;
 }
 
@@ -44,9 +44,9 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
   const allowNumericTable = hasDimensionWeightTable(rawInput);
 
   for (const line of lines) {
-    const item = parseCargoLine(line, cargoItems.length + 1, config, allowNumericTable);
-    if (item) {
-      cargoItems.push(item);
+    const items = parseCargoLineItems(line, cargoItems.length + 1, config, allowNumericTable);
+    if (items.length) {
+      cargoItems.push(...items);
     } else {
       addressLines.push(line);
     }
@@ -58,7 +58,7 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
   }
   const address = parseAddress(addressLines, config);
   const cargoCbm = round3(cargoItems.reduce((sum, item) => sum + item.cbm * item.quantity, 0));
-  const cargoWeight = round1(cargoItems.reduce((sum, item) => sum + item.weight_kg * item.quantity, 0));
+  const cargoWeight = round1(cargoItems.reduce((sum, item) => sum + (item.weight_kg ?? 0) * item.quantity, 0));
   const cargoPieceCount = cargoItems.reduce((sum, item) => sum + item.quantity, 0);
   const totalCbm = aggregate.cbm || cargoCbm || 0;
   const totalWeight = aggregate.weight_kg || cargoWeight || 0;
@@ -74,8 +74,11 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
   const longestSide = cargoItems.length
     ? Math.max(...cargoItems.flatMap((item) => [item.length_cm, item.width_cm, item.height_cm]))
     : null;
-  const heaviestPiece = cargoItems.length
-    ? Math.max(...cargoItems.map((item) => item.weight_kg))
+  const knownWeights = cargoItems
+    .map((item) => item.weight_kg)
+    .filter((value): value is number => value !== null && Number.isFinite(value) && value > 0);
+  const heaviestPiece = knownWeights.length
+    ? Math.max(...knownWeights)
     : null;
 
   const missingFields = buildMissingFields({ totalCbm, totalWeight, pieceCount, address });
@@ -161,7 +164,7 @@ function toCargoItem(
   lengthCm: number,
   widthCm: number,
   heightCm: number,
-  weightKg: number,
+  weightKg: number | null,
   quantity: number,
 ): ParsedCargoItem {
   return {
@@ -175,6 +178,41 @@ function toCargoItem(
   };
 }
 
+function parseCargoLineItems(
+  line: string,
+  startId: number,
+  config: QuoteWorkbenchConfig,
+  allowNumericTable = false,
+): ParsedCargoItem[] {
+  const normalized = normalizeCargoText(line);
+  const decimal = "(\\d+(?:\\.\\d+)?)";
+  const separators = config.parser.dimension_separators.map(escapeRegex).join("|");
+  const dimensionUnits = "mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸";
+  const dimensionRegex = new RegExp(
+    `${decimal}\\s*(${dimensionUnits})?\\s*(?:${separators})\\s*${decimal}\\s*(${dimensionUnits})?\\s*(?:${separators})\\s*${decimal}\\s*(${dimensionUnits})?`,
+    "gi",
+  );
+  const matches = Array.from(normalized.matchAll(dimensionRegex));
+  if (matches.length) {
+    const items = matches
+      .map((match, index) => parseDimensionMatch(
+        normalized,
+        match,
+        matches[index + 1]?.index ?? null,
+        startId + index,
+        config,
+      ))
+      .filter((item): item is ParsedCargoItem => item !== null);
+    if (items.length) {
+      return items;
+    }
+  }
+
+  const single = parseSpaceSeparatedCargoLine(normalized, startId, config) ??
+    (allowNumericTable ? parseNumericTableCargoLine(normalized, startId) : null);
+  return single ? [single] : [];
+}
+
 function parseCargoLine(
   line: string,
   id: number,
@@ -185,7 +223,6 @@ function parseCargoLine(
   const decimal = "(\\d+(?:\\.\\d+)?)";
   const separators = config.parser.dimension_separators.map(escapeRegex).join("|");
   const dimensionUnits = "mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸";
-  const units = config.parser.weight_units.map(escapeRegex).join("|");
   const dimensionRegex = new RegExp(
     `${decimal}\\s*(${dimensionUnits})?\\s*(?:${separators})\\s*${decimal}\\s*(${dimensionUnits})?\\s*(?:${separators})\\s*${decimal}\\s*(${dimensionUnits})?`,
     "i",
@@ -196,27 +233,56 @@ function parseCargoLine(
       (allowNumericTable ? parseNumericTableCargoLine(normalized, id) : null);
   }
 
-  const weightRegex = new RegExp(`${decimal}\\s*(${units})`, "i");
-  const afterDimension = normalized.slice(dimensionMatch.index + dimensionMatch[0].length);
-  const weightMatch = afterDimension.match(weightRegex) ?? normalized.match(weightRegex);
-  if (!weightMatch || weightMatch.index === undefined) {
+  return parseDimensionMatch(normalized, dimensionMatch, null, id, config);
+}
+
+function parseDimensionMatch(
+  line: string,
+  dimensionMatch: RegExpMatchArray,
+  nextDimensionStart: number | null,
+  id: number,
+  config: QuoteWorkbenchConfig,
+): ParsedCargoItem | null {
+  if (dimensionMatch.index === undefined) {
     return null;
   }
-
+  const decimal = "(\\d+(?:\\.\\d+)?)";
+  const units = config.parser.weight_units.map(escapeRegex).join("|");
+  const weightRegex = new RegExp(`${decimal}\\s*(${units})`, "i");
+  const dimensionStart = dimensionMatch.index;
+  const dimensionEnd = dimensionStart + dimensionMatch[0].length;
+  const localEnd = nextDimensionStart ?? line.length;
+  const localWeight = findItemWeight(line.slice(dimensionEnd, localEnd), dimensionEnd, weightRegex);
+  const prefixWeight = localWeight ?? findItemWeight(line.slice(Math.max(0, dimensionStart - 48), dimensionStart), Math.max(0, dimensionStart - 48), weightRegex);
+  const weightEnd = prefixWeight?.end ?? dimensionEnd;
+  const quantity = findQuantity(line, dimensionStart, weightEnd);
   const dimensionFallbackUnit = dimensionMatch[6] || dimensionMatch[4] || dimensionMatch[2] ||
     inferDimensionUnit([Number(dimensionMatch[1]), Number(dimensionMatch[3]), Number(dimensionMatch[5])]) ||
     "cm";
-  const weightStart = (afterDimension.match(weightRegex) ? dimensionMatch.index + dimensionMatch[0].length : 0) + weightMatch.index;
-  const weightEnd = weightStart + weightMatch[0].length;
-  const quantity = findQuantity(normalized, dimensionMatch.index, weightEnd);
   return toCargoItem(
     id,
     toCm(Number(dimensionMatch[1]), dimensionMatch[2] || dimensionFallbackUnit),
     toCm(Number(dimensionMatch[3]), dimensionMatch[4] || dimensionFallbackUnit),
     toCm(Number(dimensionMatch[5]), dimensionMatch[6] || dimensionFallbackUnit),
-    toKg(Number(weightMatch[1]), weightMatch[2]),
+    prefixWeight ? toKg(Number(prefixWeight.match[1]), prefixWeight.match[2]) : null,
     quantity,
   );
+}
+
+function findItemWeight(
+  segment: string,
+  offset: number,
+  weightRegex: RegExp,
+): { match: RegExpMatchArray; end: number } | null {
+  const match = segment.match(weightRegex);
+  if (!match || match.index === undefined) {
+    return null;
+  }
+  const beforeWeight = segment.slice(0, match.index);
+  if (/(?:总重|总重量|重量合计|合计|总计)\s*[:：]?\s*$/i.test(beforeWeight)) {
+    return null;
+  }
+  return { match, end: offset + match.index + match[0].length };
 }
 
 function hasDimensionWeightTable(rawInput: string): boolean {
@@ -276,17 +342,17 @@ function findQuantity(line: string, dimensionStart: number, itemEnd: number): nu
   const prefix = line.slice(Math.max(0, dimensionStart - 32), dimensionStart);
   const suffix = line.slice(itemEnd, itemEnd + 48);
   const quantityUnit = "(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托|pallets?)";
+  const suffixNumberFirst = suffix.match(new RegExp(`(\\d{1,5})\\s*${quantityUnit}`, "i"));
+  if (suffixNumberFirst) {
+    return Math.max(1, Number(suffixNumberFirst[1]));
+  }
   const prefixMatch = prefix.match(new RegExp(`(\\d{1,5})\\s*${quantityUnit}\\s*$`, "i"));
   if (prefixMatch) {
     return Math.max(1, Number(prefixMatch[1]));
   }
-  const suffixTokenFirst = suffix.match(new RegExp(`(?:x|×|qty|quantity|数量|件数|${quantityUnit})\\s*(\\d{1,5})\\b`, "i"));
+  const suffixTokenFirst = suffix.match(/(?:x|×|qty|quantity|数量|件数)\s*(\d{1,5})\b/i);
   if (suffixTokenFirst) {
     return Math.max(1, Number(suffixTokenFirst[1]));
-  }
-  const suffixNumberFirst = suffix.match(new RegExp(`(\\d{1,5})\\s*${quantityUnit}`, "i"));
-  if (suffixNumberFirst) {
-    return Math.max(1, Number(suffixNumberFirst[1]));
   }
   return 1;
 }
