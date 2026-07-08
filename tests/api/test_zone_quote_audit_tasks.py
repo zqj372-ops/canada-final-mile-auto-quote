@@ -249,6 +249,56 @@ def test_resolved_manual_task_learning_respects_billing_pallets() -> None:
     assert body["billing_pallets"] == 1
 
 
+def test_hermes_learned_rule_corrects_missing_postal_family_zone_gap() -> None:
+    client = build_client(
+        learned_rows=[
+            {
+                "source_task_id": 501,
+                "quote_id": "manual-winnipeg-r2",
+                "scope": "postal_prefix_city",
+                "postal_code": None,
+                "postal_prefix": "R2J",
+                "city": "Winnipeg",
+                "province": "MB",
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 1,
+                "total_price_usd": Decimal("210.00"),
+                "base_price_usd": Decimal("210.00"),
+                "confidence": 68,
+                "status": "active",
+                "usage_count": 0,
+                "note": "Approved Winnipeg R-family fallback.",
+            }
+        ]
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=payload(
+            address_line="27 greyfriars rd",
+            postal_code="R3T 3N7",
+            city="Winnipeg",
+            province="MB",
+            cbm=1.98,
+            weight_kg=340,
+            piece_count=3,
+            explicit_pallet_count=1,
+            requires_appointment=False,
+        ),
+    )
+
+    body = response.json()
+    assert body["source_type"] == "learned_manual_quote"
+    assert body["manual_review_required"] is False
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 5
+    assert body["billing_pallets"] == 1
+    assert body["total_price_usd"] == "210.00"
+    assert "score 72" in body["matched_rule"]
+    assert "hermes_zone_gap_correction" in body["risk_tags"]
+
+
 def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:
     client = build_client(
         learned_rows=[

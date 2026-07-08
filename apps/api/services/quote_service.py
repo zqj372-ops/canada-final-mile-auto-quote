@@ -145,6 +145,9 @@ def _result_from_learned_rule(
     if is_corrective_override:
         risk_tags.extend(original.risk_tags)
         risk_tags.append("hermes_corrective_override")
+    elif match_score < 80:
+        risk_tags.extend(original.risk_tags)
+        risk_tags.append("hermes_zone_gap_correction")
     result = ZoneQuoteResult(
         quote_id=original.quote_id,
         source_type=ZoneQuoteSourceType.LEARNED_MANUAL_QUOTE,

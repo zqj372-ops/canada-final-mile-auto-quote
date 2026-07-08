@@ -183,6 +183,7 @@ class QuoteWorkbenchConfig(BaseModel):
             "learned_quote_reused": "复用人工确认学习记录",
             "learned_from_manual_task": "来源为已处理人工任务",
             "hermes_corrective_override": "Hermes 已在报价时纠错",
+            "hermes_zone_gap_correction": "Hermes 已纠正分区缺口",
             "billing_pallets_manual_required": "计费托数需人工确认",
             "long_piece_count_suspicious": "超长件数量异常",
             "stale_origin_overridden": "始发仓已按省份规则覆盖",
