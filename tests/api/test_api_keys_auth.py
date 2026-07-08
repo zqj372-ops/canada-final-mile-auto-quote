@@ -385,3 +385,52 @@ def test_admin_can_override_quote_record_price(monkeypatch: pytest.MonkeyPatch) 
     assert body["customer_reply"] == "客户报价 USD 180.25"
     assert body["result_json"]["manual_override"]["previous_total_price_usd"] == "120.00"
     assert body["result_json"]["manual_override"]["actor_name"] == "Admin"
+
+
+def test_admin_can_override_quote_record_price_by_quote_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    response = client.patch(
+        "/quotes/sales-records/by-quote/quote_sales_user/manual-price",
+        json={
+            "total_price_usd": 181.25,
+            "override_note": "后台审计页人工确认价格",
+            "confirmed": True,
+        },
+        headers=headers(ADMIN_KEY),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["quote_id"] == "quote_sales_user"
+    assert body["status"] == "quoted"
+    assert body["total_price_usd"] == "181.25"
+    assert body["source_type"] == "manual_override"
+    assert body["result_json"]["manual_override"]["previous_total_price_usd"] == "120.00"
+
+
+def test_quote_id_manual_price_override_requires_second_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    response = client.patch(
+        "/quotes/sales-records/by-quote/quote_sales_user/manual-price",
+        json={"total_price_usd": 181.25, "override_note": "missing second confirmation", "confirmed": False},
+        headers=headers(ADMIN_KEY),
+    )
+
+    assert response.status_code == 400
+
+
+def test_sales_cannot_override_quote_record_price_by_quote_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    response = client.patch(
+        "/quotes/sales-records/by-quote/quote_sales_user/manual-price",
+        json={"total_price_usd": 181.25, "override_note": "sales should not override", "confirmed": True},
+        headers=headers(SALES_KEY),
+    )
+
+    assert response.status_code == 403

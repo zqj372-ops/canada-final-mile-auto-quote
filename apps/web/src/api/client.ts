@@ -923,6 +923,19 @@ export function updateSalesQuoteManualPrice(
   });
 }
 
+export function updateSalesQuoteManualPriceByQuoteId(
+  quoteId: string,
+  payload: SalesQuoteManualPricePayload,
+): Promise<SalesQuoteRecord> {
+  return request<SalesQuoteRecord>(
+    `/quotes/sales-records/by-quote/${encodeURIComponent(quoteId)}/manual-price`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
 export function listHermesLearningCandidates(params: {
   status?: string;
   postal_prefix?: string;

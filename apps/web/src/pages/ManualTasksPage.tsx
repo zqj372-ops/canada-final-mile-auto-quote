@@ -136,6 +136,15 @@ export default function ManualTasksPage({
       setSavingTaskId(null);
       return;
     }
+    if (draft.status === "resolved") {
+      const confirmed = window.confirm(
+        "请二次确认：这会把该人工任务标记为已解决，并用填写的金额作为人工确认结果；系统会据此生成 Hermes 学习候选，但不会修改 Zone 价格矩阵。确认保存？",
+      );
+      if (!confirmed) {
+        setSavingTaskId(null);
+        return;
+      }
+    }
 
     try {
       const payload: ManualQuoteTaskUpdate = {
@@ -376,7 +385,12 @@ export default function ManualTasksPage({
                   </label>
                 </div>
               </div>
-              <div className="mt-4 flex justify-center gap-3">
+              <div className="mt-4 flex flex-wrap justify-center gap-3">
+                {selectedDraft.status === "resolved" && (
+                  <div className="basis-full rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-800">
+                    保存已解决任务前会二次确认。人工确认金额只作为本次处理结果和 Hermes 候选依据，不会直接修改 Zone 价格矩阵。
+                  </div>
+                )}
                 <button
                   className="btn-secondary min-w-28"
                   type="button"

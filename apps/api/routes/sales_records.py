@@ -54,3 +54,26 @@ def update_sales_quote_manual_price(
         customer_reply=payload.customer_reply.strip() if payload.customer_reply and payload.customer_reply.strip() else None,
     )
     return sales_quote_record_to_dict(updated)
+
+
+@router.patch("/sales-records/by-quote/{quote_id}/manual-price")
+def update_sales_quote_manual_price_by_quote_id(
+    quote_id: str,
+    payload: ManualPriceOverrideRequest,
+    db: Session = Depends(get_db),
+    actor: CurrentActor = Depends(require_roles(*MANUAL_TASK_WRITE_ROLES)),
+) -> dict[str, object]:
+    if not payload.confirmed:
+        raise HTTPException(status_code=400, detail="Manual price override requires second confirmation.")
+    repository = SalesQuoteRecordRepository(db)
+    record = repository.get_latest_record_by_quote_id(quote_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Sales quote record not found for this quote_id.")
+    updated = repository.apply_manual_price(
+        record=record,
+        actor=actor,
+        total_price_usd=payload.total_price_usd,
+        override_note=payload.override_note.strip(),
+        customer_reply=payload.customer_reply.strip() if payload.customer_reply and payload.customer_reply.strip() else None,
+    )
+    return sales_quote_record_to_dict(updated)

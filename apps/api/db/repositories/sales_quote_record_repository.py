@@ -68,6 +68,14 @@ class SalesQuoteRecordRepository:
     def get_record(self, record_id: int) -> SalesQuoteRecord | None:
         return self.session.get(SalesQuoteRecord, record_id)
 
+    def get_latest_record_by_quote_id(self, quote_id: str) -> SalesQuoteRecord | None:
+        return self.session.scalars(
+            select(SalesQuoteRecord)
+            .where(SalesQuoteRecord.quote_id == quote_id)
+            .order_by(SalesQuoteRecord.created_at.desc(), SalesQuoteRecord.id.desc())
+            .limit(1)
+        ).first()
+
     def apply_manual_price(
         self,
         *,

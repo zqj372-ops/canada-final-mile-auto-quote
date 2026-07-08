@@ -1,5 +1,11 @@
 import { FormEvent, useEffect, useState } from "react";
-import { getQuoteAudit, listQuoteAudits, type JsonValue, type QuoteAuditLog } from "../api/client";
+import {
+  getQuoteAudit,
+  listQuoteAudits,
+  updateSalesQuoteManualPriceByQuoteId,
+  type JsonValue,
+  type QuoteAuditLog,
+} from "../api/client";
 import RiskTags from "../components/RiskTags";
 
 interface AuditPageProps {
@@ -13,10 +19,27 @@ export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [isListLoading, setIsListLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [overridePrice, setOverridePrice] = useState("");
+  const [overrideNote, setOverrideNote] = useState("");
+  const [overrideReply, setOverrideReply] = useState("");
+  const [overrideError, setOverrideError] = useState<string | null>(null);
+  const [overrideNotice, setOverrideNotice] = useState<string | null>(null);
+  const [isSavingOverride, setIsSavingOverride] = useState(false);
 
   useEffect(() => {
     void loadRecentAudits();
   }, []);
+
+  useEffect(() => {
+    if (!record) {
+      return;
+    }
+    setOverridePrice(record.total_price_usd === null ? "" : String(record.total_price_usd));
+    setOverrideNote("");
+    setOverrideReply("");
+    setOverrideError(null);
+    setOverrideNotice(null);
+  }, [record?.id]);
 
   async function loadRecentAudits(search = "") {
     setIsListLoading(true);
@@ -52,6 +75,47 @@ export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
       setError(caught instanceof Error ? caught.message : "审计记录查询失败");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function saveManualOverride() {
+    if (!record) {
+      return;
+    }
+    if (!overridePrice.trim()) {
+      setOverrideError("请填写人工确认 USD 金额。");
+      return;
+    }
+    const price = Number(overridePrice);
+    if (!Number.isFinite(price) || price < 0) {
+      setOverrideError("请输入大于等于 0 的 USD 金额。");
+      return;
+    }
+    if (!overrideNote.trim()) {
+      setOverrideError("请填写人工改价/确认原因。");
+      return;
+    }
+    const confirmed = window.confirm(
+      "请二次确认：这会按当前 quote_id 更新销售报价记录的客户可见金额；审计原始记录和 Zone 价格矩阵不会被修改。确认保存？",
+    );
+    if (!confirmed) {
+      return;
+    }
+    setIsSavingOverride(true);
+    setOverrideError(null);
+    setOverrideNotice(null);
+    try {
+      const updated = await updateSalesQuoteManualPriceByQuoteId(record.quote_id, {
+        total_price_usd: price,
+        override_note: overrideNote.trim(),
+        customer_reply: overrideReply.trim() || null,
+        confirmed: true,
+      });
+      setOverrideNotice(`已更新销售报价记录 #${updated.id}，客户可见金额为 USD ${Number(updated.total_price_usd).toFixed(2)}。`);
+    } catch (caught) {
+      setOverrideError(caught instanceof Error ? caught.message : "人工确认价保存失败");
+    } finally {
+      setIsSavingOverride(false);
     }
   }
 
@@ -153,6 +217,19 @@ export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
 
             <div className="grid gap-5">
               <ReadableRequestCard record={record} />
+              <ManualPriceOverrideCard
+                error={overrideError}
+                isSaving={isSavingOverride}
+                note={overrideNote}
+                notice={overrideNotice}
+                onNoteChange={setOverrideNote}
+                onPriceChange={setOverridePrice}
+                onReplyChange={setOverrideReply}
+                onSave={() => void saveManualOverride()}
+                price={overridePrice}
+                record={record}
+                reply={overrideReply}
+              />
               <details className="rounded-md border border-slate-200 bg-slate-50 p-4">
                 <summary className="cursor-pointer text-sm font-semibold text-slate-900">
                   调试 JSON
@@ -280,6 +357,96 @@ function ReadableRequestCard({ record }: { record: QuoteAuditLog }) {
         <FieldValue label="托数拆分" value={readText(result.pallet_breakdown) || formatPalletBreakdown(asRecord(result.pallet_breakdown))} />
       </dl>
     </div>
+  );
+}
+
+function ManualPriceOverrideCard({
+  error,
+  isSaving,
+  note,
+  notice,
+  onNoteChange,
+  onPriceChange,
+  onReplyChange,
+  onSave,
+  price,
+  record,
+  reply,
+}: {
+  error: string | null;
+  isSaving: boolean;
+  note: string;
+  notice: string | null;
+  onNoteChange: (value: string) => void;
+  onPriceChange: (value: string) => void;
+  onReplyChange: (value: string) => void;
+  onSave: () => void;
+  price: string;
+  record: QuoteAuditLog;
+  reply: string;
+}) {
+  return (
+    <section className="rounded-md border border-amber-200 bg-amber-50/70 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="section-title text-amber-950">人工确认价</h3>
+          <p className="mt-1 text-sm leading-6 text-amber-800">
+            用当前 quote_id 更新销售报价记录。会二次确认；不会修改审计原始记录，也不会修改 Zone 价格矩阵。
+          </p>
+        </div>
+        <StatusBadge manual={record.manual_review_required} />
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-[12rem_minmax(0,1fr)]">
+        <label>
+          <span className="field-label">确认金额 USD</span>
+          <input
+            className="field-input"
+            min="0"
+            step="0.01"
+            type="number"
+            value={price}
+            onChange={(event) => onPriceChange(event.target.value)}
+            placeholder="例如 365.00"
+          />
+        </label>
+        <label>
+          <span className="field-label">确认/改价原因</span>
+          <input
+            className="field-input"
+            value={note}
+            onChange={(event) => onNoteChange(event.target.value)}
+            placeholder="例如：已与供应商确认，按 Calgary Zone 5 / 3 托处理"
+          />
+        </label>
+      </div>
+      <label className="mt-3 block">
+        <span className="field-label">客户回复文案（可选）</span>
+        <textarea
+          className="field-input min-h-28"
+          value={reply}
+          onChange={(event) => onReplyChange(event.target.value)}
+          placeholder="留空则系统按确认金额生成基础报价话术。"
+        />
+      </label>
+      {error && (
+        <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          {notice}
+        </div>
+      )}
+      <button
+        className="btn-primary mt-3"
+        type="button"
+        disabled={isSaving}
+        onClick={onSave}
+      >
+        {isSaving ? "保存中..." : "保存人工确认价"}
+      </button>
+    </section>
   );
 }
 
