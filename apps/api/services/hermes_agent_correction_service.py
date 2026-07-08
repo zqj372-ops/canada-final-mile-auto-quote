@@ -169,6 +169,13 @@ class HermesAgentCorrectionService:
                 }
             )
 
+        curated_safe_options = _curated_safe_zone_options(
+            zone_options,
+            postal_prefix=postal_prefix,
+            city=city,
+            expected_origin=expected_origin,
+        )
+
         return {
             "postal_prefix": postal_prefix,
             "city": city,
@@ -176,6 +183,7 @@ class HermesAgentCorrectionService:
             "expected_origin": expected_origin,
             "billing_pallets": billing_pallets,
             "zone_options": zone_options[:80],
+            "curated_safe_options": curated_safe_options[:12],
             "resolved_manual_tasks": self._resolved_manual_task_evidence(city, province, postal_prefix, billing_pallets),
         }
 
@@ -332,6 +340,9 @@ _HERMES_AGENT_SYSTEM_PROMPT = """你是 Hermes Agent，负责加拿大尾端报�
 2. use_resolved_manual_quote：选择 evidence.resolved_manual_tasks 里的已解决人工任务。
 3. no_action：证据不足，保持人工复核。
 
+evidence.curated_safe_options 是后端根据同省、正确始发仓、邮编邻近、价格矩阵可用性预筛出的纠错候选。
+如果 curated_safe_options 非空，且候选说明没有明显矛盾，优先选择排名最高的候选，返回 use_zone_matrix。
+不要选择 expected_origin_match=false 的旧始发仓记录。
 优先避免错误放价。旧始发仓和省份不一致时要谨慎；如果没有可靠依据，返回 no_action。
 只返回 JSON，不要 Markdown，不要解释表格。"""
 
@@ -371,6 +382,157 @@ def _manual_task_from_evidence(evidence: dict[str, object], task_id: int | None)
         if isinstance(task, dict) and _int_value(task.get("manual_task_id")) == task_id:
             return task
     return None
+
+
+def _curated_safe_zone_options(
+    zone_options: list[dict[str, object]],
+    *,
+    postal_prefix: str | None,
+    city: str | None,
+    expected_origin: str | None,
+) -> list[dict[str, object]]:
+    requested_prefix = _normalize_prefix(postal_prefix)
+    if not requested_prefix or not expected_origin:
+        return []
+
+    requested_city = normalize_city(city)
+    priced_expected_options = [
+        option
+        for option in zone_options
+        if option.get("expected_origin_match")
+        and option.get("has_price_for_billing_pallets")
+        and option.get("origin") == expected_origin
+    ]
+    if not priced_expected_options:
+        return []
+
+    curated: list[dict[str, object]] = []
+    same_city_options = [
+        option
+        for option in priced_expected_options
+        if requested_city and normalize_city(_string(option.get("city"))) == requested_city
+    ]
+    curated.extend(
+        _group_safe_options(
+            same_city_options,
+            reason="同城市且始发仓匹配，价格矩阵有对应托数。",
+            basis="same_city_expected_origin",
+            confidence_ceiling=82,
+            min_support=1,
+        )
+    )
+
+    nearest_options = _nearest_relaxed_prefix_options(priced_expected_options, requested_prefix)
+    curated.extend(
+        _group_safe_options(
+            nearest_options,
+            reason=(
+                f"邮编前缀 {requested_prefix} 未命中；采用同省同首字母的最近邮编锚点，"
+                "且始发仓匹配、价格矩阵有对应托数。"
+            ),
+            basis="nearest_postal_initial_expected_origin",
+            confidence_ceiling=76,
+            min_support=2,
+        )
+    )
+
+    by_key: dict[tuple[str, int], dict[str, object]] = {}
+    for option in curated:
+        origin = _string(option.get("origin"))
+        zone = _int_value(option.get("zone"))
+        if origin is None or zone is None:
+            continue
+        key = (origin, zone)
+        existing = by_key.get(key)
+        if existing is None or int(option.get("support_count") or 0) > int(existing.get("support_count") or 0):
+            by_key[key] = option
+
+    return sorted(
+        by_key.values(),
+        key=lambda item: (
+            -_int_value(item.get("confidence_ceiling")) if _int_value(item.get("confidence_ceiling")) is not None else 0,
+            -_int_value(item.get("support_count")) if _int_value(item.get("support_count")) is not None else 0,
+            _int_value(item.get("zone")) or 99,
+        ),
+    )
+
+
+def _group_safe_options(
+    options: list[dict[str, object]],
+    *,
+    reason: str,
+    basis: str,
+    confidence_ceiling: int,
+    min_support: int,
+) -> list[dict[str, object]]:
+    groups: dict[tuple[str, int], list[dict[str, object]]] = {}
+    for option in options:
+        origin = _string(option.get("origin"))
+        zone = _int_value(option.get("zone"))
+        if origin is None or zone is None:
+            continue
+        groups.setdefault((origin, zone), []).append(option)
+
+    curated: list[dict[str, object]] = []
+    for (origin, zone), group in groups.items():
+        prefixes = sorted({_normalize_prefix(_string(option.get("postal_prefix"))) for option in group if option.get("postal_prefix")})
+        cities = sorted({_string(option.get("city")) or "" for option in group if option.get("city")})
+        if len(prefixes) < min_support and len(cities) < min_support:
+            continue
+        sample = group[0]
+        curated.append(
+            {
+                "origin": origin,
+                "zone": zone,
+                "base_price_usd": sample.get("base_price_usd"),
+                "basis": basis,
+                "confidence_ceiling": confidence_ceiling,
+                "support_count": len(group),
+                "supporting_prefixes": prefixes[:12],
+                "supporting_cities": cities[:12],
+                "reason_zh": reason,
+            }
+        )
+    return curated
+
+
+def _nearest_relaxed_prefix_options(
+    options: list[dict[str, object]],
+    requested_prefix: str,
+) -> list[dict[str, object]]:
+    scored: list[tuple[int, dict[str, object]]] = []
+    for option in options:
+        prefix = _normalize_prefix(_string(option.get("postal_prefix")))
+        distance = _relaxed_prefix_distance(prefix, requested_prefix)
+        if distance is None:
+            continue
+        scored.append((distance, option))
+    if not scored:
+        return []
+    nearest = min(distance for distance, _ in scored)
+    return [option for distance, option in scored if distance == nearest]
+
+
+def _relaxed_prefix_distance(candidate: str, requested: str) -> int | None:
+    if not candidate or not requested or candidate[0] != requested[0]:
+        return None
+    if len(candidate) >= 2 and len(requested) >= 2 and candidate[:2] == requested[:2]:
+        if len(candidate) >= 3 and len(requested) >= 3:
+            return abs(_prefix_rank(candidate[2]) - _prefix_rank(requested[2]))
+        return 0
+    if len(candidate) < 2 or len(requested) < 2:
+        return 100
+    return 100 + abs(_prefix_rank(candidate[1]) - _prefix_rank(requested[1])) * 10
+
+
+def _prefix_rank(value: str) -> int:
+    if value.isdigit():
+        return ord(value) - ord("0")
+    return 10 + ord(value.upper()) - ord("A")
+
+
+def _normalize_prefix(value: str | None) -> str:
+    return (value or "").upper().replace(" ", "")[:3]
 
 
 def _manual_history_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult) -> str:

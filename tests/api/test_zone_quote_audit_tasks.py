@@ -321,6 +321,114 @@ def test_hermes_agent_corrects_zone_gap_with_validated_zone_matrix(monkeypatch: 
     assert "hermes_agent_zone_matrix" in body["risk_tags"]
 
 
+def test_hermes_agent_receives_curated_safe_options_for_postal_gap(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_agent_decision(self, request, result, evidence):  # noqa: ANN001
+        safe_options = evidence["curated_safe_options"]
+        assert safe_options
+        assert safe_options[0]["origin"] == "calgary"
+        assert safe_options[0]["zone"] == 5
+        assert safe_options[0]["supporting_prefixes"] == ["R2E", "R2P"]
+        return AgentDecision(
+            action="use_zone_matrix",
+            confidence=safe_options[0]["confidence_ceiling"],
+            reason_zh="Hermes Agent 采用后端预筛的最近邮编锚点 R2E/R2P，且均为 Calgary Zone 5。",
+            origin=safe_options[0]["origin"],
+            zone=safe_options[0]["zone"],
+        )
+
+    monkeypatch.setattr(HermesAgentCorrectionService, "_ask_agent", fake_agent_decision)
+    client = build_client(
+        include_zone_rule=False,
+        zone_rule_rows=[
+            {
+                "postal_prefix": "R2C",
+                "city": "WINNIPEG",
+                "province": "MB",
+                "origin": "toronto",
+                "zone": 12,
+                "match_level": "legacy",
+                "note": "legacy wrong-origin Winnipeg row",
+            },
+            {
+                "postal_prefix": "R2E",
+                "city": "EAST ST PAUL",
+                "province": "MB",
+                "origin": "calgary",
+                "zone": 5,
+                "match_level": "metro",
+                "note": "Winnipeg metro expected-origin anchor",
+            },
+            {
+                "postal_prefix": "R2P",
+                "city": "WEST ST PAUL",
+                "province": "MB",
+                "origin": "calgary",
+                "zone": 5,
+                "match_level": "metro",
+                "note": "Winnipeg metro expected-origin anchor",
+            },
+            {
+                "postal_prefix": "R0A",
+                "city": "NIVERVILLE",
+                "province": "MB",
+                "origin": "calgary",
+                "zone": 9,
+                "match_level": "remote",
+                "note": "farther Manitoba anchor should not be preferred",
+            },
+        ],
+        price_rows=[
+            {
+                "origin": "toronto",
+                "zone": 12,
+                "billing_pallets": 1,
+                "base_price_usd": Decimal("420.00"),
+                "source": "test",
+                "last_updated": "2026-06-03",
+            },
+            {
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 1,
+                "base_price_usd": Decimal("240.00"),
+                "source": "test",
+                "last_updated": "2026-06-03",
+            },
+            {
+                "origin": "calgary",
+                "zone": 9,
+                "billing_pallets": 1,
+                "base_price_usd": Decimal("395.00"),
+                "source": "test",
+                "last_updated": "2026-06-03",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=payload(
+            address_line="27 greyfriars rd",
+            postal_code="R3T 3N7",
+            city="Winnipeg",
+            province="MB",
+            cbm=1.98,
+            weight_kg=340,
+            piece_count=3,
+            explicit_pallet_count=1,
+            requires_appointment=False,
+        ),
+    )
+
+    body = response.json()
+    assert body["source_type"] == "hermes_agent_correction"
+    assert body["manual_review_required"] is False
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 5
+    assert body["base_price_usd"] == "240.00"
+    assert body["total_price_usd"] == "324.00"
+
+
 def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:
     client = build_client(
         learned_rows=[
