@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import AuditPage from "./AuditPage";
+import BatchDiagnosticReportsPage from "./BatchDiagnosticReportsPage";
 import HermesDiagnosticsPage from "./HermesDiagnosticsPage";
 import LearningCandidatesPage from "./LearningCandidatesPage";
 import ManualTasksPage from "./ManualTasksPage";
 
-type OperationsTab = "manual" | "diagnostics" | "hermes" | "audit";
+type OperationsTab = "manual" | "diagnostics" | "batch" | "hermes" | "audit";
 
 interface OperationsWorkbenchPageProps {
   initialTab?: OperationsTab;
@@ -27,6 +28,12 @@ const tabs: Array<{
     label: "诊断队列",
     summary: "每票报价的结构化诊断包，供 Hermes Agent 只读分析",
     metric: "建议",
+  },
+  {
+    id: "batch",
+    label: "批量报告",
+    summary: "查看随机邮编命中测试的汇总、Top 缺口和整理建议",
+    metric: "批量",
   },
   {
     id: "hermes",
@@ -70,7 +77,7 @@ export default function OperationsWorkbenchPage({
             </p>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-2 xl:min-w-[44rem] xl:grid-cols-4">
+          <div className="grid gap-2 sm:grid-cols-2 xl:min-w-[54rem] xl:grid-cols-5">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -119,6 +126,7 @@ export default function OperationsWorkbenchPage({
           <ManualTasksPage embedded onOpenHermes={() => setActiveTab("diagnostics")} />
         )}
         {activeTab === "diagnostics" && <HermesDiagnosticsPage embedded />}
+        {activeTab === "batch" && <BatchDiagnosticReportsPage embedded />}
         {activeTab === "hermes" && <LearningCandidatesPage embedded />}
         {activeTab === "audit" && <AuditPage embedded />}
       </section>

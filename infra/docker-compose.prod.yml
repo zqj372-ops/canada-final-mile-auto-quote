@@ -25,6 +25,9 @@ services:
       AI_CONFIG_SECRET: ${AI_CONFIG_SECRET:?AI_CONFIG_SECRET is required}
       AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:?AUTH_TOKEN_SECRET is required}
       DEV_AUTH_DISABLED: ${DEV_AUTH_DISABLED:-false}
+      POSTAL_HIT_TEST_OUTPUT_DIR: /app/outputs/postal_hit_tests
+    volumes:
+      - ../outputs:/app/outputs
     depends_on:
       postgres:
         condition: service_healthy

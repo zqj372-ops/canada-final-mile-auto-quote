@@ -13,6 +13,10 @@ from apps.api.services.hermes_diagnostic_service import (
     list_hermes_diagnostics,
     submit_hermes_diagnostic_suggestion,
 )
+from apps.api.services.batch_diagnostic_report_service import (
+    get_batch_diagnostic_report,
+    list_batch_diagnostic_reports,
+)
 
 
 router = APIRouter(prefix="/quotes", tags=["hermes-diagnostics"])
@@ -32,6 +36,16 @@ def list_diagnostics(
     limit: int = 50,
 ) -> list[dict[str, object]]:
     return list_hermes_diagnostics(db, status=status, quote_id=quote_id, limit=limit)
+
+
+@router.get("/batch-diagnostic-reports", dependencies=[Depends(require_roles(*LEARNING_READ_ROLES))])
+def list_batch_reports(db: Session = Depends(get_db)) -> list[dict[str, object]]:
+    return list_batch_diagnostic_reports(db)
+
+
+@router.get("/batch-diagnostic-reports/{batch_id}", dependencies=[Depends(require_roles(*LEARNING_READ_ROLES))])
+def get_batch_report(batch_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
+    return get_batch_diagnostic_report(db, batch_id)
 
 
 @router.get("/hermes-diagnostics/{diagnostic_id}", dependencies=[Depends(require_roles(*LEARNING_READ_ROLES))])

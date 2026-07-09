@@ -616,6 +616,37 @@ export interface HermesDiagnosticSuggestionPayload {
   notes?: string[];
 }
 
+export interface BatchDiagnosticReportSummary {
+  batch_id: string;
+  generated_at: string | null;
+  source: string;
+  report_available: boolean;
+  requested_sample_size: number | null;
+  actual_sample_size: number | null;
+  quoted: number | null;
+  manual_required: number | null;
+  anomalies: number | null;
+  quote_success_rate: string | null;
+  manual_required_rate: string | null;
+  learning_suggestion_count: number;
+  persisted_diagnostic_count: number | null;
+  diagnostic_count: number;
+  profiles: JsonValue[];
+}
+
+export interface BatchDiagnosticReportDetail extends BatchDiagnosticReportSummary {
+  file_path?: string;
+  counters: Record<string, Record<string, number>>;
+  top_manual_clusters: JsonValue[];
+  top_fallback_clusters: JsonValue[];
+  top_expected_origin_clusters: JsonValue[];
+  top_price_gap_clusters: JsonValue[];
+  learning_suggestions: JsonValue[];
+  sample_anomalies: JsonValue[];
+  sample_observations: JsonValue[];
+  policy: Record<string, JsonValue>;
+}
+
 export interface HermesCandidateReviewPayload {
   review_note?: string | null;
 }
@@ -1037,6 +1068,16 @@ export function submitHermesDiagnosticSuggestion(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function listBatchDiagnosticReports(): Promise<BatchDiagnosticReportSummary[]> {
+  return request<BatchDiagnosticReportSummary[]>("/quotes/batch-diagnostic-reports");
+}
+
+export function getBatchDiagnosticReport(batchId: string): Promise<BatchDiagnosticReportDetail> {
+  return request<BatchDiagnosticReportDetail>(
+    `/quotes/batch-diagnostic-reports/${encodeURIComponent(batchId)}`,
+  );
 }
 
 export function approveHermesLearningCandidate(

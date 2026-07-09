@@ -28,6 +28,7 @@ type RoutePath =
   | "/ops"
   | "/manual-tasks"
   | "/hermes-diagnostics"
+  | "/batch-diagnostics"
   | "/learning-candidates"
   | "/audit"
   | "/settings/quote"
@@ -164,6 +165,9 @@ export default function App() {
     }
     if (path === "/hermes-diagnostics") {
       return <OperationsWorkbenchPage initialTab="diagnostics" />;
+    }
+    if (path === "/batch-diagnostics") {
+      return <OperationsWorkbenchPage initialTab="batch" />;
     }
     if (path === "/learning-candidates") {
       return <OperationsWorkbenchPage initialTab="hermes" />;
@@ -465,6 +469,9 @@ function normalizePath(pathname: string): RoutePath {
   if (strippedPath === "/hermes-diagnostics") {
     return "/hermes-diagnostics";
   }
+  if (strippedPath === "/batch-diagnostics") {
+    return "/batch-diagnostics";
+  }
   if (strippedPath === "/learning-candidates") {
     return "/learning-candidates";
   }
@@ -506,6 +513,7 @@ function isOperationsPath(path: RoutePath): boolean {
     path === "/ops" ||
     path === "/manual-tasks" ||
     path === "/hermes-diagnostics" ||
+    path === "/batch-diagnostics" ||
     path === "/learning-candidates" ||
     path === "/audit"
   );
