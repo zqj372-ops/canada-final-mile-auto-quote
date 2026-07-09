@@ -211,6 +211,7 @@ def lookup_zone(
         )
 
     trace["province_filtered_count"] = len(province_rules)
+    expected_origin = ORIGIN_BY_PROVINCE.get(normalized_province or "")
     single_group = _single_group_decision(
         province_rules,
         prefix=prefix,
@@ -224,16 +225,22 @@ def lookup_zone(
     city_filtered = _filter_rules_by_canonical_city(province_rules, city_candidates, alias_map)
     trace["city_filtered_count"] = len(city_filtered)
     if city_filtered:
-        groups = _unique_groups(city_filtered)
+        match_rules, origin_preference_applied = _prefer_expected_origin_rules(city_filtered, expected_origin)
+        groups = _unique_groups(match_rules)
         if len(groups) == 1:
-            original = _choose_best_rule(city_filtered)
+            original = _choose_best_rule(match_rules)
             rule, risk_tags = _apply_origin_overrides(original)
             matched_by = "city_alias" if alias_used else "canonical_city"
+            result_risk_tags = list(risk_tags)
+            if origin_preference_applied:
+                result_risk_tags.append("expected_origin_preferred")
             trace.update(
                 {
                     "matched_by": matched_by,
                     "matched_rule_city": rule.canonical_city or rule.city,
-                    "candidate_count": len(city_filtered),
+                    "candidate_count": len(match_rules),
+                    "expected_origin": expected_origin,
+                    "origin_preference_applied": origin_preference_applied,
                 }
             )
             return ZoneLookupDecision(
@@ -243,9 +250,9 @@ def lookup_zone(
                 origin=rule.origin,
                 zone=rule.zone,
                 confidence=88 if alias_used else 86,
-                risk_tags=tuple(risk_tags),
+                risk_tags=tuple(result_risk_tags),
                 matched_by=matched_by,
-                candidate_count=len(city_filtered),
+                candidate_count=len(match_rules),
                 match_trace=trace,
             )
         return ZoneLookupDecision(
@@ -253,11 +260,13 @@ def lookup_zone(
             matched_rule=f"邮编前缀 {prefix} + {input_city or preferred_city or '未知城市'} 匹配到多个 Zone 规则，需要人工确认。",
             risk_tags=("split_record_conflict",),
             matched_by="split_record_conflict",
-            candidate_count=len(city_filtered),
+            candidate_count=len(match_rules),
             match_trace={
                 **trace,
                 "matched_by": "split_record_conflict",
                 "unique_group_count": len(groups),
+                "expected_origin": expected_origin,
+                "origin_preference_applied": origin_preference_applied,
             },
         )
 
@@ -378,7 +387,18 @@ def lookup_zone_by_city_province(
 
     original = _choose_best_rule(match_rules)
     is_trusted_city_anchor = (original.match_level or "").lower() == "trusted_city_anchor"
-    if prefix_family_label and len(match_rules) == 1 and len(filtered) > len(match_rules) and not is_trusted_city_anchor:
+    has_expected_origin_support = bool(
+        expected_origin
+        and match_rules
+        and all(normalize_origin(rule.origin) == expected_origin for rule in match_rules)
+    )
+    if (
+        prefix_family_label
+        and len(match_rules) == 1
+        and len(filtered) > len(match_rules)
+        and not is_trusted_city_anchor
+        and not has_expected_origin_support
+    ):
         return ZoneLookupDecision(
             manual_required=True,
             matched_rule=(
@@ -415,6 +435,8 @@ def lookup_zone_by_city_province(
     result_risk_tags = [*risk_tags, "city_zone_fallback"]
     if prefix_family_label:
         result_risk_tags.append("city_zone_prefix_family_fallback")
+    if origin_preference_applied:
+        result_risk_tags.append("expected_origin_preferred")
     return ZoneLookupDecision(
         manual_required=False,
         matched_rule=(

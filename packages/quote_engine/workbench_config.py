@@ -181,6 +181,7 @@ class QuoteWorkbenchConfig(BaseModel):
             "city_zone_prefix_family_low_support": "同邮编族锚点证据不足",
             "postal_family_fallback": "按同省邮编族模糊匹配 Zone",
             "nearest_postal_prefix_fallback": "采用最近邮编前缀锚点",
+            "expected_origin_preferred": "已按省份始发仓过滤旧记录",
             "learned_quote_reused": "复用人工确认学习记录",
             "learned_from_manual_task": "来源为已处理人工任务",
             "hermes_corrective_override": "历史学习规则覆盖",

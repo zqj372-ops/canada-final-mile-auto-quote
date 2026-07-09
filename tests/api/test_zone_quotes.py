@@ -137,6 +137,14 @@ def default_prices() -> list[dict[str, object]]:
         },
         {
             "origin": "calgary",
+            "zone": 1,
+            "billing_pallets": 3,
+            "base_price_usd": Decimal("95.00"),
+            "source": "test",
+            "last_updated": "2026-06-03",
+        },
+        {
+            "origin": "calgary",
             "zone": 5,
             "billing_pallets": 3,
             "base_price_usd": Decimal("180.00"),
@@ -231,7 +239,7 @@ def test_v6v_richmond_bc_origin_is_overridden_to_calgary() -> None:
     assert body["manual_review_required"] is False
 
 
-def test_split_record_without_unique_confirmation_returns_manual_required() -> None:
+def test_t1x_prefers_expected_calgary_origin_over_stale_toronto_record() -> None:
     client = build_client()
 
     response = client.post(
@@ -241,10 +249,14 @@ def test_split_record_without_unique_confirmation_returns_manual_required() -> N
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "manual_required"
-    assert body["manual_review_required"] is True
-    assert "split_record_conflict" in body["risk_tags"]
-    assert body["matched_by"] == "split_record_conflict"
+    assert body["source_type"] == "zone_matrix"
+    assert body["manual_review_required"] is False
+    assert body["matched_by"] == "canonical_city"
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 1
+    assert body["billing_pallets"] == 3
+    assert body["base_price_usd"] == "95.00"
+    assert "expected_origin_preferred" in body["risk_tags"]
 
 
 def test_residential_address_adds_50_usd() -> None:
@@ -644,21 +656,91 @@ def test_city_zone_fallback_prefers_requested_postal_prefix_family() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "manual_required"
+    assert body["source_type"] == "zone_matrix"
     assert body["preferred_city"] == "Richmond"
     assert body["city"] == "Richmond"
     assert body["province"] == "BC"
-    assert body["origin"] is None
-    assert body["zone"] is None
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 5
     assert body["billing_pallets"] == 2
-    assert body["base_price_usd"] is None
-    assert "city_zone_prefix_family_low_support" in body["risk_tags"]
-    assert body["match_trace"]["suggested_origin"] == "calgary"
-    assert body["match_trace"]["suggested_zone"] == 5
-    assert body["manual_review_required"] is True
+    assert body["base_price_usd"] == "365.00"
+    assert body["fuel_usd"] == "127.75"
+    assert body["total_price_usd"] == "492.75"
+    assert "city_zone_fallback" in body["risk_tags"]
+    assert "city_zone_prefix_family_fallback" in body["risk_tags"]
+    assert "expected_origin_preferred" in body["risk_tags"]
+    assert body["manual_review_required"] is False
 
 
-def test_city_zone_fallback_with_conflicting_single_anchor_requires_manual_review() -> None:
+def test_surrey_v3w_uses_expected_origin_adjacent_city_anchor() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "V3W 3A4", "preferred_city": "Surrey", "province": "BC"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "V3R",
+                "city": "SURREY",
+                "province": "BC",
+                "origin": "toronto",
+                "zone": 10,
+                "match_level": "legacy_anchor",
+                "note": "stale Surrey origin from legacy table",
+            },
+            {
+                "postal_prefix": "V4N",
+                "city": "SURREY",
+                "province": "BC",
+                "origin": "calgary",
+                "zone": 5,
+                "match_level": "reference",
+                "note": "Surrey BC Calgary anchor",
+            },
+        ],
+        prices=[
+            {
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("300.00"),
+                "source": "test",
+                "last_updated": "2026-06-03",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="12529 80 Avenue",
+            postal_code="V3W 3A4",
+            city="Surrey",
+            province="BC",
+            cbm=3.753486,
+            weight_kg=1063,
+            piece_count=71,
+            packaging_type="carton",
+            longest_side_cm=44.5,
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "zone_matrix"
+    assert body["matched_by"] == "city_zone_fallback"
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 5
+    assert body["billing_pallets"] == 3
+    assert body["base_price_usd"] == "300.00"
+    assert body["fuel_usd"] == "105.00"
+    assert body["total_price_usd"] == "405.00"
+    assert "city_zone_prefix_family_fallback" in body["risk_tags"]
+    assert "expected_origin_preferred" in body["risk_tags"]
+    assert body["manual_review_required"] is False
+
+
+def test_city_zone_fallback_allows_single_expected_origin_adjacent_anchor() -> None:
     client = build_client(
         postal_records=[
             {"postal_code": "V5J 5M8", "preferred_city": "Burnaby", "province": "BC"},
@@ -713,13 +795,16 @@ def test_city_zone_fallback_with_conflicting_single_anchor_requires_manual_revie
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "manual_required"
-    assert body["matched_by"] == "city_zone_prefix_family_low_support"
+    assert body["source_type"] == "zone_matrix"
+    assert body["matched_by"] == "city_zone_fallback"
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 5
     assert body["billing_pallets"] == 1
-    assert body["total_price_usd"] is None
-    assert "city_zone_prefix_family_low_support" in body["risk_tags"]
-    assert body["match_trace"]["suggested_origin"] == "calgary"
-    assert body["match_trace"]["suggested_zone"] == 5
+    assert body["base_price_usd"] == "240.00"
+    assert body["fuel_usd"] == "84.00"
+    assert body["total_price_usd"] == "324.00"
+    assert "city_zone_prefix_family_fallback" in body["risk_tags"]
+    assert "expected_origin_preferred" in body["risk_tags"]
 
 
 def test_ab_city_fallback_prefers_expected_origin_anchor_over_stale_toronto() -> None:
