@@ -1,7 +1,12 @@
 from decimal import Decimal
 
 from packages.ai_assistant.model_client import AIResponse
-from packages.ai_assistant.quote_extractor import AIExtractedQuoteDraft, apply_deterministic_extraction, extract_quote_draft
+from packages.ai_assistant.quote_extractor import (
+    AIExtractedQuoteDraft,
+    apply_deterministic_extraction,
+    extract_quote_draft,
+    extract_quote_draft_with_agents,
+)
 
 
 class FakeAIClient:
@@ -10,6 +15,16 @@ class FakeAIClient:
 
     def complete(self, _messages: object) -> AIResponse:
         return AIResponse(content=self.content)
+
+
+class FakeDualAIClient:
+    def __init__(self, *, cargo: str, address: str):
+        self.cargo = cargo
+        self.address = address
+
+    def complete(self, messages: object) -> AIResponse:
+        first = messages[0].content if isinstance(messages, list) and messages else ""
+        return AIResponse(content=self.cargo if "货物字段 Agent" in first else self.address)
 
 
 def test_deterministic_extraction_normalizes_mixed_units() -> None:
@@ -286,6 +301,30 @@ def test_deterministic_extraction_reads_dimension_weight_table_with_labeled_addr
     assert draft.longest_side_cm == Decimal("290.0")
 
 
+def test_deterministic_extraction_splits_total_weight_for_aggregate_carton_line() -> None:
+    raw = """
+    720072 Range Road 84 Wembley, Alberta
+    T0H3S0 Canada,
+    200箱, 2270kgs, 10.9cbm 50*50*21.8cm
+    """
+
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    assert draft.address_line == "720072 Range Road 84"
+    assert draft.city == "Wembley"
+    assert draft.province == "AB"
+    assert draft.postal_code == "T0H 3S0"
+    assert draft.piece_count == 200
+    assert draft.cbm == Decimal("10.900")
+    assert draft.weight_kg == Decimal("2270.0")
+    assert len(draft.cargo_items) == 1
+    assert draft.cargo_items[0].quantity == 200
+    assert draft.cargo_items[0].length_cm == Decimal("50.0")
+    assert draft.cargo_items[0].width_cm == Decimal("50.0")
+    assert draft.cargo_items[0].height_cm == Decimal("21.8")
+    assert draft.cargo_items[0].weight_kg == Decimal("11.35")
+
+
 def test_deterministic_extraction_clears_placeholder_city_from_model() -> None:
     raw = """
     厨房不锈钢水龙头
@@ -400,3 +439,68 @@ def test_extract_quote_draft_ignores_non_blocking_model_missing_fields() -> None
     draft = extract_quote_draft("ignored", FakeAIClient(content))
 
     assert draft.missing_fields == []
+
+
+def test_extract_quote_draft_with_agents_merges_cargo_and_address_outputs() -> None:
+    cargo = """
+    {
+      "cbm": 10.9,
+      "weight_kg": 2270,
+      "piece_count": 200,
+      "packaging_type": "carton",
+      "longest_side_cm": 50,
+      "explicit_pallet_count": null,
+      "is_stackable": null,
+      "cargo_items": [
+        {
+          "quantity": 200,
+          "length_cm": 50,
+          "width_cm": 50,
+          "height_cm": 21.8,
+          "weight_kg": 2270,
+          "cbm": 0.054,
+          "total_weight_kg": 2270,
+          "total_cbm": 10.9,
+          "source_span": "200箱, 2270kgs, 10.9cbm 50*50*21.8cm"
+        }
+      ],
+      "missing_fields": [],
+      "confidence": 86,
+      "extraction_notes": "cargo parsed"
+    }
+    """
+    address = """
+    {
+      "address_line": "720072 Range Road 84",
+      "postal_code": "T0H3S0",
+      "city": "Wembley",
+      "province": "Alberta",
+      "country": "Canada",
+      "address_type": "commercial",
+      "requires_liftgate": false,
+      "requires_pallet_jack": false,
+      "requires_appointment": false,
+      "detention_minutes": 0,
+      "missing_fields": [],
+      "confidence": 88,
+      "extraction_notes": "address parsed"
+    }
+    """
+    raw = """
+    720072 Range Road 84 Wembley, Alberta
+    T0H3S0 Canada,
+    200箱, 2270kgs, 10.9cbm 50*50*21.8cm
+    """
+
+    draft = extract_quote_draft_with_agents(raw, FakeDualAIClient(cargo=cargo, address=address))
+
+    assert draft.address_line == "720072 Range Road 84"
+    assert draft.city == "Wembley"
+    assert draft.province == "AB"
+    assert draft.postal_code == "T0H 3S0"
+    assert draft.piece_count == 200
+    assert draft.cbm == Decimal("10.9")
+    assert draft.weight_kg == Decimal("2270")
+    assert draft.cargo_items[0].quantity == 200
+    assert draft.cargo_items[0].weight_kg == Decimal("11.35")
+    assert "split_total_weight_across_single_cargo_line" in draft.validation_notes

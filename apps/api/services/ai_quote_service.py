@@ -30,7 +30,7 @@ from packages.ai_assistant.quote_extractor import (
     QuoteExtractionError,
     apply_deterministic_extraction,
     build_follow_up_question,
-    extract_quote_draft,
+    extract_quote_draft_with_agents as extract_quote_draft,
     missing_required_fields,
 )
 from packages.quote_engine.zone_engine import ZoneQuoteEngine

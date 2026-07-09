@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 import json
 import re
@@ -8,7 +9,25 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from packages.ai_assistant.model_client import AIMessage, BaseAIClient
-from packages.ai_assistant.prompts import FIELD_EXTRACTION_SYSTEM_PROMPT
+from packages.ai_assistant.prompts import (
+    ADDRESS_EXTRACTION_SYSTEM_PROMPT,
+    CARGO_EXTRACTION_SYSTEM_PROMPT,
+    FIELD_EXTRACTION_SYSTEM_PROMPT,
+)
+
+
+class ExtractedCargoItem(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    quantity: int = Field(default=1, ge=1)
+    length_cm: Decimal | None = Field(default=None, ge=0)
+    width_cm: Decimal | None = Field(default=None, ge=0)
+    height_cm: Decimal | None = Field(default=None, ge=0)
+    weight_kg: Decimal | None = Field(default=None, ge=0)
+    cbm: Decimal | None = Field(default=None, ge=0)
+    total_weight_kg: Decimal | None = Field(default=None, ge=0)
+    total_cbm: Decimal | None = Field(default=None, ge=0)
+    source_span: str | None = None
 
 
 class AIExtractedQuoteDraft(BaseModel):
@@ -33,6 +52,10 @@ class AIExtractedQuoteDraft(BaseModel):
     missing_fields: list[str] = Field(default_factory=list)
     confidence: int = Field(default=0, ge=0, le=100)
     extraction_notes: str | None = None
+    cargo_items: list[ExtractedCargoItem] = Field(default_factory=list)
+    cargo_agent: dict[str, Any] | None = None
+    address_agent: dict[str, Any] | None = None
+    validation_notes: list[str] = Field(default_factory=list)
 
     @field_validator("packaging_type")
     @classmethod
@@ -43,6 +66,40 @@ class AIExtractedQuoteDraft(BaseModel):
     @classmethod
     def normalize_address_type(cls, value: str | None) -> str | None:
         return value.strip().lower() if value else value
+
+
+class CargoAgentExtraction(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    cbm: Decimal | None = Field(default=None, ge=0)
+    weight_kg: Decimal | None = Field(default=None, ge=0)
+    piece_count: int | None = Field(default=None, ge=1)
+    packaging_type: str | None = None
+    longest_side_cm: Decimal | None = Field(default=None, ge=0)
+    explicit_pallet_count: int | None = Field(default=None, ge=1)
+    is_stackable: bool | None = None
+    cargo_items: list[ExtractedCargoItem] = Field(default_factory=list)
+    missing_fields: list[str] = Field(default_factory=list)
+    confidence: int = Field(default=0, ge=0, le=100)
+    extraction_notes: str | None = None
+
+
+class AddressAgentExtraction(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+
+    address_line: str | None = None
+    postal_code: str | None = None
+    city: str | None = None
+    province: str | None = None
+    country: str | None = None
+    address_type: str | None = None
+    requires_liftgate: bool = False
+    requires_pallet_jack: bool = False
+    requires_appointment: bool = False
+    detention_minutes: int = Field(default=0, ge=0)
+    missing_fields: list[str] = Field(default_factory=list)
+    confidence: int = Field(default=0, ge=0, le=100)
+    extraction_notes: str | None = None
 
 
 class QuoteExtractionError(Exception):
@@ -113,6 +170,225 @@ def extract_quote_draft(customer_message: str, client: BaseAIClient) -> AIExtrac
     return draft
 
 
+def extract_quote_draft_with_agents(customer_message: str, client: BaseAIClient) -> AIExtractedQuoteDraft:
+    """Extract quote fields with separate cargo and address agents, then validate deterministically."""
+
+    errors: list[str] = []
+    cargo: CargoAgentExtraction | None = None
+    address: AddressAgentExtraction | None = None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        cargo_future = executor.submit(_extract_cargo_with_agent, customer_message, client)
+        address_future = executor.submit(_extract_address_with_agent, customer_message, client)
+        for label, future in (("cargo", cargo_future), ("address", address_future)):
+            try:
+                if label == "cargo":
+                    cargo = future.result()
+                else:
+                    address = future.result()
+            except QuoteExtractionError as exc:
+                errors.append(f"{label}_agent_failed:{exc}")
+
+    if cargo is None and address is None:
+        raise QuoteExtractionError("; ".join(errors) or "Both extraction agents failed.")
+
+    draft = _draft_from_agent_outputs(cargo, address)
+    fallback = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), customer_message)
+    draft = _merge_agent_draft_with_fallback(draft, fallback)
+    draft = _validate_cargo_items_and_totals(draft)
+    if errors:
+        draft.validation_notes.extend(errors)
+    draft.missing_fields = sorted(missing_required_fields(draft))
+    return draft
+
+
+def _extract_cargo_with_agent(customer_message: str, client: BaseAIClient) -> CargoAgentExtraction:
+    response = client.complete(
+        [
+            AIMessage(role="system", content=CARGO_EXTRACTION_SYSTEM_PROMPT),
+            AIMessage(role="user", content=customer_message),
+        ]
+    )
+    if response.error:
+        raise QuoteExtractionError(response.error)
+    data = _sanitize_cargo_agent_data(_parse_json_object(response.content))
+    return CargoAgentExtraction.model_validate(data)
+
+
+def _extract_address_with_agent(customer_message: str, client: BaseAIClient) -> AddressAgentExtraction:
+    response = client.complete(
+        [
+            AIMessage(role="system", content=ADDRESS_EXTRACTION_SYSTEM_PROMPT),
+            AIMessage(role="user", content=customer_message),
+        ]
+    )
+    if response.error:
+        raise QuoteExtractionError(response.error)
+    data = _sanitize_address_agent_data(_parse_json_object(response.content))
+    return AddressAgentExtraction.model_validate(data)
+
+
+def _draft_from_agent_outputs(
+    cargo: CargoAgentExtraction | None,
+    address: AddressAgentExtraction | None,
+) -> AIExtractedQuoteDraft:
+    confidences = [item.confidence for item in (cargo, address) if item and item.confidence]
+    notes = [
+        item.extraction_notes
+        for item in (cargo, address)
+        if item and item.extraction_notes
+    ]
+    return AIExtractedQuoteDraft(
+        address_line=address.address_line if address else None,
+        postal_code=address.postal_code if address else None,
+        city=address.city if address else None,
+        province=address.province if address else None,
+        cbm=cargo.cbm if cargo else None,
+        weight_kg=cargo.weight_kg if cargo else None,
+        piece_count=cargo.piece_count if cargo else None,
+        packaging_type=cargo.packaging_type if cargo else None,
+        longest_side_cm=cargo.longest_side_cm if cargo else None,
+        explicit_pallet_count=cargo.explicit_pallet_count if cargo else None,
+        is_stackable=cargo.is_stackable if cargo else None,
+        address_type=address.address_type if address else None,
+        requires_liftgate=address.requires_liftgate if address else False,
+        requires_pallet_jack=address.requires_pallet_jack if address else False,
+        requires_appointment=address.requires_appointment if address else False,
+        detention_minutes=address.detention_minutes if address else 0,
+        missing_fields=sorted({*(cargo.missing_fields if cargo else []), *(address.missing_fields if address else [])}),
+        confidence=int(sum(confidences) / len(confidences)) if confidences else 0,
+        extraction_notes=" | ".join(notes) if notes else None,
+        cargo_items=cargo.cargo_items if cargo else [],
+        cargo_agent=cargo.model_dump(mode="json") if cargo else None,
+        address_agent=address.model_dump(mode="json") if address else None,
+        validation_notes=["dual_agent_extraction"],
+    )
+
+
+def _merge_agent_draft_with_fallback(
+    draft: AIExtractedQuoteDraft,
+    fallback: AIExtractedQuoteDraft,
+) -> AIExtractedQuoteDraft:
+    for field in (
+        "address_line",
+        "postal_code",
+        "city",
+        "province",
+        "cbm",
+        "weight_kg",
+        "piece_count",
+        "packaging_type",
+        "longest_side_cm",
+        "explicit_pallet_count",
+        "is_stackable",
+        "address_type",
+    ):
+        if getattr(draft, field) in (None, ""):
+            setattr(draft, field, getattr(fallback, field))
+
+    draft.requires_liftgate = draft.requires_liftgate or fallback.requires_liftgate
+    draft.requires_pallet_jack = draft.requires_pallet_jack or fallback.requires_pallet_jack
+    draft.requires_appointment = draft.requires_appointment or fallback.requires_appointment
+    draft.detention_minutes = draft.detention_minutes or fallback.detention_minutes
+
+    if not draft.cargo_items and fallback.cargo_items:
+        draft.cargo_items = fallback.cargo_items
+
+    if fallback.confidence and draft.confidence < 75:
+        draft.confidence = max(draft.confidence, min(85, fallback.confidence))
+
+    notes = [note for note in (draft.extraction_notes, fallback.extraction_notes) if note]
+    if notes:
+        draft.extraction_notes = " | ".join(dict.fromkeys(notes))
+    for note in fallback.validation_notes:
+        if note not in draft.validation_notes:
+            draft.validation_notes.append(note)
+    return draft
+
+
+def _validate_cargo_items_and_totals(draft: AIExtractedQuoteDraft) -> AIExtractedQuoteDraft:
+    if not draft.cargo_items:
+        return draft
+
+    normalized_items: list[ExtractedCargoItem] = []
+    total_quantity = 0
+    computed_cbm = Decimal("0")
+    computed_weight = Decimal("0")
+    longest_side_cm: Decimal | None = None
+    for item in draft.cargo_items:
+        normalized = _normalize_cargo_item(item)
+        normalized_items.append(normalized)
+        total_quantity += normalized.quantity
+        if normalized.cbm is not None:
+            computed_cbm += normalized.cbm * Decimal(normalized.quantity)
+        if normalized.weight_kg is not None:
+            computed_weight += normalized.weight_kg * Decimal(normalized.quantity)
+        dimensions = [normalized.length_cm, normalized.width_cm, normalized.height_cm]
+        known_dimensions = [value for value in dimensions if value is not None]
+        if known_dimensions:
+            item_longest = max(known_dimensions)
+            longest_side_cm = item_longest if longest_side_cm is None else max(longest_side_cm, item_longest)
+
+    draft.cargo_items = normalized_items
+    if draft.piece_count is None or total_quantity > draft.piece_count:
+        draft.piece_count = total_quantity
+    if draft.cbm is None and computed_cbm > 0:
+        draft.cbm = _quantize(computed_cbm, "0.001")
+    if draft.weight_kg is None and computed_weight > 0:
+        draft.weight_kg = _quantize(computed_weight, "0.1")
+    if draft.longest_side_cm is None and longest_side_cm is not None:
+        draft.longest_side_cm = _quantize(longest_side_cm, "0.1")
+
+    _split_aggregate_weight_for_single_cargo_item(draft)
+    return draft
+
+
+def _normalize_cargo_item(item: ExtractedCargoItem) -> ExtractedCargoItem:
+    cbm = item.cbm
+    if cbm is None and item.length_cm is not None and item.width_cm is not None and item.height_cm is not None:
+        cbm = _quantize(item.length_cm * item.width_cm * item.height_cm / Decimal("1000000"), "0.001")
+
+    weight_kg = item.weight_kg
+    if weight_kg is None and item.total_weight_kg is not None and item.quantity:
+        weight_kg = item.total_weight_kg / Decimal(item.quantity)
+
+    return item.model_copy(
+        update={
+            "length_cm": _quantize(item.length_cm, "0.1") if item.length_cm is not None else None,
+            "width_cm": _quantize(item.width_cm, "0.1") if item.width_cm is not None else None,
+            "height_cm": _quantize(item.height_cm, "0.1") if item.height_cm is not None else None,
+            "weight_kg": _quantize(weight_kg, "0.01") if weight_kg is not None else None,
+            "cbm": cbm,
+        }
+    )
+
+
+def _split_aggregate_weight_for_single_cargo_item(draft: AIExtractedQuoteDraft) -> None:
+    if len(draft.cargo_items) != 1 or draft.weight_kg is None:
+        return
+    item = draft.cargo_items[0]
+    quantity = draft.piece_count or item.quantity
+    if quantity <= 1:
+        return
+
+    expected_total = item.weight_kg * Decimal(quantity) if item.weight_kg is not None else None
+    tolerance = max(Decimal("1"), draft.weight_kg * Decimal("0.05"))
+    should_split = expected_total is None or abs(expected_total - draft.weight_kg) > tolerance
+    if not should_split:
+        return
+
+    per_piece_weight = draft.weight_kg / Decimal(quantity)
+    draft.cargo_items[0] = item.model_copy(
+        update={
+            "quantity": quantity,
+            "weight_kg": _quantize(per_piece_weight, "0.01"),
+            "total_weight_kg": draft.weight_kg,
+            "total_cbm": draft.cbm,
+        }
+    )
+    draft.validation_notes.append("split_total_weight_across_single_cargo_line")
+
+
 def apply_deterministic_extraction(draft: AIExtractedQuoteDraft, customer_message: str) -> AIExtractedQuoteDraft:
     confirmed = _parse_confirmed_fields(customer_message)
     _clear_placeholder_fields(draft)
@@ -125,6 +401,8 @@ def apply_deterministic_extraction(draft: AIExtractedQuoteDraft, customer_messag
         draft.weight_kg = parsed["weight_kg"]
     if parsed["longest_side_cm"] is not None:
         draft.longest_side_cm = parsed["longest_side_cm"]
+    if parsed["cargo_items"]:
+        draft.cargo_items = parsed["cargo_items"]
 
     postal_code = _find_postal_code(customer_message)
     if postal_code and not draft.postal_code:
@@ -259,7 +537,95 @@ def _sanitize_extraction_data(data: dict[str, Any]) -> dict[str, Any]:
         normalized["missing_fields"] = [missing_fields]
     elif not isinstance(missing_fields, list):
         normalized["missing_fields"] = []
+    normalized["cargo_items"] = _sanitize_cargo_items(normalized.get("cargo_items"))
+    validation_notes = normalized.get("validation_notes")
+    if validation_notes is None:
+        normalized["validation_notes"] = []
+    elif isinstance(validation_notes, str):
+        normalized["validation_notes"] = [validation_notes]
+    elif not isinstance(validation_notes, list):
+        normalized["validation_notes"] = []
     return normalized
+
+
+def _sanitize_cargo_agent_data(data: dict[str, Any]) -> dict[str, Any]:
+    normalized = {
+        "cbm": _coerce_optional_decimal(data.get("cbm")),
+        "weight_kg": _coerce_optional_decimal(data.get("weight_kg")),
+        "piece_count": _coerce_optional_int(data.get("piece_count")),
+        "packaging_type": _none_if_placeholder(data.get("packaging_type")),
+        "longest_side_cm": _coerce_optional_decimal(data.get("longest_side_cm")),
+        "explicit_pallet_count": _coerce_optional_int(data.get("explicit_pallet_count")),
+        "is_stackable": _coerce_optional_bool(data.get("is_stackable")),
+        "cargo_items": _sanitize_cargo_items(data.get("cargo_items")),
+        "missing_fields": _coerce_string_list(data.get("missing_fields")),
+        "confidence": _coerce_confidence(data.get("confidence")),
+        "extraction_notes": _none_if_placeholder(data.get("extraction_notes")),
+    }
+    return normalized
+
+
+def _sanitize_address_agent_data(data: dict[str, Any]) -> dict[str, Any]:
+    postal_code = data.get("postal_code")
+    province = data.get("province")
+    normalized = {
+        "address_line": _none_if_placeholder(data.get("address_line")),
+        "postal_code": _find_postal_code(str(postal_code)) if postal_code else None,
+        "city": _none_if_placeholder(data.get("city")),
+        "province": _find_province(str(province)) or (str(province).upper() if province and not _is_placeholder_value(str(province)) else None),
+        "country": _none_if_placeholder(data.get("country")),
+        "address_type": _none_if_placeholder(data.get("address_type")),
+        "requires_liftgate": _coerce_bool(data.get("requires_liftgate"), default=False),
+        "requires_pallet_jack": _coerce_bool(data.get("requires_pallet_jack"), default=False),
+        "requires_appointment": _coerce_bool(data.get("requires_appointment"), default=False),
+        "detention_minutes": _coerce_int(data.get("detention_minutes"), default=0),
+        "missing_fields": _coerce_string_list(data.get("missing_fields")),
+        "confidence": _coerce_confidence(data.get("confidence")),
+        "extraction_notes": _none_if_placeholder(data.get("extraction_notes")),
+    }
+    return normalized
+
+
+def _sanitize_cargo_items(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        quantity = _coerce_optional_int(item.get("quantity")) or 1
+        items.append(
+            {
+                "quantity": quantity,
+                "length_cm": _coerce_optional_decimal(item.get("length_cm")),
+                "width_cm": _coerce_optional_decimal(item.get("width_cm")),
+                "height_cm": _coerce_optional_decimal(item.get("height_cm")),
+                "weight_kg": _coerce_optional_decimal(item.get("weight_kg")),
+                "cbm": _coerce_optional_decimal(item.get("cbm")),
+                "total_weight_kg": _coerce_optional_decimal(item.get("total_weight_kg")),
+                "total_cbm": _coerce_optional_decimal(item.get("total_cbm")),
+                "source_span": _none_if_placeholder(item.get("source_span")),
+            }
+        )
+    return items
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item is not None and str(item).strip()]
+
+
+def _none_if_placeholder(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str) and _is_placeholder_value(value):
+        return None
+    return value
 
 
 def _coerce_bool(value: Any, *, default: bool) -> bool:
@@ -276,6 +642,14 @@ def _coerce_bool(value: Any, *, default: bool) -> bool:
         if lowered in {"false", "no", "n", "0", "不需要", "否", "none", "null", ""}:
             return False
     return default
+
+
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str) and _is_placeholder_value(value):
+        return None
+    return _coerce_bool(value, default=False)
 
 
 def _coerce_int(value: Any, *, default: int) -> int:
@@ -295,6 +669,18 @@ def _coerce_optional_int(value: Any) -> int | None:
     except Exception:
         return None
     return number if number >= 1 else None
+
+
+def _coerce_optional_decimal(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, str) and _is_placeholder_value(value):
+        return None
+    try:
+        number = Decimal(str(value))
+    except Exception:
+        return None
+    return number if number >= 0 else None
 
 
 def _coerce_confidence(value: Any) -> int:
@@ -348,6 +734,7 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
     total_weight_kg = Decimal("0")
     piece_count = 0
     longest_side_cm: Decimal | None = None
+    cargo_items: list[ExtractedCargoItem] = []
     parsed_lines = 0
     allow_numeric_table = _has_dimension_weight_table(customer_message)
 
@@ -362,11 +749,23 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
             width_cm = item["width_cm"]
             height_cm = item["height_cm"]
             weight_kg = item["weight_kg"]
-            total_cbm += (length_cm * width_cm * height_cm / Decimal("1000000")) * quantity
+            item_cbm = length_cm * width_cm * height_cm / Decimal("1000000")
+            total_cbm += item_cbm * quantity
             total_weight_kg += weight_kg * quantity
             piece_count += int(quantity)
             line_longest = max(length_cm, width_cm, height_cm)
             longest_side_cm = line_longest if longest_side_cm is None else max(longest_side_cm, line_longest)
+            cargo_items.append(
+                ExtractedCargoItem(
+                    quantity=int(quantity),
+                    length_cm=_quantize(length_cm, "0.1"),
+                    width_cm=_quantize(width_cm, "0.1"),
+                    height_cm=_quantize(height_cm, "0.1"),
+                    weight_kg=_quantize(weight_kg, "0.01") if weight_kg > 0 else None,
+                    cbm=_quantize(item_cbm, "0.001"),
+                    source_span=line.strip()[:240] or None,
+                )
+            )
 
     explicit_cbm = _find_explicit_decimal(customer_message, r"(?:cbm|m3|m³|方|立方)")
     explicit_piece_count = _find_explicit_piece_count(customer_message)
@@ -379,6 +778,12 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
     if explicit_weight is not None:
         total_weight_kg = explicit_weight
     if explicit_piece_count is not None and explicit_piece_count >= piece_count:
+        cargo_items = _align_single_parsed_cargo_item_with_explicit_totals(
+            cargo_items,
+            explicit_piece_count=explicit_piece_count,
+            explicit_weight=explicit_weight,
+            explicit_cbm=explicit_cbm,
+        )
         piece_count = explicit_piece_count
 
     return {
@@ -386,12 +791,38 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
         "cbm": _quantize(total_cbm, "0.001") if total_cbm > 0 else None,
         "weight_kg": _quantize(total_weight_kg, "0.1") if total_weight_kg > 0 else None,
         "longest_side_cm": _quantize(longest_side_cm, "0.1") if longest_side_cm is not None else None,
+        "cargo_items": cargo_items,
         "notes": (
             f"Deterministic parser normalized {piece_count} piece(s) from {parsed_lines} cargo line(s)."
             if piece_count
             else None
         ),
     }
+
+
+def _align_single_parsed_cargo_item_with_explicit_totals(
+    cargo_items: list[ExtractedCargoItem],
+    *,
+    explicit_piece_count: int,
+    explicit_weight: Decimal | None,
+    explicit_cbm: Decimal | None,
+) -> list[ExtractedCargoItem]:
+    if len(cargo_items) != 1 or explicit_piece_count <= 1:
+        return cargo_items
+
+    item = cargo_items[0]
+    updates: dict[str, Any] = {
+        "quantity": explicit_piece_count,
+        "total_weight_kg": explicit_weight,
+        "total_cbm": explicit_cbm,
+    }
+    if explicit_weight is not None:
+        expected_total = item.weight_kg * Decimal(explicit_piece_count) if item.weight_kg is not None else None
+        tolerance = max(Decimal("1"), explicit_weight * Decimal("0.05"))
+        if expected_total is None or abs(expected_total - explicit_weight) > tolerance:
+            updates["weight_kg"] = _quantize(explicit_weight / Decimal(explicit_piece_count), "0.01")
+
+    return [item.model_copy(update=updates)]
 
 
 def _parse_measurement_line(line: str, *, allow_numeric_table: bool = False) -> list[dict[str, Any]]:
@@ -826,9 +1257,27 @@ def _parse_city_from_address_line(line: str) -> dict[str, str | None]:
         if not province_match and _looks_like_street_address(parts[-1]):
             return {"address_line": _join_unique_parts(parts), "city": None}
         return {"address_line": ", ".join(parts[:-1]), "city": parts[-1]}
+    if province_match and _looks_like_street_address(before_province):
+        split = _split_trailing_city_from_street(before_province)
+        if split["city"]:
+            return split
     if not _looks_like_street_address(before_province):
         return {"address_line": None, "city": before_province}
     return {"address_line": before_province, "city": None}
+
+
+def _split_trailing_city_from_street(value: str) -> dict[str, str | None]:
+    street_pattern = re.compile(
+        r"^(?P<address>.+?\b(?:range\s+road|road|rd|street|st|avenue|ave|boulevard|blvd|drive|dr|way|parkway|pkwy|lane|ln|route|hwy|highway)\b(?:\s+\d+[A-Za-z]?)?(?:\s*(?:#|unit|suite|ste)\s*[\w-]+)?)\s+(?P<city>[A-Za-z][A-Za-z .'-]{2,})$",
+        re.IGNORECASE,
+    )
+    match = street_pattern.match(value.strip())
+    if not match:
+        return {"address_line": value, "city": None}
+    city = match.group("city").strip(" ,，")
+    if _looks_like_street_address(city):
+        return {"address_line": value, "city": None}
+    return {"address_line": match.group("address").strip(" ,，"), "city": city}
 
 
 def _join_unique_parts(parts: list[str]) -> str:

@@ -26,7 +26,7 @@ import ParsedCargoTable from "../components/ParsedCargoTable";
 import QuoteCopyButton from "../components/QuoteCopyButton";
 import QuoteCalculationPanel from "../components/QuoteCalculationPanel";
 import QuoteRiskPanel from "../components/QuoteRiskPanel";
-import { parseQuoteInput, type ParsedQuoteInput } from "../utils/quoteParser";
+import { parseQuoteInput, type ParsedCargoItem, type ParsedQuoteInput } from "../utils/quoteParser";
 
 type WorkbenchStatus =
   | "idle"
@@ -1234,6 +1234,15 @@ function mergeParsedWithAIExtraction(
   const density = totalCbm > 0 && totalWeight > 0 ? round1(totalWeight / totalCbm) : parsed.density_kg_per_cbm;
   const provinceCode = extraction.province || parsed.address.province_code;
   const province = config.provinces.find((item) => item.code.toLowerCase() === String(provinceCode ?? "").toLowerCase());
+  const aiCargoItems = normalizeAICargoItems(extraction);
+  const cargoItems = aiCargoItems.length ? aiCargoItems : parsed.cargo_items;
+  const maxItem = cargoItems.reduce<ParsedCargoItem | null>(
+    (current, item) => (!current || item.cbm > current.cbm ? item : current),
+    null,
+  );
+  const longestSide = cargoItems.length
+    ? Math.max(...cargoItems.flatMap((item) => [item.length_cm, item.width_cm, item.height_cm]))
+    : toNumber(extraction.longest_side_cm) ?? parsed.longest_side_cm;
 
   return {
     ...parsed,
@@ -1241,8 +1250,11 @@ function mergeParsedWithAIExtraction(
     total_cbm: totalCbm,
     total_weight_kg: totalWeight,
     density_kg_per_cbm: density,
-    longest_side_cm: toNumber(extraction.longest_side_cm) ?? parsed.longest_side_cm,
-    max_dimensions_cm: parsed.max_dimensions_cm,
+    cargo_items: cargoItems,
+    longest_side_cm: longestSide,
+    max_dimensions_cm: maxItem
+      ? [maxItem.length_cm, maxItem.width_cm, maxItem.height_cm]
+      : parsed.max_dimensions_cm,
     address: {
       address_line: extraction.address_line || parsed.address.address_line,
       city: extraction.city || parsed.address.city,
@@ -1256,6 +1268,33 @@ function mergeParsedWithAIExtraction(
       : parsed.missing_fields,
     confidence: extraction.confidence || parsed.confidence,
   };
+}
+
+function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoItem[] {
+  if (!Array.isArray(extraction.cargo_items)) {
+    return [];
+  }
+  return extraction.cargo_items
+    .map((item, index) => {
+      const length = toNumber(item.length_cm);
+      const width = toNumber(item.width_cm);
+      const height = toNumber(item.height_cm);
+      if (!length || !width || !height) {
+        return null;
+      }
+      const quantity = Math.max(1, Number(item.quantity) || 1);
+      const cbm = toNumber(item.cbm) ?? (length * width * height) / 1_000_000;
+      return {
+        id: index + 1,
+        quantity,
+        length_cm: length,
+        width_cm: width,
+        height_cm: height,
+        weight_kg: toNumber(item.weight_kg),
+        cbm,
+      };
+    })
+    .filter((item): item is ParsedCargoItem => item !== null);
 }
 
 function applyAIExtractionToControls(

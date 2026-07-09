@@ -136,6 +136,22 @@ export interface AIExtractedQuoteDraft {
   missing_fields: string[];
   confidence: number;
   extraction_notes: string | null;
+  cargo_items: AIExtractedCargoItem[];
+  cargo_agent: Record<string, JsonValue> | null;
+  address_agent: Record<string, JsonValue> | null;
+  validation_notes: string[];
+}
+
+export interface AIExtractedCargoItem {
+  quantity: number;
+  length_cm: MoneyValue;
+  width_cm: MoneyValue;
+  height_cm: MoneyValue;
+  weight_kg: MoneyValue;
+  cbm: MoneyValue;
+  total_weight_kg: MoneyValue;
+  total_cbm: MoneyValue;
+  source_span: string | null;
 }
 
 export interface AIAutoQuoteRequest {
