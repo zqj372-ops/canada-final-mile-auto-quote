@@ -9,7 +9,6 @@ import {
   listSalesQuoteRecords,
   login,
   setStoredAuthToken,
-  updateSalesQuoteManualPrice,
   type AIExtractedQuoteDraft,
   type AIAutoQuoteResponse,
   type AddressType,
@@ -172,13 +171,6 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     } finally {
       setIsLoadingRecords(false);
     }
-  }
-
-  function updateSalesRecord(record: SalesQuoteRecord) {
-    setQuoteRecords((current) =>
-      current.map((item) => (item.id === record.id ? record : item)),
-    );
-    setSelectedRecordId(record.id);
   }
 
   const parsed = useMemo(
@@ -540,7 +532,6 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
             </div>
           ) : (
             <SalesQuoteRecordsPanel
-              canOverridePrice={["admin", "operator"].includes(currentActor.role)}
               filter={recordFilter}
               isLoading={isLoadingRecords}
               query={recordQuery}
@@ -552,7 +543,6 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
               onRefresh={() => {
                 void refreshSalesRecords();
               }}
-              onRecordUpdated={updateSalesRecord}
               onSelectRecord={setSelectedRecordId}
             />
           )}
@@ -872,7 +862,6 @@ function SalesQuoteRecordsPreview({
 }
 
 function SalesQuoteRecordsPanel({
-  canOverridePrice,
   filter,
   isLoading,
   query,
@@ -882,10 +871,8 @@ function SalesQuoteRecordsPanel({
   onNewQuote,
   onQueryChange,
   onRefresh,
-  onRecordUpdated,
   onSelectRecord,
 }: {
-  canOverridePrice: boolean;
   filter: SalesQuoteRecordFilter;
   isLoading: boolean;
   query: string;
@@ -895,7 +882,6 @@ function SalesQuoteRecordsPanel({
   onNewQuote: () => void;
   onQueryChange: (value: string) => void;
   onRefresh: () => void;
-  onRecordUpdated: (record: SalesQuoteRecord) => void;
   onSelectRecord: (id: number) => void;
 }) {
   const visibleRecords = useMemo(
@@ -999,41 +985,13 @@ function SalesQuoteRecordsPanel({
           </div>
         </div>
 
-        <SalesQuoteRecordDetail
-          canOverridePrice={canOverridePrice}
-          record={selectedRecord}
-          onRecordUpdated={onRecordUpdated}
-        />
+        <SalesQuoteRecordDetail record={selectedRecord} />
       </div>
     </section>
   );
 }
 
-function SalesQuoteRecordDetail({
-  canOverridePrice,
-  record,
-  onRecordUpdated,
-}: {
-  canOverridePrice: boolean;
-  record: SalesQuoteRecord | null;
-  onRecordUpdated: (record: SalesQuoteRecord) => void;
-}) {
-  const [manualPrice, setManualPrice] = useState("");
-  const [manualNote, setManualNote] = useState("");
-  const [manualReply, setManualReply] = useState("");
-  const [isSavingManualPrice, setIsSavingManualPrice] = useState(false);
-  const [manualPriceError, setManualPriceError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!record) {
-      return;
-    }
-    setManualPrice(record.total_price_usd ? String(record.total_price_usd) : "");
-    setManualNote("");
-    setManualReply(record.customer_reply ?? "");
-    setManualPriceError(null);
-  }, [record?.id]);
-
+function SalesQuoteRecordDetail({ record }: { record: SalesQuoteRecord | null }) {
   if (!record) {
     return (
       <div className="rounded-md border border-slate-200 bg-white p-5 text-sm text-slate-500">
@@ -1044,43 +1002,6 @@ function SalesQuoteRecordDetail({
 
   const canCopyReply = record.status === "quoted" && Boolean(record.customer_reply?.trim());
   const manualOverride = getManualOverride(record);
-
-  async function saveManualPrice() {
-    if (!record) {
-      return;
-    }
-    const currentRecord = record;
-    const price = Number(manualPrice);
-    if (!Number.isFinite(price) || price < 0) {
-      setManualPriceError("请输入大于等于 0 的 USD 金额。");
-      return;
-    }
-    if (!manualNote.trim()) {
-      setManualPriceError("请填写改价原因，方便后续复盘。");
-      return;
-    }
-    const confirmed = window.confirm(
-      "请二次确认：这会覆盖本条报价记录的客户可见金额，但不会修改 Zone 价格矩阵，也不会自动发布 Hermes 学习规则。确认保存？",
-    );
-    if (!confirmed) {
-      return;
-    }
-    setIsSavingManualPrice(true);
-    setManualPriceError(null);
-    try {
-      const updated = await updateSalesQuoteManualPrice(currentRecord.id, {
-        total_price_usd: price,
-        override_note: manualNote.trim(),
-        customer_reply: manualReply.trim() || null,
-        confirmed: true,
-      });
-      onRecordUpdated(updated);
-    } catch (caught) {
-      setManualPriceError(caught instanceof Error ? caught.message : "人工改价保存失败");
-    } finally {
-      setIsSavingManualPrice(false);
-    }
-  }
 
   return (
     <article className="rounded-md border border-slate-200 bg-white p-4">
@@ -1150,73 +1071,6 @@ function SalesQuoteRecordDetail({
           </div>
         </div>
       </div>
-
-      {canOverridePrice && (
-        <section className="mt-4 rounded-md border border-teal-200 bg-teal-50/70 p-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h4 className="text-sm font-semibold text-teal-900">后台人工确认金额</h4>
-              <p className="mt-1 text-xs leading-5 text-teal-700">
-                只修改这条报价记录和客户回复；不会修改 Zone 价格表，也不会自动写入 Hermes 学习规则。
-              </p>
-            </div>
-            <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
-              保存前会二次确认
-            </span>
-          </div>
-
-          <div className="mt-3 grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)]">
-            <label>
-              <span className="text-xs font-semibold text-slate-700">确认金额 USD</span>
-              <input
-                className="field-input mt-2"
-                type="number"
-                min="0"
-                step="0.01"
-                value={manualPrice}
-                onChange={(event) => setManualPrice(event.target.value)}
-                placeholder="例如 365.00"
-              />
-            </label>
-            <label>
-              <span className="text-xs font-semibold text-slate-700">改价/确认原因</span>
-              <input
-                className="field-input mt-2"
-                value={manualNote}
-                onChange={(event) => setManualNote(event.target.value)}
-                placeholder="例如：已与供应商确认，按 Calgary Zone 5 / 3 托处理"
-              />
-            </label>
-          </div>
-
-          <label className="mt-3 block">
-            <span className="text-xs font-semibold text-slate-700">客户回复文案</span>
-            <textarea
-              className="field-input mt-2 min-h-32"
-              value={manualReply}
-              onChange={(event) => setManualReply(event.target.value)}
-              placeholder="留空则由系统按确认金额生成基础报价话术。"
-            />
-          </label>
-
-          {manualPriceError && (
-            <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
-              {manualPriceError}
-            </div>
-          )}
-
-          <button
-            className="btn-primary mt-3 min-h-10 px-4 py-2"
-            type="button"
-            onClick={() => {
-              void saveManualPrice();
-            }}
-            disabled={isSavingManualPrice}
-          >
-            {isSavingManualPrice ? "保存中..." : "保存人工确认价"}
-          </button>
-        </section>
-      )}
     </article>
   );
 }
