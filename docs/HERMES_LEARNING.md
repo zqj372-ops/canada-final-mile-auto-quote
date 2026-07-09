@@ -60,3 +60,28 @@ Hermes 是报价经验学习层，不是报价引擎。它只能从人工复核�
 - 同一 FSA/城市/托数多次人工结果一致：批准候选。
 - 已发布规则发现不准：在 Hermes 页面禁用对应学习规则。
 - 需要长期正式化的规则：后续再人工迁移到 `zone_lookup_rules` 或 `zone_price_matrix`，不要由 Hermes 自动写入。
+
+## 随机邮编命中测试
+
+可以用脚本让服务侧诊断 Agent 随机抽样邮编，批量跑 Quote Engine，整理哪些区域依赖模糊命中、哪些区域缺 Zone 或价格矩阵。
+
+```bash
+python scripts/postal_hit_test_agent.py \
+  --sample-size 5000 \
+  --profiles 1p \
+  --persist-diagnostics \
+  --persist-only manual
+```
+
+输出：
+
+- `outputs/postal_hit_tests/postal_hit_test_*.json`
+- `outputs/postal_hit_tests/postal_hit_test_*.md`
+
+规则边界：
+
+- 脚本不会修改 `zone_price_matrix`。
+- 脚本不会发布 `learned_quote_rules`。
+- `--persist-diagnostics --persist-only manual` 只把无法自动报价的样本写入 `hermes_diagnostic_queue`，避免后台被大量成功回退样本刷屏。
+- 成功但依赖模糊回退的样本仍会进入报告的规则整理建议。
+- 真正学习规则仍然必须来自人工任务 resolved 后生成的候选，并经后台审核批准。
