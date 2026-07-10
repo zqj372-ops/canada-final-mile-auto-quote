@@ -127,11 +127,11 @@ export default function SearchSettingsPage() {
     setTestingId(config.id);
     try {
       const response = await testSearchConfig(config.id);
-      setNotice(
-        response.success
-          ? `搜索测试成功，返回 ${response.result_count} 条，耗时 ${response.latency_ms}ms`
-          : `搜索测试失败：${response.error || "unknown error"} (${response.latency_ms}ms)`,
-      );
+      if (!response.success) {
+        setError(`搜索测试失败：${response.error || "unknown error"} (${response.latency_ms}ms)`);
+        return;
+      }
+      setNotice(`搜索测试成功，返回 ${response.result_count} 条，耗时 ${response.latency_ms}ms`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "搜索测试失败");
     } finally {
@@ -189,7 +189,7 @@ export default function SearchSettingsPage() {
         </div>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[0.75fr_1.25fr]">
+      <div className="grid gap-5 lg:grid-cols-[minmax(20rem,0.75fr)_minmax(0,1.25fr)]">
         <section className="panel p-5">
           <div className="flex items-start justify-between gap-4">
             <div>

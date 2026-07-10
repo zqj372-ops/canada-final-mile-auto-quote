@@ -25,6 +25,8 @@ type NewPriceDraft = {
   source: string;
 };
 
+type PricingSettingsSection = "fees" | "new-price" | "matrix";
+
 const pricingFields: Array<{
   key: keyof ZonePricingConfig;
   label: string;
@@ -58,6 +60,7 @@ export default function PricingSettingsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingPricing, setIsSavingPricing] = useState(false);
   const [isSavingMatrix, setIsSavingMatrix] = useState(false);
+  const [activeSection, setActiveSection] = useState<PricingSettingsSection>("fees");
 
   useEffect(() => {
     void loadAll();
@@ -152,8 +155,9 @@ export default function PricingSettingsPage() {
           });
         }),
       );
-      setNotice(`已保存 ${changedCells.length} 个价格单元格。`);
+      const savedCount = changedCells.length;
       await loadMatrix();
+      setNotice(`已保存 ${savedCount} 个价格单元格。`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "分区价格保存失败");
     } finally {
@@ -173,9 +177,9 @@ export default function PricingSettingsPage() {
     setIsSavingMatrix(true);
     try {
       await upsertZonePriceMatrix(payload);
-      setNotice("已新增或覆盖一个分区价格。");
       setNewPrice((current) => ({ ...current, zone: "", billing_pallets: "", base_price_usd: "" }));
       await loadMatrix();
+      setNotice("已新增或覆盖一个分区价格。");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "新增分区价格失败");
     } finally {
@@ -196,7 +200,10 @@ export default function PricingSettingsPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-[1600px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
+    <div
+      className="pricing-settings-page mx-auto flex max-w-[1600px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8"
+      data-active-section={activeSection}
+    >
       <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-sm font-semibold text-blue-800">Pricing Settings</p>
@@ -226,8 +233,25 @@ export default function PricingSettingsPage() {
         </div>
       )}
 
-      <section className="grid items-start gap-5 xl:grid-cols-[0.95fr_1.05fr]">
-        <form className="panel grid gap-4 p-5" onSubmit={savePricing}>
+      <nav className="settings-section-tabs" aria-label="价格配置分区">
+        {([
+          ["fees", "附加费规则"],
+          ["new-price", "新增价格"],
+          ["matrix", "价格矩阵"],
+        ] as Array<[PricingSettingsSection, string]>).map(([section, label]) => (
+          <button
+            key={section}
+            className={activeSection === section ? "settings-section-tab-active" : ""}
+            type="button"
+            onClick={() => setActiveSection(section)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      <section className="pricing-settings-forms">
+        <form className="panel pricing-settings-section pricing-settings-fees grid gap-4 p-5" onSubmit={savePricing}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="section-title">燃油和附加费</h2>
@@ -264,7 +288,7 @@ export default function PricingSettingsPage() {
           </div>
         </form>
 
-        <form className="panel grid gap-4 p-5" onSubmit={addOrUpdatePrice}>
+        <form className="panel pricing-settings-section pricing-settings-new-price grid gap-4 p-5" onSubmit={addOrUpdatePrice}>
           <div>
             <h2 className="section-title">新增 / 覆盖单条 Zone 价格</h2>
             <p className="mt-1 text-sm leading-6 text-slate-600">
@@ -286,7 +310,7 @@ export default function PricingSettingsPage() {
         </form>
       </section>
 
-      <section className="panel grid gap-4 p-5">
+      <section className="panel pricing-settings-section pricing-settings-matrix grid gap-4 p-5">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <h2 className="section-title">Zone 基础派送费矩阵</h2>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from sqlalchemy.orm import Session
 
@@ -29,6 +30,7 @@ from packages.wecom.templates import (
 logger = logging.getLogger(__name__)
 MANUAL_REQUIRED_AT_ALL_TEXT = "@all 有新的加拿大尾程报价需人工确认，请查看上一条详情。"
 NotificationSendResult = EmailSendResult | WeComSendResult
+NotificationChannel = Literal["email", "wecom"]
 
 
 def notify_quote_success(
@@ -38,6 +40,7 @@ def notify_quote_success(
     request: ZoneQuoteRequest,
     bot_id: int | None = None,
     email_config_id: int | None = None,
+    channels: set[NotificationChannel] | None = None,
 ) -> NotificationSendResult | None:
     markdown = build_quote_success_markdown(result, request)
     subject, body_text = build_quote_success_email(result, request)
@@ -49,6 +52,7 @@ def notify_quote_success(
         markdown=markdown,
         bot_id=bot_id,
         email_config_id=email_config_id,
+        channels=channels,
     )
 
 
@@ -58,6 +62,7 @@ def notify_ai_quote_success(
     response: object,
     bot_id: int | None = None,
     email_config_id: int | None = None,
+    channels: set[NotificationChannel] | None = None,
 ) -> NotificationSendResult | None:
     markdown = build_ai_quote_success_markdown(response)
     subject, body_text = build_ai_quote_success_email(response)
@@ -69,6 +74,7 @@ def notify_ai_quote_success(
         markdown=markdown,
         bot_id=bot_id,
         email_config_id=email_config_id,
+        channels=channels,
     )
 
 
@@ -79,6 +85,7 @@ def notify_ai_missing_fields(
     missing_fields: list[str],
     bot_id: int | None = None,
     email_config_id: int | None = None,
+    channels: set[NotificationChannel] | None = None,
 ) -> NotificationSendResult | None:
     markdown = build_ai_missing_fields_markdown(customer_reply, missing_fields)
     subject, body_text = build_ai_missing_fields_email(customer_reply, missing_fields)
@@ -90,6 +97,7 @@ def notify_ai_missing_fields(
         markdown=markdown,
         bot_id=bot_id,
         email_config_id=email_config_id,
+        channels=channels,
     )
 
 
@@ -100,22 +108,34 @@ def notify_manual_required(
     request: ZoneQuoteRequest,
     bot_id: int | None = None,
     email_config_id: int | None = None,
+    channels: set[NotificationChannel] | None = None,
 ) -> NotificationSendResult | None:
     markdown = build_manual_required_markdown(result, request)
     subject, body_text = build_manual_required_email(result, request)
-    email_repository = EmailNotificationConfigRepository(db)
-    email_config = _select_email_config(email_repository, purpose="manual_required", email_config_id=email_config_id)
-    if email_config is not None:
-        return _send_with_email_config(email_repository, email_config, subject=subject, body_text=body_text)
-    if email_config_id is not None:
-        return None
-    repository = WeComBotConfigRepository(db)
-    bot = _select_bot(repository, purpose="manual_required", bot_id=bot_id)
-    if bot is None:
-        return None
-    result = _send_with_bot(repository, bot, markdown=markdown)
-    if bot.mention_all_on_manual_required:
-        _send_manual_required_at_all(repository, bot)
+    legacy_email_selected = False
+    if channels is None:
+        email_repository = EmailNotificationConfigRepository(db)
+        legacy_email_selected = _select_email_config(
+            email_repository,
+            purpose="manual_required",
+            email_config_id=email_config_id,
+        ) is not None
+    result = _send_notification(
+        db,
+        purpose="manual_required",
+        subject=subject,
+        body_text=body_text,
+        markdown=markdown,
+        bot_id=bot_id,
+        email_config_id=email_config_id,
+        channels=channels,
+    )
+    should_mention_wecom = "wecom" in channels if channels is not None else not legacy_email_selected and email_config_id is None
+    if should_mention_wecom:
+        repository = WeComBotConfigRepository(db)
+        bot = _select_bot(repository, purpose="manual_required", bot_id=bot_id)
+        if bot is not None and bot.mention_all_on_manual_required:
+            _send_manual_required_at_all(repository, bot)
     return result
 
 
@@ -125,6 +145,7 @@ def notify_manual_task_resolved(
     task: ManualQuoteTask,
     bot_id: int | None = None,
     email_config_id: int | None = None,
+    channels: set[NotificationChannel] | None = None,
 ) -> NotificationSendResult | None:
     markdown = build_manual_task_resolved_markdown(task)
     subject, body_text = build_manual_task_resolved_email(task)
@@ -136,6 +157,7 @@ def notify_manual_task_resolved(
         markdown=markdown,
         bot_id=bot_id,
         email_config_id=email_config_id,
+        channels=channels,
     )
 
 
@@ -148,14 +170,37 @@ def _send_notification(
     markdown: str,
     bot_id: int | None = None,
     email_config_id: int | None = None,
+    channels: set[NotificationChannel] | None = None,
 ) -> NotificationSendResult | None:
-    email_repository = EmailNotificationConfigRepository(db)
-    email_config = _select_email_config(email_repository, purpose=purpose, email_config_id=email_config_id)
-    if email_config is not None:
-        return _send_with_email_config(email_repository, email_config, subject=subject, body_text=body_text)
-    if email_config_id is not None:
-        return None
-    return _send_markdown(db, purpose=purpose, markdown=markdown, bot_id=bot_id)
+    if channels is None:
+        email_repository = EmailNotificationConfigRepository(db)
+        email_config = _select_email_config(email_repository, purpose=purpose, email_config_id=email_config_id)
+        if email_config is not None:
+            return _send_with_email_config(email_repository, email_config, subject=subject, body_text=body_text)
+        if email_config_id is not None:
+            return None
+        return _send_markdown(db, purpose=purpose, markdown=markdown, bot_id=bot_id)
+
+    result: NotificationSendResult | None = None
+    if "email" in channels:
+        email_repository = EmailNotificationConfigRepository(db)
+        email_config = _select_email_config(email_repository, purpose=purpose, email_config_id=email_config_id)
+        if email_config is not None:
+            result = _send_with_email_config(email_repository, email_config, subject=subject, body_text=body_text)
+    if "wecom" in channels:
+        wecom_result = _send_markdown(db, purpose=purpose, markdown=markdown, bot_id=bot_id)
+        if wecom_result is not None:
+            result = wecom_result
+    return result
+
+
+def requested_notification_channels(*, email: bool, wecom: bool) -> set[NotificationChannel]:
+    channels: set[NotificationChannel] = set()
+    if email:
+        channels.add("email")
+    if wecom:
+        channels.add("wecom")
+    return channels
 
 
 def _select_email_config(

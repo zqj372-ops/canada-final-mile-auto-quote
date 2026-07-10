@@ -11,6 +11,7 @@ from apps.api.services.hermes_diagnostic_service import (
     fail_hermes_diagnostic,
     get_hermes_diagnostic,
     list_hermes_diagnostics,
+    run_hermes_diagnostic,
     submit_hermes_diagnostic_suggestion,
 )
 from apps.api.services.batch_diagnostic_report_service import (
@@ -60,6 +61,14 @@ def submit_diagnostic_suggestion(
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     return submit_hermes_diagnostic_suggestion(db, diagnostic_id, payload)
+
+
+@router.post("/hermes-diagnostics/{diagnostic_id}/run", dependencies=[Depends(require_roles(*LEARNING_WRITE_ROLES))])
+def run_diagnostic(
+    diagnostic_id: int,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    return run_hermes_diagnostic(db, diagnostic_id)
 
 
 @router.post("/hermes-diagnostics/{diagnostic_id}/fail", dependencies=[Depends(require_roles(*LEARNING_WRITE_ROLES))])

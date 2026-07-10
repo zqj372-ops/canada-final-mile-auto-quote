@@ -9,6 +9,20 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: canada_quote_test
+          POSTGRES_USER: quote_app
+          POSTGRES_PASSWORD: quote_app_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U quote_app -d canada_quote_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - name: Checkout
@@ -23,6 +37,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[test]"
+
+      - name: Verify Postgres migrations
+        env:
+          DATABASE_URL: postgresql+psycopg://quote_app:quote_app_test_password@localhost:5432/canada_quote_test
+        run: alembic upgrade head
 
       - name: Run pytest
         env:

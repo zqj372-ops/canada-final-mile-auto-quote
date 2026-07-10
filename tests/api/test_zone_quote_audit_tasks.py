@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 from apps.api.db.models import Base, LearnedQuoteRule, PostalCodeCityLookup, QuoteRuleConfig, ZoneLookupRule, ZonePriceMatrix
 from apps.api.db.session import get_db
 from apps.api.main import app
+from packages.ai_assistant.model_client import AIResponse
 
 
 def build_client(
@@ -105,7 +106,7 @@ def test_zone_calculate_success_writes_audit_log() -> None:
     body = audit.json()
     assert body["quote_id"] == quote["quote_id"]
     assert body["quote_id"].isdigit()
-    assert len(body["quote_id"]) == 8
+    assert len(body["quote_id"]) == 31
     assert body["source_type"] == "zone_matrix"
     assert body["postal_prefix"] == "L4K"
     assert body["total_price_usd"] == "212.00"
@@ -398,6 +399,45 @@ def test_hermes_diagnostic_suggestion_is_stored_but_does_not_change_quote() -> N
     assert audit["total_price_usd"] is None
 
 
+def test_bound_hermes_model_runs_diagnostic_without_changing_quote(monkeypatch) -> None:
+    client = build_client(include_zone_rule=False)
+    quote = client.post("/quotes/zone-calculate", json=payload()).json()
+    diagnostic = client.get(f"/quotes/hermes-diagnostics?quote_id={quote['quote_id']}").json()[0]
+    config = client.post(
+        "/ai-configs",
+        json={
+            "name": "Hermes test model",
+            "provider": "openai",
+            "base_url": "https://example.invalid/v1",
+            "api_key": "sk-hermes-test-0001",
+            "model_name": "hermes-test",
+        },
+    ).json()
+    client.put("/ai-configs/agents/hermes", json={"config_id": config["id"]})
+
+    monkeypatch.setattr(
+        "apps.api.services.hermes_diagnostic_service.OpenAICompatibleClient.complete",
+        lambda _client, _messages: AIResponse(
+            content=(
+                '{"suggested_action":"manual_review","can_auto_correct":false,'
+                '"confidence":81,"reason_zh":"证据不足，需人工复核。",'
+                '"recommend_manual_review":true,"recommend_learning_candidate":false}'
+            )
+        ),
+    )
+
+    response = client.post(f"/quotes/hermes-diagnostics/{diagnostic['id']}/run")
+    audit = client.get(f"/quotes/audit/{quote['quote_id']}").json()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["confidence"] == 81
+    assert body["agent_suggestion"]["reason_zh"] == "证据不足，需人工复核。"
+    assert audit["source_type"] == "manual_required"
+    assert audit["total_price_usd"] is None
+
+
 def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:
     client = build_client(
         learned_rows=[
@@ -412,6 +452,13 @@ def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:
                 "origin": "toronto",
                 "zone": 2,
                 "billing_pallets": 3,
+                "conditions_json": {
+                    "address_type": "commercial",
+                    "requires_liftgate": False,
+                    "requires_pallet_jack": False,
+                    "requires_appointment": True,
+                    "detention_minutes": 0,
+                },
                 "total_price_usd": Decimal("250.00"),
                 "base_price_usd": Decimal("250.00"),
                 "confidence": 72,
@@ -431,6 +478,48 @@ def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:
     assert body["matched_rule"].startswith("learned_manual_quote")
     assert "score 100" in body["matched_rule"]
     assert "hermes_corrective_override" in body["risk_tags"]
+
+
+def test_exact_learned_rule_does_not_reuse_price_for_different_accessorials() -> None:
+    client = build_client(
+        learned_rows=[
+            {
+                "source_task_id": 99,
+                "quote_id": "manual-99",
+                "scope": "postal_prefix_city",
+                "postal_code": "L4K 2N2",
+                "postal_prefix": "L4K",
+                "city": "CONCORD",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 2,
+                "billing_pallets": 3,
+                "conditions_json": {
+                    "address_type": "commercial",
+                    "requires_liftgate": False,
+                    "requires_pallet_jack": False,
+                    "requires_appointment": False,
+                    "detention_minutes": 0,
+                },
+                "total_price_usd": Decimal("250.00"),
+                "base_price_usd": Decimal("250.00"),
+                "confidence": 72,
+                "status": "active",
+                "usage_count": 0,
+                "note": "Price without appointment service.",
+            }
+        ]
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=payload(requires_appointment=True),
+    )
+
+    body = response.json()
+    assert body["source_type"] == "zone_matrix"
+    assert body["accessorials"]["appointment_fee_usd"] == "50.00"
+    assert body["total_price_usd"] == "212.00"
 
 
 def test_prefix_city_learned_rule_does_not_override_clean_zone_quote() -> None:

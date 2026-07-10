@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 import re
 
@@ -58,9 +59,19 @@ def build_match_context(shipment: ShipmentInput) -> ShipmentMatchContext:
     )
 
 
-def find_best_rule(shipment: ShipmentInput, rate_rules: list[RateRule]) -> MatchResult:
+def find_best_rule(
+    shipment: ShipmentInput,
+    rate_rules: list[RateRule],
+    *,
+    as_of: date | None = None,
+) -> MatchResult:
     context = build_match_context(shipment)
-    active_rules = [rule for rule in rate_rules if rule.status.lower() == "active"]
+    effective_date = as_of or date.today()
+    active_rules = [
+        rule
+        for rule in rate_rules
+        if rule.status.lower() == "active" and rule_is_effective(rule, effective_date)
+    ]
 
     for source_type in PRIORITY:
         for rule in active_rules:
@@ -110,6 +121,14 @@ def rule_matches_context(rule: RateRule, context: ShipmentMatchContext) -> bool:
     if rule.source_type == SourceType.DISTANCE_FALLBACK:
         return False
     return False
+
+
+def rule_is_effective(rule: RateRule, as_of: date) -> bool:
+    if rule.effective_from is not None and rule.effective_from > as_of:
+        return False
+    if rule.effective_to is not None and rule.effective_to < as_of:
+        return False
+    return True
 
 
 def weight_matches(rule: RateRule, context: ShipmentMatchContext) -> bool:

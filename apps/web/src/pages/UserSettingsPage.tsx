@@ -155,7 +155,7 @@ export default function UserSettingsPage() {
         </div>
       )}
 
-      <section className="grid gap-5 2xl:grid-cols-[0.78fr_1.22fr]">
+      <section className="grid gap-5 lg:grid-cols-[minmax(20rem,0.78fr)_minmax(0,1.22fr)]">
         <form className="panel p-5" onSubmit={handleCreateUser}>
           <div className="flex items-start justify-between gap-3">
             <div>

@@ -18,7 +18,11 @@ from apps.api.services.address_validation_service import (
     LocalAddressValidation,
     build_local_address_validation_from_extraction,
 )
-from apps.api.services.notification_service import notify_ai_missing_fields, notify_ai_quote_success
+from apps.api.services.notification_service import (
+    notify_ai_missing_fields,
+    notify_ai_quote_success,
+    requested_notification_channels,
+)
 from apps.api.services.quote_logic_explainer import attach_zone_quote_logic
 from apps.api.services.quote_service import apply_learned_quote_if_available, record_zone_quote_side_effects, try_notification
 from apps.api.services.search_context_service import QuoteSearchContext, build_quote_search_context
@@ -164,6 +168,10 @@ def calculate_ai_auto_quote(
                     missing_fields=missing_fields,
                     bot_id=payload.wecom_bot_id,
                     email_config_id=payload.email_config_id,
+                    channels=requested_notification_channels(
+                        email=payload.notify_email,
+                        wecom=payload.notify_wecom,
+                    ),
                 ),
                 "missing-fields",
             )
@@ -251,6 +259,10 @@ def calculate_ai_auto_quote(
                 response=response,
                 bot_id=payload.wecom_bot_id,
                 email_config_id=payload.email_config_id,
+                channels=requested_notification_channels(
+                    email=payload.notify_email,
+                    wecom=payload.notify_wecom,
+                ),
             ),
             quote_result.quote_id,
         )

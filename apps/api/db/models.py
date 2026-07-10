@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -324,6 +324,23 @@ class AIModelConfig(Base):
     )
 
 
+class AIAgentModelAssignment(Base):
+    __tablename__ = "ai_agent_model_assignments"
+
+    agent_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    ai_model_config_id: Mapped[int] = mapped_column(
+        ForeignKey("ai_model_configs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class WeComBotConfig(Base):
     __tablename__ = "wecom_bot_configs"
 
@@ -418,6 +435,7 @@ class LearnedQuoteRule(Base):
     origin: Mapped[str | None] = mapped_column(String(32), index=True)
     zone: Mapped[int | None] = mapped_column(Integer, index=True)
     billing_pallets: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    conditions_json: Mapped[dict[str, object] | None] = mapped_column(JSON)
     total_price_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     base_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     confidence: Mapped[int] = mapped_column(Integer, nullable=False, default=60)

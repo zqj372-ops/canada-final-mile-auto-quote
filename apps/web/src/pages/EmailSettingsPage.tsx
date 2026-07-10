@@ -140,11 +140,11 @@ export default function EmailSettingsPage() {
     setTestingId(config.id);
     try {
       const response = await testEmailConfig(config.id);
-      setNotice(
-        response.success
-          ? `测试邮件发送成功，耗时 ${response.latency_ms}ms`
-          : `测试邮件发送失败：${response.error || "unknown error"} (${response.latency_ms}ms)`,
-      );
+      if (!response.success) {
+        setError(`测试邮件发送失败：${response.error || "unknown error"} (${response.latency_ms}ms)`);
+        return;
+      }
+      setNotice(`测试邮件发送成功，耗时 ${response.latency_ms}ms`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "测试邮件发送失败");
     } finally {
@@ -204,7 +204,7 @@ export default function EmailSettingsPage() {
       {error && <Alert tone="red">{error}</Alert>}
       {notice && <Alert tone="green">{notice}</Alert>}
 
-      <div className="grid gap-6 xl:grid-cols-[0.78fr_1.22fr]">
+      <div className="grid gap-5 lg:grid-cols-[minmax(20rem,0.78fr)_minmax(0,1.22fr)]">
         <section className="panel p-5">
           <div className="flex items-start justify-between gap-4">
             <div>

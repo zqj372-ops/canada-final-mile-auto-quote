@@ -111,7 +111,7 @@ export default function AIQuotePage() {
         </h1>
       </header>
 
-      <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
+      <div className="grid gap-5 lg:grid-cols-[minmax(20rem,0.85fr)_minmax(0,1.15fr)]">
         <section className="panel p-5">
           <h2 className="section-title">客户原始消息</h2>
           <p className="mt-1 text-sm leading-6 text-slate-600">

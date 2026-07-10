@@ -31,14 +31,14 @@ export default function ParsedAddressCard({
   return (
     <section className="panel min-w-0 p-4">
       <h2 className="section-title text-lg">地址信息</h2>
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <dl className="parsed-address-fields mt-3 grid grid-cols-2 gap-0 sm:grid-cols-3">
         <Metric label="目的地地址" value={address.address_line || "待确认"} wide />
         <Metric label="目的地城市" value={address.city || "待确认"} />
         <Metric label="目的地省份" value={address.province_name ? `${address.province_name} / ${address.province_code}` : "待确认"} />
         <Metric label="目的地邮编" value={address.postal_code || "待确认"} />
         <Metric label="国家" value={address.country || "待确认"} />
         <Metric label="偏远等级" value="待查询" />
-      </div>
+      </dl>
 
       <AddressMapPreview parsed={parsed} />
 
@@ -118,7 +118,7 @@ function Metric({
   wide?: boolean;
 }) {
   return (
-    <div className={`rounded-md border border-slate-200 bg-white p-2.5 ${wide ? "col-span-2" : ""}`}>
+    <div className={`quote-field-row ${wide ? "col-span-2 sm:col-span-3" : ""}`}>
       <dt className="text-xs font-medium text-slate-500">{label}</dt>
       <dd className="mt-1 break-words text-sm font-semibold text-slate-900">{value}</dd>
     </div>

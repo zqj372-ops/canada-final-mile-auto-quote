@@ -175,5 +175,5 @@ INSERT INTO quote_rule_config (key, value, description) VALUES
     ('liftgate_fee_usd', '50', 'Liftgate accessorial fee when requested.'),
     ('pallet_jack_fee_usd', '50', 'Pallet jack accessorial fee when requested.'),
     ('appointment_fee_usd', '50', 'Appointment accessorial fee when requested.'),
-    ('detention_fee_usd_per_half_hour', '35', 'Detention fee after the free 30 minutes.')
+    ('detention_half_hour_fee_usd', '35', 'Detention fee after the free 30 minutes.')
 ON CONFLICT (key) DO NOTHING;

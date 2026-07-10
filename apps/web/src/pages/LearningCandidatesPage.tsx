@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   approveHermesLearningCandidate,
   getHermesLearningCandidate,
@@ -26,6 +26,8 @@ export default function LearningCandidatesPage({
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const listRequestId = useRef(0);
+  const detailRequestId = useRef(0);
 
   useEffect(() => {
     void loadCandidates(filter);
@@ -39,6 +41,7 @@ export default function LearningCandidatesPage({
   }, [candidates]);
 
   async function loadCandidates(nextFilter = filter) {
+    const requestId = ++listRequestId.current;
     setIsLoading(true);
     setError(null);
     try {
@@ -46,6 +49,9 @@ export default function LearningCandidatesPage({
         status: nextFilter,
         limit: 100,
       });
+      if (requestId !== listRequestId.current) {
+        return;
+      }
       setCandidates(response);
       if (response.length) {
         const nextSelected = selected
@@ -60,15 +66,22 @@ export default function LearningCandidatesPage({
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Hermes 学习候选加载失败");
     } finally {
-      setIsLoading(false);
+      if (requestId === listRequestId.current) {
+        setIsLoading(false);
+      }
     }
   }
 
   async function selectCandidate(candidate: HermesLearningCandidate) {
+    const requestId = ++detailRequestId.current;
     setSelected(candidate);
     setReviewNote(candidate.review_note ?? "");
     try {
-      setSelected(await getHermesLearningCandidate(candidate.id));
+      const detail = await getHermesLearningCandidate(candidate.id);
+      if (requestId === detailRequestId.current) {
+        setSelected(detail);
+        setReviewNote(detail.review_note ?? "");
+      }
     } catch {
       // 列表信息足够人工判断，详情加载失败时不打断操作。
     }
@@ -78,15 +91,17 @@ export default function LearningCandidatesPage({
     if (!selected) {
       return;
     }
-    setBusyId(selected.id);
+    const candidateId = selected.id;
+    const note = optionalText(reviewNote);
+    setBusyId(candidateId);
     setError(null);
     setNotice(null);
     try {
-      const response = await approveHermesLearningCandidate(selected.id, {
-        review_note: optionalText(reviewNote),
+      const response = await approveHermesLearningCandidate(candidateId, {
+        review_note: note,
       });
       setSelected(response.candidate);
-      setNotice(`候选 #${selected.id} 已批准，生成学习规则 #${response.learned_rule.id}`);
+      setNotice(`候选 #${candidateId} 已批准，生成学习规则 #${response.learned_rule.id}`);
       await loadCandidates(filter);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "批准 Hermes 候选失败");
@@ -99,15 +114,17 @@ export default function LearningCandidatesPage({
     if (!selected) {
       return;
     }
-    setBusyId(selected.id);
+    const candidateId = selected.id;
+    const note = optionalText(reviewNote);
+    setBusyId(candidateId);
     setError(null);
     setNotice(null);
     try {
-      const response = await rejectHermesLearningCandidate(selected.id, {
-        review_note: optionalText(reviewNote),
+      const response = await rejectHermesLearningCandidate(candidateId, {
+        review_note: note,
       });
       setSelected(response);
-      setNotice(`候选 #${selected.id} 已拒绝`);
+      setNotice(`候选 #${candidateId} 已拒绝`);
       await loadCandidates(filter);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "拒绝 Hermes 候选失败");

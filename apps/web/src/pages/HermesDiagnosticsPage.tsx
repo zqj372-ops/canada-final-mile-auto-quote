@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   getHermesDiagnostic,
   listHermesDiagnostics,
+  runHermesDiagnostic,
   submitHermesDiagnosticSuggestion,
   type HermesDiagnosticRecord,
   type JsonValue,
@@ -21,7 +22,10 @@ export default function HermesDiagnosticsPage({ embedded = false }: HermesDiagno
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingSuggestion, setIsSavingSuggestion] = useState(false);
+  const [isRunningAgent, setIsRunningAgent] = useState(false);
   const [suggestionNote, setSuggestionNote] = useState("");
+  const detailRequestId = useRef(0);
+  const agentRunRequestId = useRef(0);
 
   useEffect(() => {
     void loadRecords();
@@ -54,12 +58,42 @@ export default function HermesDiagnosticsPage({ embedded = false }: HermesDiagno
   }
 
   async function selectRecord(record: HermesDiagnosticRecord) {
+    const requestId = ++detailRequestId.current;
+    agentRunRequestId.current += 1;
     setError(null);
     setSelected(record);
     try {
-      setSelected(await getHermesDiagnostic(record.id));
+      const detail = await getHermesDiagnostic(record.id);
+      if (requestId === detailRequestId.current) {
+        setSelected(detail);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "读取诊断详情失败");
+    }
+  }
+
+  async function runSelectedDiagnostic() {
+    if (!selected) {
+      return;
+    }
+    const diagnosticId = selected.id;
+    const requestId = ++agentRunRequestId.current;
+    setIsRunningAgent(true);
+    setError(null);
+    try {
+      const response = await runHermesDiagnostic(diagnosticId);
+      if (requestId !== agentRunRequestId.current) {
+        return;
+      }
+      setSelected(response);
+      setRecords((items) => items.map((item) => (item.id === response.id ? response : item)));
+      if (response.status === "failed") {
+        setError(response.agent_error || "Hermes 模型诊断失败");
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Hermes 模型诊断失败");
+    } finally {
+      setIsRunningAgent(false);
     }
   }
 
@@ -219,7 +253,9 @@ export default function HermesDiagnosticsPage({ embedded = false }: HermesDiagno
               record={selected}
               suggestionNote={suggestionNote}
               isSavingSuggestion={isSavingSuggestion}
+              isRunningAgent={isRunningAgent}
               onNoteChange={setSuggestionNote}
+              onRunAgent={runSelectedDiagnostic}
               onSaveSuggestion={saveSuggestion}
             />
           ) : (
@@ -237,13 +273,17 @@ function DiagnosticDetail({
   record,
   suggestionNote,
   isSavingSuggestion,
+  isRunningAgent,
   onNoteChange,
+  onRunAgent,
   onSaveSuggestion,
 }: {
   record: HermesDiagnosticRecord;
   suggestionNote: string;
   isSavingSuggestion: boolean;
+  isRunningAgent: boolean;
   onNoteChange: (value: string) => void;
+  onRunAgent: () => void;
   onSaveSuggestion: (action: "manual_review" | "learning_candidate" | "no_action") => void;
 }) {
   const pkg = record.diagnostic_package;
@@ -384,7 +424,15 @@ function DiagnosticDetail({
           </div>
         ) : (
           <div className="space-y-3">
-            <EmptyLine text="Hermes Agent 还没有提交建议。可以等待 Agent 跑队列，也可以人工先记录建议方向。" />
+            <EmptyLine text="Hermes Agent 还没有提交建议。可以用当前绑定的模型立即运行，也可以人工记录建议。" />
+            <button
+              className="btn-primary min-h-10 w-full px-3 py-2 sm:w-auto"
+              type="button"
+              disabled={isRunningAgent || isSavingSuggestion}
+              onClick={onRunAgent}
+            >
+              {isRunningAgent ? "Hermes 诊断中..." : "用当前模型运行 Hermes 诊断"}
+            </button>
             <textarea
               className="min-h-24 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100"
               placeholder="写明建议原因，例如：相邻 S7H/S7K 均指向 Calgary Zone 5，但价格矩阵缺 3 托价格，建议人工复核后生成学习候选。"

@@ -9,19 +9,26 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./postgres/init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
-      - ./postgres/seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quote_app} -d ${POSTGRES_DB:-canada_quote}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   api:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
     env_file:
-      - ../.env.example
+      - ../.env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://quote_app:quote_app_dev_password@postgres:5432/canada_quote}
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+      uvicorn apps.api.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
 

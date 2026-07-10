@@ -21,6 +21,7 @@ import {
   type ZoneQuoteResult,
 } from "../api/client";
 import AiQuoteInputPanel from "../components/AiQuoteInputPanel";
+import AddressMapPreview from "../components/AddressMapPreview";
 import ParsedAddressCard from "../components/ParsedAddressCard";
 import ParsedCargoTable from "../components/ParsedCargoTable";
 import QuoteCopyButton from "../components/QuoteCopyButton";
@@ -37,6 +38,7 @@ type WorkbenchStatus =
   | "manual_required";
 
 type SalesQuoteTab = "quote" | "records";
+type QuoteWorkspaceStage = "input" | "parsed";
 type SalesQuoteRecordStatus = "quoted" | "manual_required";
 type SalesQuoteRecordFilter = SalesQuoteRecordStatus | "all";
 
@@ -63,8 +65,11 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   const [isCheckingAuth, setIsCheckingAuth] = useState(Boolean(getStoredAuthToken()));
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [activeSalesTab, setActiveSalesTab] = useState<SalesQuoteTab>("quote");
+  const [workspaceStage, setWorkspaceStage] = useState<QuoteWorkspaceStage>("input");
+  const [isResultModalOpen, setIsResultModalOpen] = useState(false);
   const [quoteRecords, setQuoteRecords] = useState<SalesQuoteRecord[]>([]);
   const [isLoadingRecords, setIsLoadingRecords] = useState(false);
+  const [recordsError, setRecordsError] = useState<string | null>(null);
   const [recordFilter, setRecordFilter] = useState<SalesQuoteRecordFilter>("all");
   const [recordQuery, setRecordQuery] = useState("");
   const [selectedRecordId, setSelectedRecordId] = useState<number | null>(null);
@@ -83,14 +88,15 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     try {
       const actor = await getCurrentActor("quote");
       setCurrentActor(actor);
-      await Promise.all([loadConfig(), loadEmailConfigs(), refreshSalesRecords()]);
     } catch (caught) {
       clearStoredAuthToken();
       setCurrentActor(null);
       setAuthError(caught instanceof Error ? caught.message : "登录已失效，请重新登录。");
+      return;
     } finally {
       setIsCheckingAuth(false);
     }
+    await Promise.allSettled([loadConfig(), loadEmailConfigs(), refreshSalesRecords()]);
   }
 
   async function handleLogin() {
@@ -108,7 +114,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
       setStoredAuthToken(response.access_token);
       setCurrentActor(response.actor);
       setLoginPassword("");
-      await Promise.all([loadConfig(), loadEmailConfigs(), refreshSalesRecords()]);
+      await Promise.allSettled([loadConfig(), loadEmailConfigs(), refreshSalesRecords()]);
     } catch (caught) {
       setAuthError(caught instanceof Error ? caught.message : "登录失败");
     } finally {
@@ -126,6 +132,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     setResult(null);
     setAiResult(null);
     setStatus("idle");
+    setIsResultModalOpen(false);
   }
 
   async function loadConfig() {
@@ -162,12 +169,17 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     }
   }
 
-  async function refreshSalesRecords() {
+  async function refreshSalesRecords(): Promise<boolean> {
     setIsLoadingRecords(true);
+    setRecordsError(null);
     try {
       const records = await listSalesQuoteRecords({ limit: 80 });
       setQuoteRecords(records);
       setSelectedRecordId((current) => current ?? records[0]?.id ?? null);
+      return true;
+    } catch (caught) {
+      setRecordsError(caught instanceof Error ? caught.message : "报价记录刷新失败");
+      return false;
     } finally {
       setIsLoadingRecords(false);
     }
@@ -214,6 +226,8 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     setNotice(null);
     setError(null);
     setStatus("idle");
+    setWorkspaceStage("input");
+    setIsResultModalOpen(false);
   }
 
   async function handleSmartQuote() {
@@ -230,6 +244,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     setStatus("parsing");
     setError(null);
     setNotice(null);
+    setIsResultModalOpen(false);
 
     setIsSubmitting(true);
     setStatus("quoting");
@@ -257,6 +272,8 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
         setDetentionMinutes,
       });
       setResult(response.quote_result);
+      setWorkspaceStage("parsed");
+      setIsResultModalOpen(true);
       if (response.manual_review_required || response.quote_result?.manual_review_required) {
         setStatus("manual_required");
         setNotice(
@@ -267,7 +284,12 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
       } else {
         setStatus("quoted");
       }
-      await refreshSalesRecords();
+      const recordsRefreshed = await refreshSalesRecords();
+      if (!recordsRefreshed) {
+        setNotice((current) =>
+          [current, "报价结果已生成，但历史记录列表暂未刷新。"].filter(Boolean).join(" "),
+        );
+      }
     } catch (caught) {
       setStatus("manual_required");
       setError(
@@ -287,6 +309,8 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     setError(null);
     setNotice(null);
     setStatus("idle");
+    setWorkspaceStage("input");
+    setIsResultModalOpen(false);
   }
 
   function handleImportText(value: string) {
@@ -458,11 +482,42 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
               {notice}
             </div>
           )}
+          {recordsError && (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+              报价记录：{recordsError}
+            </div>
+          )}
 
           {activeSalesTab === "quote" ? (
             <div className="grid gap-4">
-              <div className="sales-workbench-grid">
-                <div className="grid min-w-0 content-start gap-3">
+              <nav className="sales-stage-tabs" aria-label="报价工作区阶段">
+                <button
+                  className={workspaceStage === "input" ? "sales-stage-tab-active" : ""}
+                  type="button"
+                  onClick={() => setWorkspaceStage("input")}
+                >
+                  <span>01</span> 询价输入
+                </button>
+                <button
+                  className={workspaceStage === "parsed" ? "sales-stage-tab-active" : ""}
+                  type="button"
+                  onClick={() => setWorkspaceStage("parsed")}
+                >
+                  <span>02</span> 解析结果
+                </button>
+                <button
+                  className={isResultModalOpen ? "sales-stage-tab-active" : ""}
+                  type="button"
+                  onClick={() => setIsResultModalOpen(true)}
+                  disabled={!aiResult && !result}
+                  aria-haspopup="dialog"
+                >
+                  <span>03</span> 报价结果
+                </button>
+              </nav>
+
+              <div className="sales-workbench-grid" data-stage={workspaceStage}>
+                <div className="sales-stage sales-stage-input grid min-w-0 content-start gap-3">
                   <AiQuoteInputPanel
                     config={config}
                     value={rawInput}
@@ -482,7 +537,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
                   />
                 </div>
 
-                <div className="grid min-w-0 content-start gap-3">
+                <div className="sales-stage sales-stage-parsed grid min-w-0 content-start gap-3">
                   <QuotePipelinePanel
                     hasAIResult={Boolean(aiResult)}
                     hasSearchContext={Boolean(aiResult?.search_context)}
@@ -506,20 +561,6 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
                   />
                 </div>
 
-                <div className="grid min-w-0 content-start gap-3 sales-result-rail">
-                  <QuoteCalculationPanel
-                    config={config}
-                    parsed={displayParsed}
-                    result={result}
-                    aiParsed={Boolean(aiResult)}
-                    salesText={salesText}
-                    onExport={exportQuote}
-                  />
-                  <QuoteRiskPanel risks={riskMessages} manualRequired={manualRequired} />
-                  {aiResult?.search_context && (
-                    <SearchVerificationPanel searchContext={aiResult.search_context} />
-                  )}
-                </div>
               </div>
               <SalesQuoteRecordsPreview
                 isLoading={isLoadingRecords}
@@ -528,6 +569,10 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
                   void refreshSalesRecords();
                 }}
                 onViewAll={() => setActiveSalesTab("records")}
+                onOpenRecord={(recordId) => {
+                  setSelectedRecordId(recordId);
+                  setActiveSalesTab("records");
+                }}
               />
             </div>
           ) : (
@@ -549,6 +594,137 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
         </section>
         </main>
       </div>
+      <QuoteResultDialog
+        isOpen={isResultModalOpen}
+        config={config}
+        parsed={displayParsed}
+        result={result}
+        aiParsed={Boolean(aiResult)}
+        salesText={salesText}
+        risks={riskMessages}
+        manualRequired={manualRequired}
+        searchContext={aiResult?.search_context ?? null}
+        onClose={() => setIsResultModalOpen(false)}
+        onExport={exportQuote}
+      />
+    </div>
+  );
+}
+
+function QuoteResultDialog({
+  aiParsed,
+  config,
+  isOpen,
+  manualRequired,
+  onClose,
+  onExport,
+  parsed,
+  result,
+  risks,
+  salesText,
+  searchContext,
+}: {
+  aiParsed: boolean;
+  config: QuoteWorkbenchConfig;
+  isOpen: boolean;
+  manualRequired: boolean;
+  onClose: () => void;
+  onExport: () => void;
+  parsed: ParsedQuoteInput;
+  result: ZoneQuoteResult | null;
+  risks: string[];
+  salesText: string;
+  searchContext: QuoteSearchContext | null;
+}) {
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const previousOverflow = document.body.style.overflow;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen) {
+    return null;
+  }
+
+  const addressLabel = [
+    parsed.address.address_line,
+    parsed.address.city,
+    parsed.address.province_code || parsed.address.province_name,
+    parsed.address.postal_code,
+  ].filter(Boolean).join(", ");
+
+  return (
+    <div
+      className="quote-result-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section
+        className="quote-result-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="quote-result-modal-title"
+      >
+        <header className="quote-result-modal-header">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase text-teal-700">AI 报价结果</p>
+            <h2 id="quote-result-modal-title" className="mt-1 text-xl font-semibold text-slate-950">
+              {manualRequired ? "报价待人工复核" : "报价已完成"}
+            </h2>
+          </div>
+          <button
+            className="quote-result-modal-close"
+            type="button"
+            onClick={onClose}
+            aria-label="关闭报价结果"
+            autoFocus
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+
+        <div className="quote-result-modal-content">
+          <div className="quote-result-modal-summary grid min-w-0 content-start gap-3">
+            <QuoteCalculationPanel
+              config={config}
+              parsed={parsed}
+              result={result}
+              aiParsed={aiParsed}
+              salesText={salesText}
+              onExport={onExport}
+            />
+            <QuoteRiskPanel risks={risks} manualRequired={manualRequired} />
+            {searchContext ? <SearchVerificationPanel searchContext={searchContext} /> : null}
+          </div>
+
+          <aside className="quote-result-map-panel panel min-w-0 p-4">
+            <div>
+              <p className="text-xs font-semibold uppercase text-teal-700">Google Maps</p>
+              <h2 className="mt-1 text-lg font-semibold text-slate-950">目的地址验证</h2>
+              <p className="mt-2 break-words text-sm leading-6 text-slate-600">
+                {addressLabel || "等待 AI 解析完整地址"}
+              </p>
+            </div>
+            <AddressMapPreview parsed={parsed} mapMode="expanded" />
+          </aside>
+        </div>
+      </section>
     </div>
   );
 }
@@ -735,8 +911,8 @@ function QuotePipelinePanel({
   ];
 
   return (
-    <section className="panel p-4">
-      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+    <section className="panel quote-pipeline-panel p-4">
+      <div className="quote-pipeline-steps grid grid-cols-2 gap-2 xl:grid-cols-4">
         {steps.map((step) => (
           <div key={step.label} className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2">
             <p className="text-xs font-semibold text-slate-500">{step.label}</p>
@@ -801,11 +977,13 @@ function SalesQuoteRecordsPreview({
   records,
   onRefresh,
   onViewAll,
+  onOpenRecord,
 }: {
   isLoading: boolean;
   records: SalesQuoteRecord[];
   onRefresh: () => void;
   onViewAll: () => void;
+  onOpenRecord: (recordId: number) => void;
 }) {
   return (
     <section className="panel sales-records-preview overflow-hidden p-4">
@@ -839,7 +1017,7 @@ function SalesQuoteRecordsPreview({
                 key={record.id}
                 className="grid w-full grid-cols-[1.1fr_1.5fr_0.75fr_0.8fr_0.9fr] gap-3 border-t border-slate-100 px-4 py-3 text-left text-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-teal-700"
                 type="button"
-                onClick={onViewAll}
+                onClick={() => onOpenRecord(record.id)}
               >
                 <span className="break-all font-mono font-semibold text-slate-950">{record.quote_id || `#${record.id}`}</span>
                 <span className="truncate text-slate-700">{record.destination || record.customer_message}</span>

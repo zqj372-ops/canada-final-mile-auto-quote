@@ -215,6 +215,11 @@ export interface AIConfigTestResult {
   preview?: string;
 }
 
+export interface AIAgentModelAssignment {
+  agent_key: string;
+  config: AIModelConfigPublic | null;
+}
+
 export interface AIProviderPreset {
   provider: string;
   label: string;
@@ -1070,6 +1075,12 @@ export function submitHermesDiagnosticSuggestion(
   });
 }
 
+export function runHermesDiagnostic(diagnosticId: number): Promise<HermesDiagnosticRecord> {
+  return request<HermesDiagnosticRecord>(`/quotes/hermes-diagnostics/${diagnosticId}/run`, {
+    method: "POST",
+  });
+}
+
 export function listBatchDiagnosticReports(): Promise<BatchDiagnosticReportSummary[]> {
   return request<BatchDiagnosticReportSummary[]>("/quotes/batch-diagnostic-reports");
 }
@@ -1182,6 +1193,32 @@ export function listAIConfigs(): Promise<AIModelConfigPublic[]> {
 
 export function listAIProviderPresets(): Promise<AIProviderPreset[]> {
   return request<AIProviderPreset[]>("/ai-configs/provider-presets");
+}
+
+export function getAIAgentModelAssignment(
+  agentKey: string,
+): Promise<AIAgentModelAssignment> {
+  return request<AIAgentModelAssignment>(`/ai-configs/agents/${agentKey}`);
+}
+
+export function setAIAgentModelAssignment(
+  agentKey: string,
+  configId: number,
+): Promise<AIAgentModelAssignment> {
+  return request<AIAgentModelAssignment>(`/ai-configs/agents/${agentKey}`, {
+    method: "PUT",
+    body: JSON.stringify({ config_id: configId }),
+  });
+}
+
+export function createAIAgentModelConfig(
+  agentKey: string,
+  payload: Required<Pick<AIModelConfigPayload, "name" | "model_name">> & AIModelConfigPayload,
+): Promise<AIAgentModelAssignment> {
+  return request<AIAgentModelAssignment>(`/ai-configs/agents/${agentKey}/configs`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export function discoverAIModels(

@@ -213,29 +213,6 @@ function parseCargoLineItems(
   return single ? [single] : [];
 }
 
-function parseCargoLine(
-  line: string,
-  id: number,
-  config: QuoteWorkbenchConfig,
-  allowNumericTable = false,
-): ParsedCargoItem | null {
-  const normalized = normalizeCargoText(line);
-  const decimal = "(\\d+(?:\\.\\d+)?)";
-  const separators = config.parser.dimension_separators.map(escapeRegex).join("|");
-  const dimensionUnits = "mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸";
-  const dimensionRegex = new RegExp(
-    `${decimal}\\s*(${dimensionUnits})?\\s*(?:${separators})\\s*${decimal}\\s*(${dimensionUnits})?\\s*(?:${separators})\\s*${decimal}\\s*(${dimensionUnits})?`,
-    "i",
-  );
-  const dimensionMatch = normalized.match(dimensionRegex);
-  if (!dimensionMatch || dimensionMatch.index === undefined) {
-    return parseSpaceSeparatedCargoLine(normalized, id, config) ??
-      (allowNumericTable ? parseNumericTableCargoLine(normalized, id) : null);
-  }
-
-  return parseDimensionMatch(normalized, dimensionMatch, null, id, config);
-}
-
 function parseDimensionMatch(
   line: string,
   dimensionMatch: RegExpMatchArray,
@@ -385,25 +362,6 @@ function normalizeCargoText(value: string): string {
     .replace(/公斤/g, "kg")
     .replace(/千克/g, "kg")
     .replace(/厘米/g, "cm");
-}
-
-function buildCargoRegex(config: QuoteWorkbenchConfig): RegExp {
-  const decimal = "(\\d+(?:\\.\\d+)?)";
-  const separators = config.parser.dimension_separators.map(escapeRegex).join("|");
-  const units = config.parser.weight_units.map(escapeRegex).join("|");
-  return new RegExp(
-    `^\\s*${decimal}\\s*(?:${separators})\\s*${decimal}\\s*(?:${separators})\\s*${decimal}(?:\\s*(?:cm|厘米))?\\s+${decimal}\\s*(?:${units})\\b`,
-    "i",
-  );
-}
-
-function buildSpaceCargoRegex(config: QuoteWorkbenchConfig): RegExp {
-  if (!config.parser.allow_space_dimension_separator) {
-    return /a^/;
-  }
-  const decimal = "(\\d+(?:\\.\\d+)?)";
-  const units = config.parser.weight_units.map(escapeRegex).join("|");
-  return new RegExp(`^\\s*${decimal}\\s+${decimal}\\s+${decimal}\\s+${decimal}\\s*(?:${units})\\b`, "i");
 }
 
 function parseAddress(lines: string[], config: QuoteWorkbenchConfig): ParsedAddress {

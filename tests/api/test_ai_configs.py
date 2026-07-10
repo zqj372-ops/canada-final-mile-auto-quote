@@ -127,6 +127,99 @@ def test_set_default_ai_config_clears_previous_default() -> None:
     assert first["id"] != defaults[0]["id"]
 
 
+def test_hermes_agent_can_switch_api_key_and_model_config() -> None:
+    client = build_client()
+    first = client.post(
+        "/ai-configs",
+        json={
+            "name": "Hermes Primary",
+            "provider": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "sk-or-primary-0001",
+            "model_name": "anthropic/claude-sonnet-test",
+        },
+    ).json()
+    second = client.post(
+        "/ai-configs",
+        json={
+            "name": "Hermes Backup",
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": "sk-deepseek-backup-0002",
+            "model_name": "deepseek-chat-test",
+        },
+    ).json()
+
+    initial = client.get("/ai-configs/agents/hermes")
+    selected = client.put("/ai-configs/agents/hermes", json={"config_id": first["id"]})
+    switched = client.put("/ai-configs/agents/hermes", json={"config_id": second["id"]})
+
+    assert initial.status_code == 200
+    assert initial.json()["config"] is None
+    assert selected.status_code == 200
+    assert selected.json()["config"]["model_name"] == "anthropic/claude-sonnet-test"
+    assert switched.status_code == 200
+    assert switched.json()["config"]["id"] == second["id"]
+    assert switched.json()["config"]["masked_api_key"] == "sk-****0002"
+    assert "sk-deepseek-backup-0002" not in switched.text
+
+
+def test_hermes_agent_model_can_be_created_and_assigned_atomically() -> None:
+    client = build_client()
+
+    response = client.post(
+        "/ai-configs/agents/hermes/configs",
+        json={
+            "name": "Hermes Atomic",
+            "provider": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "sk-atomic-hermes-0003",
+            "model_name": "anthropic/test-model",
+            "enabled": True,
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["config"]["name"] == "Hermes Atomic"
+    assert body["config"]["masked_api_key"] == "sk-****0003"
+    current = client.get("/ai-configs/agents/hermes").json()
+    assert current["config"]["id"] == body["config"]["id"]
+    assert len(client.get("/ai-configs").json()) == 1
+
+
+def test_hermes_agent_rejects_disabled_config_and_clears_deleted_assignment() -> None:
+    client = build_client()
+    disabled = client.post(
+        "/ai-configs",
+        json={
+            "name": "Disabled Hermes",
+            "api_key": "sk-disabled-0001",
+            "model_name": "disabled-model",
+            "enabled": False,
+        },
+    ).json()
+    enabled = client.post(
+        "/ai-configs",
+        json={
+            "name": "Enabled Hermes",
+            "api_key": "sk-enabled-0002",
+            "model_name": "enabled-model",
+        },
+    ).json()
+
+    rejected = client.put("/ai-configs/agents/hermes", json={"config_id": disabled["id"]})
+    assigned = client.put("/ai-configs/agents/hermes", json={"config_id": enabled["id"]})
+    deleted = client.delete(f"/ai-configs/{enabled['id']}")
+    current = client.get("/ai-configs/agents/hermes")
+
+    assert rejected.status_code == 422
+    assert assigned.status_code == 200
+    assert deleted.status_code == 200
+    assert current.status_code == 200
+    assert current.json()["config"] is None
+
+
 def test_ai_config_test_failure_returns_structured_error() -> None:
     client = build_client()
     config = client.post(

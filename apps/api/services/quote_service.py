@@ -13,7 +13,11 @@ from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfi
 from apps.api.db.repositories.rate_rule_repository import RateRuleRepository
 from apps.api.db.repositories.zone_repository import ZoneRepository
 from apps.api.services.hermes_diagnostic_service import enqueue_quote_diagnostic
-from apps.api.services.notification_service import notify_manual_required, notify_quote_success
+from apps.api.services.notification_service import (
+    notify_manual_required,
+    notify_quote_success,
+    requested_notification_channels,
+)
 from apps.api.services.quote_logic_explainer import attach_zone_quote_logic
 from packages.quote_engine.engine import QuoteEngine
 from packages.quote_engine.models import QuoteCalculationRequest, QuoteResult, ShipmentInput
@@ -61,6 +65,7 @@ def calculate_zone_quote(
                 request=payload,
                 bot_id=wecom_bot_id,
                 email_config_id=email_config_id,
+                channels=requested_notification_channels(email=notify_email, wecom=notify_wecom),
             ),
             result.quote_id,
         )

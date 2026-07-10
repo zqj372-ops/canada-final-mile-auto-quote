@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import AuditPage from "./AuditPage";
-import BatchDiagnosticReportsPage from "./BatchDiagnosticReportsPage";
-import HermesDiagnosticsPage from "./HermesDiagnosticsPage";
-import LearningCandidatesPage from "./LearningCandidatesPage";
-import ManualTasksPage from "./ManualTasksPage";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+
+const AuditPage = lazy(() => import("./AuditPage"));
+const BatchDiagnosticReportsPage = lazy(() => import("./BatchDiagnosticReportsPage"));
+const HermesDiagnosticsPage = lazy(() => import("./HermesDiagnosticsPage"));
+const LearningCandidatesPage = lazy(() => import("./LearningCandidatesPage"));
+const ManualTasksPage = lazy(() => import("./ManualTasksPage"));
 
 type OperationsTab = "manual" | "diagnostics" | "batch" | "hermes" | "audit";
 
@@ -77,7 +78,7 @@ export default function OperationsWorkbenchPage({
             </p>
           </div>
 
-          <div className="grid gap-2 sm:grid-cols-2 xl:min-w-[54rem] xl:grid-cols-5">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
@@ -122,14 +123,20 @@ export default function OperationsWorkbenchPage({
           </div>
         </div>
 
-        {activeTab === "manual" && (
-          <ManualTasksPage embedded onOpenHermes={() => setActiveTab("diagnostics")} />
-        )}
-        {activeTab === "diagnostics" && <HermesDiagnosticsPage embedded />}
-        {activeTab === "batch" && <BatchDiagnosticReportsPage embedded />}
-        {activeTab === "hermes" && <LearningCandidatesPage embedded />}
-        {activeTab === "audit" && <AuditPage embedded />}
+        <Suspense fallback={<WorkbenchLoading />}>
+          {activeTab === "manual" && (
+            <ManualTasksPage embedded onOpenHermes={() => setActiveTab("diagnostics")} />
+          )}
+          {activeTab === "diagnostics" && <HermesDiagnosticsPage embedded />}
+          {activeTab === "batch" && <BatchDiagnosticReportsPage embedded />}
+          {activeTab === "hermes" && <LearningCandidatesPage embedded />}
+          {activeTab === "audit" && <AuditPage embedded />}
+        </Suspense>
       </section>
     </div>
   );
+}
+
+function WorkbenchLoading() {
+  return <div className="px-4 py-12 text-center text-sm font-medium text-slate-500">加载工作台数据…</div>;
 }

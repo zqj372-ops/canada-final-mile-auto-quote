@@ -101,7 +101,7 @@ VITE_API_BASE_URL=http://localhost:8000 npm run dev
 - `/learning-candidates`：Hermes 自学习候选审核，批准后才发布为可复用学习规则。
 - `/audit`：按 `quote_id` 查询报价审计记录。
 - `/settings/quote`：维护 `/quote` 工作台后台配置，包括示例、字段选项、风险阈值和复制话术。
-- `/settings/ai`：维护 OpenAI-compatible 模型配置，支持输入 API Key 自动获取模型列表并导入。
+- `/settings/ai`：维护 OpenAI-compatible 模型配置，支持输入 API Key 自动获取模型列表并导入，也可为内置 Hermes Agent 独立切换已加密保存的 Key/模型配置。
 - `/settings/search`：维护 Tavily 等搜索 API Key，用于 AI 自动报价时查询地址和行情参考。
 - `/settings/wecom`：维护企业微信群机器人 Webhook 配置。
 - `/settings/email`：维护邮件通知配置，作为人工任务和报价通知的主要通道。
@@ -118,6 +118,13 @@ cp .env.example .env
 docker compose -f infra/docker-compose.yml up --build
 ```
 
+本地 Compose 会在 API 启动前自动执行 `alembic upgrade head`。如需加载演示数据：
+
+```bash
+docker compose -f infra/docker-compose.yml exec -T postgres \
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < infra/postgres/seed.sql
+```
+
 数据库迁移：
 
 ```bash
@@ -132,11 +139,13 @@ alembic revision --autogenerate -m "describe schema change"
 alembic upgrade head
 ```
 
-`infra/postgres/init.sql` 仍保留用于本地容器首次初始化和演示数据；后续新增表、
-字段、索引必须通过 `migrations/versions/` 里的 Alembic migration 管理。测试库
-使用 SQLite 内存库，并由 `Base.metadata.create_all()` 自动建表。
-如果某个开发库已经由 `init.sql` 初始化到当前结构，可先执行 `alembic stamp head`
-标记版本；之后再用 `alembic upgrade head` 应用新增 migration。
+数据库结构只通过 `migrations/versions/` 里的 Alembic migration 管理，
+`infra/postgres/seed.sql` 仅提供可选演示数据。单元测试使用 SQLite 内存库，并由
+`Base.metadata.create_all()` 自动建表；CI 另外会在真实 Postgres 上从空库执行完整迁移链。
+
+旧版 Compose 曾用 `init.sql` 直接建表。如果本机仍是一次性演示数据，可先执行
+`docker compose -f infra/docker-compose.yml down -v` 清理旧卷后重新启动；有需要保留的
+数据时应先备份并核对迁移版本，不要直接把未知结构 `stamp head`。
 
 ## Hermes Agent 运维助手
 
@@ -168,6 +177,9 @@ HERMES_ENV_FILE=.env.prod
 Hermes 只能诊断、总结、提出修复建议；不能编造价格，不能改写报价金额，不能输出
 密钥或解密后的配置。报价金额仍然只能来自 Quote Engine、Zone 价格矩阵或已审核的
 `learned_quote_rules`。
+
+后台的“AI 模型配置”页面可为 Hermes 选择独立的模型配置。该绑定不会改动
+AI 报价的通用默认模型；Hermes 未单独绑定时，内置 LLM 辅助诊断链路会回退到通用默认配置。
 
 新的 Hermes 运行边界：
 

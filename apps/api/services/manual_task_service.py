@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from apps.api.db.models import ManualQuoteTask
 from apps.api.db.repositories.hermes_learning_candidate_repository import HermesLearningCandidateRepository
 from apps.api.db.repositories.manual_quote_task_repository import ManualQuoteTaskRepository
-from apps.api.services.notification_service import notify_manual_task_resolved
+from apps.api.services.notification_service import notify_manual_task_resolved, requested_notification_channels
 from apps.api.services.quote_issue_labels import localize_issue_reason, risk_tag_labels
 from apps.api.services.quote_service import try_notification
 
@@ -60,6 +60,7 @@ def update_manual_quote_task(
                 task=task,
                 bot_id=wecom_bot_id,
                 email_config_id=email_config_id,
+                channels=requested_notification_channels(email=notify_email, wecom=notify_wecom),
             ),
             task.quote_id,
         )

@@ -8,7 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.db.models import HermesLearningCandidate, LearnedQuoteRule, ManualQuoteTask
-from apps.api.db.repositories.learned_quote_rule_repository import LearnedQuoteRuleRepository
+from apps.api.db.repositories.learned_quote_rule_repository import (
+    LearnedQuoteRuleRepository,
+    quote_conditions_from_mapping,
+)
 from packages.address_normalizer import extract_fsa, normalize_city, normalize_postal_code, normalize_province
 
 
@@ -156,9 +159,24 @@ class HermesLearningCandidateRepository:
         origin = _string(result_json.get("origin"))
         zone = _int_value(result_json.get("zone"))
         risk_tags = list(result_json.get("risk_tags") or task.risk_tags or [])
+        conditions = quote_conditions_from_mapping(request_json)
         duplicate_key = "|".join(
             str(value or "")
-            for value in (scope, postal_code, postal_prefix, city, province, origin, zone, billing_pallets)
+            for value in (
+                scope,
+                postal_code,
+                postal_prefix,
+                city,
+                province,
+                origin,
+                zone,
+                billing_pallets,
+                conditions["address_type"],
+                int(bool(conditions["requires_liftgate"])),
+                int(bool(conditions["requires_pallet_jack"])),
+                int(bool(conditions["requires_appointment"])),
+                conditions["detention_minutes"],
+            )
         )
 
         return {
@@ -189,6 +207,7 @@ class HermesLearningCandidateRepository:
                 "origin": origin,
                 "zone": zone,
                 "billing_pallets": billing_pallets,
+                "conditions": conditions,
                 "total_price_usd": f"{total_price:.2f}",
                 "base_price_usd": f"{base_price:.2f}",
             },

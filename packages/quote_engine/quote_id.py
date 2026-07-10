@@ -1,19 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
-from itertools import count
-from threading import Lock
-from zoneinfo import ZoneInfo
-
-
-_counter = count()
-_lock = Lock()
-_timezone = ZoneInfo("Asia/Shanghai")
+import secrets
+from time import time_ns
 
 
 def generate_quote_id() -> str:
-    """Return an 8-digit, time-based quote id: DDHHMM + two-digit sequence."""
-    now = datetime.now(_timezone)
-    with _lock:
-        suffix = next(_counter) % 100
-    return f"{now:%d%H%M}{suffix:02d}"
+    """Return a time-ordered numeric id with a cross-process random suffix."""
+    return f"{time_ns():019d}{secrets.randbelow(1_000_000_000_000):012d}"

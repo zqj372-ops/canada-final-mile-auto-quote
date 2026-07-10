@@ -57,6 +57,12 @@ class ModelDiscoveryRequest(BaseModel):
     timeout_seconds: int = Field(default=20, ge=1, le=60)
 
 
+class AIAgentModelAssignmentUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    config_id: int = Field(ge=1)
+
+
 @router.get("/provider-presets", response_model=list[AIProviderPreset])
 def list_ai_provider_presets() -> list[AIProviderPreset]:
     return list_provider_presets()
@@ -76,6 +82,58 @@ def discover_ai_models(payload: ModelDiscoveryRequest) -> ModelDiscoveryResult:
 def list_ai_configs(db: Session = Depends(get_db)) -> list[dict[str, object]]:
     repository = AIModelConfigRepository(db)
     return [repository.to_public_dict(record) for record in repository.list_configs()]
+
+
+@router.get("/agents/{agent_key}")
+def get_ai_agent_model_assignment(
+    agent_key: str,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    repository = AIModelConfigRepository(db)
+    try:
+        record = repository.get_agent_config(agent_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "agent_key": agent_key,
+        "config": repository.to_public_dict(record) if record else None,
+    }
+
+
+@router.put("/agents/{agent_key}")
+def set_ai_agent_model_assignment(
+    agent_key: str,
+    payload: AIAgentModelAssignmentUpdate,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    repository = AIModelConfigRepository(db)
+    try:
+        record = repository.set_agent_config(agent_key, payload.config_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="AI model config not found.")
+    return {
+        "agent_key": agent_key,
+        "config": repository.to_public_dict(record),
+    }
+
+
+@router.post("/agents/{agent_key}/configs", status_code=201)
+def create_ai_agent_model_config(
+    agent_key: str,
+    payload: AIModelConfigCreate,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    repository = AIModelConfigRepository(db)
+    try:
+        record = repository.create_agent_config(agent_key, **payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "agent_key": agent_key,
+        "config": repository.to_public_dict(record),
+    }
 
 
 @router.post("", status_code=201)

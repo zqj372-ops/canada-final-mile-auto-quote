@@ -1,10 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
   createAIConfig,
+  createAIAgentModelConfig,
   deleteAIConfig,
   discoverAIModels,
+  getAIAgentModelAssignment,
   listAIConfigs,
   listAIProviderPresets,
+  setAIAgentModelAssignment,
   setDefaultAIConfig,
   testAIConfig,
   updateAIConfig,
@@ -36,7 +39,10 @@ interface ImportState {
   model_name: string;
   purpose: string;
   is_default: boolean;
+  use_for_hermes: boolean;
 }
+
+type AISettingsSection = "hermes" | "import" | "manual" | "configs";
 
 const emptyForm: FormState = {
   id: null,
@@ -60,6 +66,7 @@ const emptyImport: ImportState = {
   model_name: "",
   purpose: "general",
   is_default: false,
+  use_for_hermes: false,
 };
 
 const fallbackProviders = ["openai", "openrouter", "deepseek", "qwen", "moonshot", "zhipu", "custom"];
@@ -70,6 +77,8 @@ export default function AISettingsPage() {
   const [providerPresets, setProviderPresets] = useState<AIProviderPreset[]>([]);
   const [importForm, setImportForm] = useState<ImportState>(emptyImport);
   const [discoveredModels, setDiscoveredModels] = useState<DiscoveredModel[]>([]);
+  const [hermesConfig, setHermesConfig] = useState<AIModelConfigPublic | null>(null);
+  const [hermesSelection, setHermesSelection] = useState("");
   const [form, setForm] = useState<FormState>(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -77,10 +86,14 @@ export default function AISettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isSavingHermes, setIsSavingHermes] = useState(false);
+  const [isTestingHermes, setIsTestingHermes] = useState(false);
+  const [activeSection, setActiveSection] = useState<AISettingsSection>("hermes");
 
   useEffect(() => {
     void loadConfigs();
     void loadProviderPresets();
+    void loadHermesConfig();
   }, []);
 
   async function loadConfigs() {
@@ -102,6 +115,16 @@ export default function AISettingsPage() {
       }
     } catch {
       setProviderPresets([]);
+    }
+  }
+
+  async function loadHermesConfig() {
+    try {
+      const assignment = await getAIAgentModelAssignment("hermes");
+      setHermesConfig(assignment.config);
+      setHermesSelection(assignment.config ? String(assignment.config.id) : "");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Hermes Agent 配置加载失败");
     }
   }
 
@@ -155,7 +178,7 @@ export default function AISettingsPage() {
     }
     setIsImporting(true);
     try {
-      await createAIConfig({
+      const payload = {
         name: `${providerLabel(importForm.provider, providerPresets)} / ${importForm.model_name}`,
         provider: importForm.provider,
         base_url: optionalText(importForm.base_url),
@@ -167,11 +190,22 @@ export default function AISettingsPage() {
         purpose: importForm.purpose,
         enabled: true,
         is_default: importForm.is_default,
-      });
-      setNotice("模型配置已自动导入，可在列表中设为默认或测试连接");
-      setImportForm((current) => ({ ...current, api_key: "", model_name: "" }));
+      };
+      if (importForm.use_for_hermes) {
+        const assignment = await createAIAgentModelConfig("hermes", payload);
+        setHermesConfig(assignment.config);
+        setHermesSelection(assignment.config ? String(assignment.config.id) : "");
+      } else {
+        await createAIConfig(payload);
+      }
+      setNotice(
+        importForm.use_for_hermes
+          ? "模型配置已导入并切换为 Hermes Agent 当前配置"
+          : "模型配置已自动导入，可在列表中设为默认或测试连接",
+      );
+      setImportForm((current) => ({ ...current, api_key: "", model_name: "", use_for_hermes: false }));
       setDiscoveredModels([]);
-      await loadConfigs();
+      await Promise.all([loadConfigs(), loadHermesConfig()]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "模型配置导入失败");
     } finally {
@@ -202,7 +236,7 @@ export default function AISettingsPage() {
         setNotice("AI 配置已新增");
       }
       setForm(emptyForm);
-      await loadConfigs();
+      await Promise.all([loadConfigs(), loadHermesConfig()]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "AI 配置保存失败");
     } finally {
@@ -219,7 +253,7 @@ export default function AISettingsPage() {
     try {
       await deleteAIConfig(config.id);
       setNotice(`已删除 ${config.name}`);
-      await loadConfigs();
+      await Promise.all([loadConfigs(), loadHermesConfig()]);
       if (form.id === config.id) {
         setForm(emptyForm);
       }
@@ -250,15 +284,62 @@ export default function AISettingsPage() {
     setTestingId(config.id);
     try {
       const response = await testAIConfig(config.id);
-      setNotice(
-        response.success
-          ? `连接成功，耗时 ${response.latency_ms}ms`
-          : `连接失败：${response.error || "unknown error"} (${response.latency_ms}ms)`,
-      );
+      if (!response.success) {
+        setError(`连接失败：${response.error || "unknown error"} (${response.latency_ms}ms)`);
+        return;
+      }
+      setNotice(`连接成功，耗时 ${response.latency_ms}ms`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "测试连接失败");
     } finally {
       setTestingId(null);
+    }
+  }
+
+  async function handleSaveHermesConfig() {
+    const configId = Number(hermesSelection);
+    if (!configId) {
+      setError("请先选择 Hermes Agent 要使用的 API Key 与模型");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setIsSavingHermes(true);
+    try {
+      const assignment = await setAIAgentModelAssignment("hermes", configId);
+      setHermesConfig(assignment.config);
+      setNotice(
+        assignment.config
+          ? `Hermes Agent 已切换为 ${assignment.config.name} / ${assignment.config.model_name}`
+          : "Hermes Agent 配置已更新",
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Hermes Agent 配置切换失败");
+    } finally {
+      setIsSavingHermes(false);
+    }
+  }
+
+  async function handleTestHermesSelection() {
+    const configId = Number(hermesSelection);
+    if (!configId) {
+      setError("请先选择要测试的模型配置");
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    setIsTestingHermes(true);
+    try {
+      const response = await testAIConfig(configId);
+      if (!response.success) {
+        setError(`Hermes 候选配置连接失败：${response.error || "unknown error"}`);
+        return;
+      }
+      setNotice(`Hermes 候选配置连接成功，耗时 ${response.latency_ms}ms`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Hermes 候选配置测试失败");
+    } finally {
+      setIsTestingHermes(false);
     }
   }
 
@@ -312,15 +393,37 @@ export default function AISettingsPage() {
   const providerOptions = providerPresets.length
     ? providerPresets.map((preset) => preset.provider)
     : fallbackProviders;
+  const enabledConfigs = configs.filter((config) => config.enabled);
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+    <div
+      className="ai-settings-page mx-auto flex max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8"
+      data-active-section={activeSection}
+    >
       <header>
         <p className="text-sm font-medium text-blue-800">AI Settings</p>
         <h1 className="mt-1 text-2xl font-semibold text-slate-950">
           大模型配置
         </h1>
       </header>
+
+      <nav className="settings-section-tabs" aria-label="AI 模型配置分区">
+        {([
+          ["hermes", "Hermes"],
+          ["import", "自动导入"],
+          ["manual", "手动配置"],
+          ["configs", `配置列表 ${configs.length}`],
+        ] as Array<[AISettingsSection, string]>).map(([section, label]) => (
+          <button
+            key={section}
+            className={activeSection === section ? "settings-section-tab-active" : ""}
+            type="button"
+            onClick={() => setActiveSection(section)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
 
       {error && (
         <div
@@ -339,9 +442,78 @@ export default function AISettingsPage() {
         </div>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[0.78fr_1.22fr]">
-        <div className="grid content-start gap-6">
-        <section className="panel p-5">
+      <section className="panel ai-settings-section ai-settings-hermes overflow-hidden">
+        <div className="border-b border-slate-200 bg-white px-5 py-5 text-slate-950 sm:px-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-teal-700">Hermes Agent</p>
+              <h2 className="mt-1 text-xl font-semibold">API Key 与模型切换</h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                Hermes 使用独立绑定，切换不会改动 AI 报价的默认模型。密钥仅以加密形式保存。
+              </p>
+            </div>
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 lg:min-w-72">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">当前使用</p>
+              {hermesConfig ? (
+                <div className="mt-2">
+                  <p className="font-semibold text-slate-950">{hermesConfig.name}</p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {hermesConfig.provider} / {hermesConfig.model_name}
+                  </p>
+                  <p className="mt-1 font-mono text-xs text-slate-500">
+                    {hermesConfig.masked_api_key || "未设置 API Key"}
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-2 text-sm font-medium text-amber-700">未单独指定，当前回退到通用默认模型</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 p-5 sm:p-6 lg:grid-cols-[1fr_auto] lg:items-end">
+          <label>
+            <span className="field-label">选择 API Key / 模型配置</span>
+            <select
+              className="field-input"
+              value={hermesSelection}
+              onChange={(event) => setHermesSelection(event.target.value)}
+            >
+              <option value="">请选择已启用的配置</option>
+              {enabledConfigs.map((config) => (
+                <option key={config.id} value={config.id}>
+                  {config.name} · {config.provider}/{config.model_name} · {config.masked_api_key || "无 Key"}
+                </option>
+              ))}
+            </select>
+            <p className="field-hint">
+              如需新 Key 或新模型，可直接在下方“自动导入模型”中勾选用于 Hermes Agent。
+            </p>
+          </label>
+          <div className="grid gap-2 sm:grid-cols-2 lg:min-w-72">
+            <button
+              className="btn-secondary"
+              type="button"
+              onClick={() => void handleTestHermesSelection()}
+              disabled={!hermesSelection || isTestingHermes}
+            >
+              {isTestingHermes ? "测试中..." : "测试候选配置"}
+            </button>
+            <button
+              className="btn-primary"
+              type="button"
+              onClick={() => void handleSaveHermesConfig()}
+              disabled={!hermesSelection || isSavingHermes || Number(hermesSelection) === hermesConfig?.id}
+            >
+              {isSavingHermes ? "切换中..." : "切换 Hermes 配置"}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div className="ai-settings-sections">
+        <div className="ai-settings-form-stack">
+        <section className="panel ai-settings-section ai-settings-import p-5">
           <div>
             <h2 className="section-title">自动导入模型</h2>
             <p className="mt-1 text-sm leading-6 text-slate-600">
@@ -426,6 +598,11 @@ export default function AISettingsPage() {
               checked={importForm.is_default}
               onChange={(value) => updateImport("is_default", value)}
             />
+            <CheckboxField
+              label="导入后切换给 Hermes Agent"
+              checked={importForm.use_for_hermes}
+              onChange={(value) => updateImport("use_for_hermes", value)}
+            />
             <button
               className="btn-primary"
               type="button"
@@ -437,7 +614,7 @@ export default function AISettingsPage() {
           </div>
         </section>
 
-        <section className="panel p-5">
+        <section className="panel ai-settings-section ai-settings-manual p-5">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="section-title">{form.id ? "编辑配置" : "新增配置"}</h2>
@@ -519,7 +696,7 @@ export default function AISettingsPage() {
         </section>
         </div>
 
-        <section className="panel p-5">
+        <section className="panel ai-settings-section ai-settings-configs p-5">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="section-title">配置列表</h2>

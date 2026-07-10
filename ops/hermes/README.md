@@ -53,3 +53,10 @@ ops/hermes/run_daily_report.sh
 - A Hermes suggestion is advisory only. A resolved manual task is still
   required before a learning candidate can be approved and reused.
 - Prefer these scripts before ad-hoc SQL.
+
+## Model selection
+
+The backoffice AI settings page can bind one encrypted model configuration to
+the built-in Hermes diagnostic path. This binding is independent from the
+default AI quote extraction model. If no Hermes configuration is selected, the
+application falls back to the enabled general default model.

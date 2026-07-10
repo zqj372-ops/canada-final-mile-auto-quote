@@ -3,7 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import { getApiBaseUrl, verifyLocalAddress, type LocalAddressValidation } from "../api/client";
 import type { ParsedQuoteInput } from "../utils/quoteParser";
 
-export default function AddressMapPreview({ parsed }: { parsed: ParsedQuoteInput }) {
+export default function AddressMapPreview({
+  parsed,
+  mapMode = "collapsible",
+}: {
+  parsed: ParsedQuoteInput;
+  mapMode?: "collapsible" | "expanded";
+}) {
   const query = useMemo(() => buildMapQuery(parsed), [parsed]);
   const embedUrl = query
     ? `${getApiBaseUrl()}/maps/embed?query=${encodeURIComponent(query)}`
@@ -52,43 +58,48 @@ export default function AddressMapPreview({ parsed }: { parsed: ParsedQuoteInput
   ]);
 
   return (
-    <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3 sm:p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-slate-900">Google 地图预览</h3>
-          <p className="mt-1 text-sm leading-6 text-slate-400">
-            自动按解析地址搜索；仅用于核对地址情况，不影响系统报价金额。
-          </p>
+    <div className={`address-verification mt-3 ${mapMode === "expanded" ? "address-verification-expanded" : ""}`}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-slate-900">地址核验</h3>
+          <p className="mt-1 text-xs leading-5 text-slate-500">本地邮编库为主，地图仅用于人工复核。</p>
         </div>
-        {query && (
+        {query ? (
           <a
-            className="shrink-0 rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-semibold text-cyan-700 transition hover:bg-cyan-100"
+            className="shrink-0 text-xs font-semibold text-teal-700 transition hover:text-teal-900"
             href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`}
             target="_blank"
             rel="noreferrer"
           >
-            打开地图
+            在 Google 地图打开 ↗
           </a>
-        )}
+        ) : null}
       </div>
 
       <LocalValidationSummary validation={validation} error={validationError} />
 
-      {query ? (
-        <div className="mt-4 overflow-hidden rounded-md border border-slate-200 bg-slate-100">
-          <iframe
-            className="block h-[clamp(18rem,28vw,26rem)] w-full"
-            title={`Google 地图：${query}`}
-            src={embedUrl}
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-          />
-        </div>
-      ) : (
-        <div className="mt-2 grid h-32 place-items-center rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 text-center text-sm font-semibold text-slate-500">
-          地址解析完成后自动显示地图
-        </div>
-      )}
+      {query && mapMode === "expanded" ? (
+        <MapFrame embedUrl={embedUrl} query={query} />
+      ) : query ? (
+        <details className="address-map-disclosure mt-3">
+          <summary>展开地图预览</summary>
+          <MapFrame embedUrl={embedUrl} query={query} />
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function MapFrame({ embedUrl, query }: { embedUrl: string; query: string }) {
+  return (
+    <div className="address-map-frame mt-3 overflow-hidden rounded-md border border-slate-200 bg-slate-100">
+      <iframe
+        className="block h-[clamp(14rem,22vw,19rem)] w-full"
+        title={`Google 地图：${query}`}
+        src={embedUrl}
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+      />
     </div>
   );
 }
@@ -166,6 +177,12 @@ function formatValidationStatus(status: LocalAddressValidation["status"]): strin
 
 function buildMapQuery(parsed: ParsedQuoteInput): string {
   const address = parsed.address;
+  const hasAddressBasis = Boolean(
+    address.address_line || address.city || address.province_name || address.province_code || address.postal_code,
+  );
+  if (!hasAddressBasis) {
+    return "";
+  }
   return [
     address.address_line,
     address.city,

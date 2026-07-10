@@ -33,6 +33,7 @@ class LearnedQuoteRuleRepository:
             record.quote_id = data["quote_id"]
             record.total_price_usd = data["total_price_usd"]
             record.base_price_usd = data["base_price_usd"]
+            record.conditions_json = data["conditions_json"]
             record.origin = data["origin"]
             record.zone = data["zone"]
             record.confidence = max(record.confidence, data["confidence"])
@@ -54,6 +55,7 @@ class LearnedQuoteRuleRepository:
             "origin": candidate.origin,
             "zone": candidate.zone,
             "billing_pallets": candidate.billing_pallets,
+            "conditions_json": _conditions_from_candidate(candidate),
             "total_price_usd": candidate.resolved_total_price_usd,
             "base_price_usd": candidate.resolved_base_price_usd or candidate.resolved_total_price_usd,
             "confidence": candidate.confidence,
@@ -70,6 +72,7 @@ class LearnedQuoteRuleRepository:
             record.quote_id = data["quote_id"]
             record.total_price_usd = data["total_price_usd"]
             record.base_price_usd = data["base_price_usd"]
+            record.conditions_json = data["conditions_json"]
             record.origin = data["origin"]
             record.zone = data["zone"]
             record.confidence = max(record.confidence, data["confidence"])
@@ -100,7 +103,8 @@ class LearnedQuoteRuleRepository:
         scored = [
             (score, record)
             for record in records
-            if (score := _match_score(record, postal_code, postal_prefix, city, province)) > 0
+            if quote_conditions_match(record.conditions_json, request)
+            and (score := _match_score(record, postal_code, postal_prefix, city, province)) > 0
         ]
         if not scored:
             return None
@@ -169,6 +173,7 @@ class LearnedQuoteRuleRepository:
             "origin": _string(result_json.get("origin")),
             "zone": _int_value(result_json.get("zone")),
             "billing_pallets": billing_pallets,
+            "conditions_json": quote_conditions_from_mapping(request_json),
             "total_price_usd": total_price,
             "base_price_usd": base_price,
             "confidence": 62 if scope == "postal_prefix" else 68,
@@ -187,7 +192,15 @@ class LearnedQuoteRuleRepository:
             column = getattr(LearnedQuoteRule, field)
             value = data[field]
             query = query.where(column == value if value is not None else column.is_(None))
-        return self.session.scalars(query).first()
+        expected_conditions = normalize_quote_conditions(data.get("conditions_json"))
+        return next(
+            (
+                record
+                for record in self.session.scalars(query)
+                if normalize_quote_conditions(record.conditions_json) == expected_conditions
+            ),
+            None,
+        )
 
 
 def learned_quote_rule_to_dict(record: LearnedQuoteRule) -> dict[str, object]:
@@ -203,6 +216,7 @@ def learned_quote_rule_to_dict(record: LearnedQuoteRule) -> dict[str, object]:
         "origin": record.origin,
         "zone": record.zone,
         "billing_pallets": record.billing_pallets,
+        "conditions_json": record.conditions_json,
         "total_price_usd": f"{record.total_price_usd:.2f}",
         "base_price_usd": f"{record.base_price_usd:.2f}" if record.base_price_usd is not None else None,
         "confidence": record.confidence,
@@ -230,6 +244,50 @@ def _match_score(
         if record.city is None and record.province and record.province == province:
             return 80
     return 0
+
+
+_QUOTE_CONDITION_DEFAULTS: dict[str, object] = {
+    "address_type": "commercial",
+    "requires_liftgate": False,
+    "requires_pallet_jack": False,
+    "requires_appointment": False,
+    "detention_minutes": 0,
+}
+
+
+def quote_conditions_from_mapping(values: dict[str, object]) -> dict[str, object]:
+    return {
+        "address_type": str(values.get("address_type") or "commercial"),
+        "requires_liftgate": bool(values.get("requires_liftgate", False)),
+        "requires_pallet_jack": bool(values.get("requires_pallet_jack", False)),
+        "requires_appointment": bool(values.get("requires_appointment", False)),
+        "detention_minutes": max(0, _nonnegative_int(values.get("detention_minutes"))),
+    }
+
+
+def normalize_quote_conditions(values: object) -> dict[str, object] | None:
+    if not isinstance(values, dict):
+        return None
+    return quote_conditions_from_mapping(values)
+
+
+def quote_conditions_match(values: object, request: ZoneQuoteRequest) -> bool:
+    stored = normalize_quote_conditions(values)
+    if stored is None:
+        return False
+    return stored == quote_conditions_from_mapping(request.model_dump(mode="json"))
+
+
+def _conditions_from_candidate(candidate: HermesLearningCandidate) -> dict[str, object] | None:
+    proposal = candidate.proposal_json or {}
+    return normalize_quote_conditions(proposal.get("conditions"))
+
+
+def _nonnegative_int(value: object) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _string(value: object) -> str | None:

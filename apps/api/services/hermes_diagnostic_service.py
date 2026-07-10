@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from decimal import Decimal
@@ -15,11 +16,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.db.models import ManualQuoteTask
+from apps.api.db.repositories.ai_model_config_repository import AIModelConfigRepository
 from apps.api.db.repositories.hermes_diagnostic_repository import (
     HermesDiagnosticRepository,
     hermes_diagnostic_to_dict,
 )
 from apps.api.db.repositories.zone_repository import ZoneRepository
+from packages.ai_assistant.model_client import AIMessage, OpenAICompatibleClient, config_from_record
 from packages.address_normalizer import extract_fsa, normalize_city, normalize_province
 from packages.quote_engine.zone_lookup import ORIGIN_BY_PROVINCE
 from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult
@@ -186,6 +189,59 @@ def submit_hermes_diagnostic_suggestion(
     return hermes_diagnostic_to_dict(record)
 
 
+def run_hermes_diagnostic(
+    db: Session,
+    diagnostic_id: int,
+) -> dict[str, object]:
+    diagnostic_repository = HermesDiagnosticRepository(db)
+    diagnostic = diagnostic_repository.get(diagnostic_id)
+    if diagnostic is None:
+        raise HTTPException(status_code=404, detail="Hermes diagnostic package not found.")
+
+    config_repository = AIModelConfigRepository(db)
+    config_record = config_repository.get_agent_config("hermes")
+    if config_record is None:
+        raise HTTPException(status_code=400, detail="Hermes Agent has no enabled model configuration.")
+
+    client = OpenAICompatibleClient(
+        config_from_record(
+            config_record,
+            api_key=config_repository.decrypt_api_key(config_record),
+        )
+    )
+    response = client.complete(
+        [
+            AIMessage(role="system", content=_HERMES_DIAGNOSTIC_SYSTEM_PROMPT),
+            AIMessage(
+                role="user",
+                content=json.dumps(
+                    {
+                        "task": "diagnose_quote_without_changing_price",
+                        "diagnostic_package": diagnostic.diagnostic_package_json,
+                        "output_schema": HermesDiagnosticSuggestionPayload.model_json_schema(),
+                    },
+                    ensure_ascii=False,
+                ),
+            ),
+        ]
+    )
+    if response.error:
+        return fail_hermes_diagnostic(db, diagnostic_id, error=response.error)
+
+    data = _parse_json_object(response.content)
+    if data is None:
+        return fail_hermes_diagnostic(db, diagnostic_id, error="Hermes model returned invalid JSON.")
+    try:
+        payload = HermesDiagnosticSuggestionPayload.model_validate(data)
+    except Exception as exc:
+        return fail_hermes_diagnostic(
+            db,
+            diagnostic_id,
+            error=f"Hermes model response validation failed: {exc.__class__.__name__}",
+        )
+    return submit_hermes_diagnostic_suggestion(db, diagnostic_id, payload)
+
+
 def fail_hermes_diagnostic(
     db: Session,
     diagnostic_id: int,
@@ -200,6 +256,32 @@ def fail_hermes_diagnostic(
     if record is None:
         raise HTTPException(status_code=404, detail="Hermes diagnostic package not found.")
     return hermes_diagnostic_to_dict(record)
+
+
+_HERMES_DIAGNOSTIC_SYSTEM_PROMPT = """你是加拿大尾程报价系统内置的 Hermes 诊断 Agent。
+你只能解释给定的诊断包并提出建议，不能改价、编造价格、编造 Zone，也不能更新任何表。
+价格和 Zone 必须来自 diagnostic_package 中已有的后端证据。证据不足时，必须建议人工复核。
+只返回符合 output_schema 的 JSON 对象，不要返回 Markdown。
+""".strip()
+
+
+def _parse_json_object(content: str) -> dict[str, Any] | None:
+    text = content.strip()
+    if not text:
+        return None
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1)
+    elif not text.startswith("{"):
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if not match:
+            return None
+        text = match.group(0)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def _price_matrix_context(repository: ZoneRepository, result: ZoneQuoteResult) -> dict[str, object]:
@@ -359,7 +441,6 @@ def _find_agent_pack_dir() -> Path | None:
         "/app/reference/private_address_agent_pack",
         "/app/reference/agent_pack",
         "/home/opc/canada-final-mile-auto-quote/reference/private_address_agent_pack",
-        "/Users/autumn/Desktop/agent_pack",
     ]
     for candidate in candidates:
         if not candidate:

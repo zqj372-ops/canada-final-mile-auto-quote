@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   getBatchDiagnosticReport,
   listBatchDiagnosticReports,
@@ -20,16 +20,22 @@ export default function BatchDiagnosticReportsPage({ embedded = false }: BatchDi
   const [error, setError] = useState<string | null>(null);
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
+  const listRequestId = useRef(0);
+  const detailRequestId = useRef(0);
 
   useEffect(() => {
     void loadReports();
   }, []);
 
   async function loadReports() {
+    const requestId = ++listRequestId.current;
     setIsLoadingList(true);
     setError(null);
     try {
       const response = await listBatchDiagnosticReports();
+      if (requestId !== listRequestId.current) {
+        return;
+      }
       setReports(response);
       const firstBatchId = selectedBatchId || response[0]?.batch_id || null;
       setSelectedBatchId(firstBatchId);
@@ -41,20 +47,28 @@ export default function BatchDiagnosticReportsPage({ embedded = false }: BatchDi
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "批量诊断报告加载失败");
     } finally {
-      setIsLoadingList(false);
+      if (requestId === listRequestId.current) {
+        setIsLoadingList(false);
+      }
     }
   }
 
   async function loadDetail(batchId: string) {
+    const requestId = ++detailRequestId.current;
     setSelectedBatchId(batchId);
     setIsLoadingDetail(true);
     setError(null);
     try {
-      setDetail(await getBatchDiagnosticReport(batchId));
+      const response = await getBatchDiagnosticReport(batchId);
+      if (requestId === detailRequestId.current) {
+        setDetail(response);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "批量诊断详情加载失败");
     } finally {
-      setIsLoadingDetail(false);
+      if (requestId === detailRequestId.current) {
+        setIsLoadingDetail(false);
+      }
     }
   }
 

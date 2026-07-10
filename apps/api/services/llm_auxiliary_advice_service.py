@@ -84,7 +84,9 @@ class LLMAuxiliaryAdviceService:
         evidence: dict[str, object],
     ) -> LLMAuxiliaryAdviceDecision | None:
         config_repository = AIModelConfigRepository(self.db)
-        config_record = config_repository.get_default_config(purpose="general")
+        config_record = config_repository.get_agent_config("hermes")
+        if config_record is None:
+            config_record = config_repository.get_default_config(purpose="general")
         if config_record is None:
             return None
 

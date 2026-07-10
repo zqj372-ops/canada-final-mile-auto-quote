@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   clearStoredAuthToken,
   clearStoredApiKey,
-  getApiBaseUrl,
   getBackofficeActor,
   getQuoteErrorSummary,
   getStoredAuthToken,
@@ -11,15 +10,15 @@ import {
   type CurrentActor,
   type QuoteErrorSummary,
 } from "./api/client";
-import AIQuotePage from "./pages/AIQuotePage";
-import AISettingsPage from "./pages/AISettingsPage";
-import EmailSettingsPage from "./pages/EmailSettingsPage";
-import OperationsWorkbenchPage from "./pages/OperationsWorkbenchPage";
-import PricingSettingsPage from "./pages/PricingSettingsPage";
-import QuotePage from "./pages/QuotePage";
-import QuoteSettingsPage from "./pages/QuoteSettingsPage";
-import SearchSettingsPage from "./pages/SearchSettingsPage";
-import UserSettingsPage from "./pages/UserSettingsPage";
+const AIQuotePage = lazy(() => import("./pages/AIQuotePage"));
+const AISettingsPage = lazy(() => import("./pages/AISettingsPage"));
+const EmailSettingsPage = lazy(() => import("./pages/EmailSettingsPage"));
+const OperationsWorkbenchPage = lazy(() => import("./pages/OperationsWorkbenchPage"));
+const PricingSettingsPage = lazy(() => import("./pages/PricingSettingsPage"));
+const QuotePage = lazy(() => import("./pages/QuotePage"));
+const QuoteSettingsPage = lazy(() => import("./pages/QuoteSettingsPage"));
+const SearchSettingsPage = lazy(() => import("./pages/SearchSettingsPage"));
+const UserSettingsPage = lazy(() => import("./pages/UserSettingsPage"));
 
 type RoutePath =
   | "/quote"
@@ -274,7 +273,9 @@ export default function App() {
           跳到主内容
         </a>
         <main id="main-content" tabIndex={-1}>
-          <QuotePage adminHref={withBasePath("/admin")} />
+          <Suspense fallback={<PageLoading />}>
+            <QuotePage adminHref={withBasePath("/admin")} />
+          </Suspense>
         </main>
       </div>
     );
@@ -322,7 +323,7 @@ export default function App() {
         onLogout={logoutAdmin}
         onNavigate={navigate}
       >
-        {page}
+        <Suspense fallback={<PageLoading />}>{page}</Suspense>
       </AdminShell>
     </div>
   );
@@ -341,6 +342,11 @@ function AdminShell({
   onLogout: () => void;
   onNavigate: (path: RoutePath) => void;
 }) {
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  useEffect(() => {
+    setIsMobileNavOpen(false);
+  }, [currentPath]);
+
   const currentRoute =
     adminRoutes.find((route) => route.path === currentPath)
     ?? (isOperationsPath(currentPath) ? adminRoutes.find((route) => route.path === "/ops") : undefined)
@@ -364,7 +370,10 @@ function AdminShell({
 
   return (
     <div className="admin-shell">
-      <aside className="admin-sidebar">
+      <aside
+        id="admin-sidebar"
+        className={`admin-sidebar ${isMobileNavOpen ? "admin-sidebar-open" : ""}`}
+      >
         <div className="admin-brand">
           <div className="admin-brand-mark">
             <AdminIcon name="truck" />
@@ -392,9 +401,11 @@ function AdminShell({
                       key={route.path}
                       className={`admin-nav-link ${isActive ? "admin-nav-link-active" : ""}`}
                       href={withBasePath(route.path)}
+                      title={route.label}
                       aria-current={isActive ? "page" : undefined}
                       onClick={(event) => {
                         event.preventDefault();
+                        setIsMobileNavOpen(false);
                         onNavigate(route.path);
                       }}
                     >
@@ -417,11 +428,26 @@ function AdminShell({
           </div>
         </div>
       </aside>
+      {isMobileNavOpen && (
+        <button
+          className="admin-mobile-nav-overlay"
+          type="button"
+          aria-label="关闭后台导航"
+          onClick={() => setIsMobileNavOpen(false)}
+        />
+      )}
 
       <div className="admin-shell-main">
         <header className="admin-topbar">
           <div className="admin-topbar-title">
-            <button className="admin-icon-button" type="button" aria-label="菜单">
+            <button
+              className="admin-icon-button admin-mobile-menu-button"
+              type="button"
+              aria-controls="admin-sidebar"
+              aria-expanded={isMobileNavOpen}
+              aria-label={isMobileNavOpen ? "关闭菜单" : "打开菜单"}
+              onClick={() => setIsMobileNavOpen((current) => !current)}
+            >
               <AdminIcon name="menu" />
             </button>
             <div className="min-w-0">
@@ -431,11 +457,6 @@ function AdminShell({
           </div>
 
           <div className="admin-topbar-actions">
-            <label className="admin-search-box">
-              <AdminIcon name="search" />
-              <input placeholder="全局搜索（报价ID/地址/运单号）" />
-              <span>Ctrl K</span>
-            </label>
             <button className="btn-primary min-h-10 px-3 py-1" type="button" onClick={() => onNavigate("/ops")}>
               <AdminIcon name="user" />
               处理工作台
@@ -457,6 +478,14 @@ function AdminShell({
           {children}
         </main>
       </div>
+    </div>
+  );
+}
+
+function PageLoading() {
+  return (
+    <div className="mx-auto max-w-7xl px-6 py-16 text-center text-sm font-medium text-slate-500">
+      页面加载中…
     </div>
   );
 }
@@ -884,7 +913,6 @@ function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
           <AdminOverviewMetric
             icon="file"
             label="近24h 报价总数"
-            trend="+12.5%"
             value={summary?.daily_total_audit_count}
           />
           <AdminOverviewMetric
@@ -892,7 +920,6 @@ function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
             label="报价成功"
             note={`成功率 ${successRate}`}
             tone="success"
-            trend="+8.2%"
             value={summary?.daily_successful_quote_count}
           />
           <AdminOverviewMetric
@@ -900,7 +927,6 @@ function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
             label="需人工处理"
             note={manualRate}
             tone="warn"
-            trend="+5.4%"
             value={summary?.daily_manual_required_audit_count}
           />
           <AdminOverviewMetric
@@ -908,7 +934,6 @@ function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
             label="Hermes 待审"
             note={hermesRate}
             tone="purple"
-            trend="+3.1%"
             value={summary?.pending_learning_candidate_count}
           />
           <AdminOverviewMetric
@@ -916,7 +941,6 @@ function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
             label="AI 问题（需处理）"
             note={aiIssueRate}
             tone="danger"
-            trend="+2.0%"
             value={summary?.daily_ai_issue_task_count}
           />
         </div>
@@ -929,9 +953,6 @@ function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
           <div className="admin-card-header">
             <h2>最近报价</h2>
             <div className="flex flex-wrap gap-2">
-              <button className="btn-secondary min-h-9 px-3 py-1" type="button" onClick={() => navigate("/audit")}>
-                导出
-              </button>
               <button className="btn-secondary min-h-9 px-3 py-1" type="button" onClick={() => void loadSummary()}>
                 刷新
               </button>
@@ -980,20 +1001,7 @@ function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
             </div>
           )}
           <div className="admin-pagination">
-            <span>共 {summary?.daily_total_audit_count ?? quoteHistoryRows.length} 条</span>
-            <button type="button" disabled>‹</button>
-            <button className="active" type="button">1</button>
-            <button type="button">2</button>
-            <button type="button">3</button>
-            <button type="button">4</button>
-            <button type="button">5</button>
-            <span>...</span>
-            <button type="button">126</button>
-            <button type="button">›</button>
-            <select aria-label="每页条数">
-              <option>10 条/页</option>
-              <option>20 条/页</option>
-            </select>
+            <span>近 24 小时共 {summary?.daily_total_audit_count ?? quoteHistoryRows.length} 条，此处显示最近 10 条</span>
           </div>
         </section>
 
@@ -1093,14 +1101,12 @@ function AdminOverviewMetric({
   label,
   note,
   tone = "teal",
-  trend,
   value,
 }: {
   icon: AdminIconName;
   label: string;
   note?: string;
   tone?: "danger" | "purple" | "success" | "teal" | "warn";
-  trend?: string;
   value: number | undefined;
 }) {
   return (
@@ -1113,7 +1119,6 @@ function AdminOverviewMetric({
         <strong>{value ?? "-"}</strong>
       </div>
       {note && <span>{note}</span>}
-      {trend && <small>较昨日 {trend}</small>}
     </div>
   );
 }
@@ -1179,9 +1184,6 @@ function RiskDistribution({
     <section className="panel p-5">
       <div className="admin-card-header px-0 pt-0">
         <h2>风险标签分布（近24h）</h2>
-        <span className="admin-link-button">
-          查看全部
-        </span>
       </div>
       <div className="admin-risk-body">
         <div className="admin-risk-donut" style={{ background: `conic-gradient(${gradient})` }}>
@@ -1209,20 +1211,6 @@ function RiskDistribution({
       </p>
     </section>
   );
-}
-
-function formatAuditSource(value: string): string {
-  const labels: Record<string, string> = {
-    zone_matrix: "Zone 矩阵",
-    manual_required: "人工复核",
-    learned_manual_quote: "学习库",
-    llm_auxiliary_advice: "LLM 建议",
-    hermes_agent_correction: "LLM 建议",
-    postal_code: "邮编",
-    fsa: "FSA",
-    city: "城市",
-  };
-  return labels[value] || value || "-";
 }
 
 function formatMoneyValue(value: string | number | null): string {

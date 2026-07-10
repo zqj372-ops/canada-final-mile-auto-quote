@@ -213,7 +213,7 @@ def test_ai_missing_fields_creates_manual_task(monkeypatch: pytest.MonkeyPatch) 
     assert response.status_code == 200
     assert len(tasks) == 1
     assert tasks[0]["quote_id"].isdigit()
-    assert len(tasks[0]["quote_id"]) == 8
+    assert len(tasks[0]["quote_id"]) == 31
     assert "ai_missing_fields" in tasks[0]["risk_tags"]
     assert "cbm" in tasks[0]["result_json"]["missing_fields"]
 
@@ -239,7 +239,7 @@ def test_ai_provider_failure_returns_manual_review_instead_of_502(monkeypatch: p
     assert body["internal_note"] == "AI field extraction failed. Manual review task was created; no price was generated."
     assert len(tasks) == 1
     assert tasks[0]["quote_id"].isdigit()
-    assert len(tasks[0]["quote_id"]) == 8
+    assert len(tasks[0]["quote_id"]) == 31
     assert "ai_extraction_failed" in tasks[0]["risk_tags"]
 
 

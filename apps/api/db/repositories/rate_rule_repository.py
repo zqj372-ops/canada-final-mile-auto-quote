@@ -1,3 +1,5 @@
+from datetime import date
+
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -11,9 +13,12 @@ class RateRuleRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def list_candidate_rules(self, shipment: ShipmentInput) -> list[RateRule]:
+    def list_candidate_rules(self, shipment: ShipmentInput, *, as_of: date | None = None) -> list[RateRule]:
+        effective_date = as_of or date.today()
         stmt = select(VendorRateRule).where(
             VendorRateRule.status == "active",
+            or_(VendorRateRule.effective_from.is_(None), VendorRateRule.effective_from <= effective_date),
+            or_(VendorRateRule.effective_to.is_(None), VendorRateRule.effective_to >= effective_date),
             VendorRateRule.pallet_min <= shipment.pallet_count,
             VendorRateRule.pallet_max >= shipment.pallet_count,
             self._origin_matches(shipment.origin_warehouse),
@@ -106,4 +111,3 @@ class RateRuleRepository:
             effective_to=record.effective_to,
             status=record.status,
         )
-

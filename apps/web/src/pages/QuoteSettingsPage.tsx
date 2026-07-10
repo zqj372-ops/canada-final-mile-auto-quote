@@ -152,7 +152,7 @@ export default function QuoteSettingsPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
+    <div className="quote-settings-page mx-auto flex max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
       <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="text-sm font-medium text-blue-800">Quote Settings</p>
@@ -191,15 +191,11 @@ export default function QuoteSettingsPage() {
       )}
 
       <form className="grid gap-6" onSubmit={handleSubmit}>
-        <nav className="flex flex-wrap gap-2" aria-label="报价配置分组">
+        <nav className="settings-section-tabs" aria-label="报价配置分组">
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              className={`min-h-11 rounded-md px-4 py-2 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-700 focus:ring-offset-2 ${
-                activeTab === tab.id
-                  ? "bg-blue-700 text-white"
-                  : "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
-              }`}
+              className={activeTab === tab.id ? "settings-section-tab-active" : ""}
               type="button"
               onClick={() => setActiveTab(tab.id)}
             >
@@ -219,12 +215,14 @@ export default function QuoteSettingsPage() {
               <TextField label="清空按钮" value={config.clear_button_label} onChange={(value) => update("clear_button_label", value)} />
               <TextField label="导入按钮" value={config.import_button_label} onChange={(value) => update("import_button_label", value)} />
             </div>
-            <TextareaField label="示例输入" value={config.sample_input} onChange={(value) => update("sample_input", value)} minHeight="220px" />
-            <StringListEditor
-              label="支持格式提示"
-              values={config.format_hints}
-              onChange={(values) => update("format_hints", values)}
-            />
+            <div className="grid items-start gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+              <TextareaField label="示例输入" value={config.sample_input} onChange={(value) => update("sample_input", value)} minHeight="180px" />
+              <StringListEditor
+                label="支持格式提示"
+                values={config.format_hints}
+                onChange={(values) => update("format_hints", values)}
+              />
+            </div>
             <KeyValueEditor
               label="状态标签"
               value={config.status_labels}
@@ -526,14 +524,14 @@ function OptionListEditor({
   onChange: (values: WorkbenchOption[]) => void;
 }) {
   return (
-    <div className="grid gap-3 rounded-md border border-slate-200 p-4">
+    <div className="key-value-editor grid gap-3 rounded-md border border-slate-200 p-4">
       <div className="flex items-center justify-between gap-3">
         <h3 className="section-title">{label}</h3>
         <button className="btn-secondary min-h-10 px-3 py-1" type="button" onClick={() => onChange([...values, { value: "", label: "" }])}>
           新增
         </button>
       </div>
-      <div className="grid gap-3">
+      <div className="key-value-editor-list grid gap-3">
         {values.map((item, index) => (
           <div key={index} className="grid gap-3 rounded-md border border-slate-100 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]">
             <TextField label="值" value={item.value} onChange={(value) => updateOption(values, onChange, index, { ...item, value })} />
@@ -583,16 +581,19 @@ function KeyValueEditor({
 }) {
   const entries = Object.entries(value);
   return (
-    <div className="grid gap-3 rounded-md border border-slate-200 p-4">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="section-title">{label}</h3>
+    <details className="key-value-editor rounded-md border border-slate-200 p-4">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+        <span className="section-title">{label}</span>
+        <span className="text-xs font-semibold text-slate-500">{entries.length} 项 · 点击展开</span>
+      </summary>
+      <div className="mt-4 flex justify-end">
         <button className="btn-secondary min-h-10 px-3 py-1" type="button" onClick={() => onChange({ ...value, "": "" })}>
           新增
         </button>
       </div>
-      <div className="grid gap-3">
+      <div className="key-value-editor-list mt-3 grid gap-3">
         {entries.map(([entryKey, entryValue], index) => (
-          <div key={`${entryKey}-${index}`} className="grid gap-3 rounded-md border border-slate-100 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]">
+          <div key={`${entryKey}-${index}`} className="key-value-editor-row grid gap-3 rounded-md border border-slate-100 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_auto]">
             <TextField
               label="系统字段"
               value={entryKey}
@@ -621,7 +622,7 @@ function KeyValueEditor({
           </div>
         ))}
       </div>
-    </div>
+    </details>
   );
 }
 

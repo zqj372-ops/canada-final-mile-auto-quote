@@ -13,11 +13,24 @@ if [[ -z "${PREFIX}" ]]; then
 fi
 
 PREFIX="$(echo "${PREFIX}" | tr '[:lower:]' '[:upper:]' | tr -d ' ')"
+if [[ ! "${PREFIX}" =~ ^[A-Z][0-9][A-Z]([0-9][A-Z][0-9])?$ ]]; then
+  echo "Postal prefix must be a 3-character FSA or a 6-character Canadian postal code." >&2
+  exit 2
+fi
+
 FSA="${PREFIX:0:3}"
 P2="${PREFIX:0:2}"
-P1="${PREFIX:0:1}"
 CITY_UPPER="$(echo "${CITY}" | tr '[:lower:]' '[:upper:]')"
 PROVINCE_UPPER="$(echo "${PROVINCE}" | tr '[:lower:]' '[:upper:]')"
+
+if (( ${#CITY_UPPER} > 100 )); then
+  echo "City must be at most 100 characters." >&2
+  exit 2
+fi
+if [[ -n "${PROVINCE_UPPER}" && ! "${PROVINCE_UPPER}" =~ ^[A-Z]{2}$ ]]; then
+  echo "Province must be a 2-letter code." >&2
+  exit 2
+fi
 
 echo "== Input =="
 printf 'prefix=%s fsa=%s city=%s province=%s\n' "${PREFIX}" "${FSA}" "${CITY}" "${PROVINCE}"
@@ -25,33 +38,33 @@ printf 'prefix=%s fsa=%s city=%s province=%s\n' "${PREFIX}" "${FSA}" "${CITY}" "
 echo
 echo "== Preferred city lookup =="
 db_query "
-select postal_code, city, province
+select postal_code, preferred_city, province
 from postal_code_city_lookup
-where upper(replace(postal_code, ' ', '')) like '${FSA}%'
+where upper(replace(postal_code, ' ', '')) like :'fsa' || '%'
 order by postal_code
 limit 20;
-"
+" -v "fsa=${FSA}"
 
 echo
 echo "== Exact FSA zone rules =="
 db_query "
 select postal_prefix, city, province, origin, zone
 from zone_lookup_rules
-where upper(postal_prefix) = '${FSA}'
+where upper(postal_prefix) = :'fsa'
 order by origin, zone, city
 limit 50;
-"
+" -v "fsa=${FSA}"
 
 echo
 echo "== Same first-two prefix family =="
 db_query "
 select postal_prefix, city, province, origin, zone
 from zone_lookup_rules
-where upper(postal_prefix) like '${P2}%'
-  and ('${PROVINCE_UPPER}' = '' or upper(province) = '${PROVINCE_UPPER}')
+where upper(postal_prefix) like :'p2' || '%'
+  and (:'province' = '' or upper(province) = :'province')
 order by postal_prefix, origin, zone, city
 limit 80;
-"
+" -v "p2=${P2}" -v "province=${PROVINCE_UPPER}"
 
 if [[ -n "${CITY_UPPER}" || -n "${PROVINCE_UPPER}" ]]; then
   echo
@@ -59,11 +72,11 @@ if [[ -n "${CITY_UPPER}" || -n "${PROVINCE_UPPER}" ]]; then
   db_query "
   select postal_prefix, city, province, origin, zone
   from zone_lookup_rules
-  where ('${CITY_UPPER}' = '' or upper(city) like '%' || '${CITY_UPPER}' || '%')
-    and ('${PROVINCE_UPPER}' = '' or upper(province) = '${PROVINCE_UPPER}')
+  where (:'city' = '' or upper(city) like '%' || :'city' || '%')
+    and (:'province' = '' or upper(province) = :'province')
   order by origin, zone, postal_prefix, city
   limit 100;
-  "
+  " -v "city=${CITY_UPPER}" -v "province=${PROVINCE_UPPER}"
 fi
 
 echo
@@ -73,14 +86,14 @@ select id, scope, quote_id, postal_code, postal_prefix, city, province, origin, 
 from learned_quote_rules
 where status = 'active'
   and (
-    upper(coalesce(postal_code, '')) like '${FSA}%'
-    or upper(coalesce(postal_prefix, '')) = '${FSA}'
-    or upper(coalesce(postal_prefix, '')) like '${P2}%'
-    or ('${CITY_UPPER}' <> '' and upper(coalesce(city, '')) like '%' || '${CITY_UPPER}' || '%')
+    upper(coalesce(postal_code, '')) like :'fsa' || '%'
+    or upper(coalesce(postal_prefix, '')) = :'fsa'
+    or upper(coalesce(postal_prefix, '')) like :'p2' || '%'
+    or (:'city' <> '' and upper(coalesce(city, '')) like '%' || :'city' || '%')
   )
 order by usage_count desc, updated_at desc nulls last, id desc
 limit 50;
-"
+" -v "fsa=${FSA}" -v "p2=${P2}" -v "city=${CITY_UPPER}"
 
 echo
 echo "== Price matrix coverage by origin/zone =="
@@ -91,4 +104,3 @@ group by origin, zone
 order by origin, zone
 limit 120;
 "
-

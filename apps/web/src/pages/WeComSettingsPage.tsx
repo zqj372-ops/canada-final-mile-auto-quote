@@ -195,7 +195,7 @@ export default function WeComSettingsPage() {
         </div>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[0.75fr_1.25fr]">
+      <div className="grid gap-5 lg:grid-cols-[minmax(20rem,0.75fr)_minmax(0,1.25fr)]">
         <section className="panel p-5">
           <div className="flex items-start justify-between gap-4">
             <div>

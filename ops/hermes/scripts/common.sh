@@ -34,10 +34,12 @@ compose() {
 
 db_query() {
   local sql="$1"
-  printf '%s\n' "${sql}" | compose exec -T postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
-}
-
-db_query_csv() {
-  local sql="$1"
-  printf '%s\n' "${sql}" | compose exec -T postgres sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -A -F "," -P pager=off'
+  shift
+  {
+    printf 'begin read only;\n'
+    printf '%s\n' "${sql}"
+    printf 'rollback;\n'
+  } | compose exec -T postgres sh -c \
+    'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' \
+    sh "$@"
 }

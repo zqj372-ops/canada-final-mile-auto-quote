@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from packages.quote_engine import QuoteCalculationRequest, QuoteEngine, RateRule, ShipmentInput, SourceType
@@ -107,3 +108,36 @@ def test_weight_bound_rule_requires_matching_weight() -> None:
     result = QuoteEngine().quote(request)
 
     assert result.source_type == SourceType.MANUAL_REQUIRED
+
+
+def test_expired_and_future_rate_rules_do_not_quote() -> None:
+    request = QuoteCalculationRequest(
+        shipment=ShipmentInput(postal_code="L5T 2X3", province="ON", pallet_count=1),
+        rate_rules=[
+            RateRule(
+                rule_id="expired",
+                source_type=SourceType.FSA,
+                fsa="L5T",
+                province="ON",
+                pallet_min=1,
+                pallet_max=5,
+                base_cost_cad=Decimal("100.00"),
+                effective_to=date(2000, 1, 1),
+            ),
+            RateRule(
+                rule_id="future",
+                source_type=SourceType.FSA,
+                fsa="L5T",
+                province="ON",
+                pallet_min=1,
+                pallet_max=5,
+                base_cost_cad=Decimal("100.00"),
+                effective_from=date(2999, 1, 1),
+            ),
+        ],
+    )
+
+    result = QuoteEngine().quote(request)
+
+    assert result.source_type == SourceType.MANUAL_REQUIRED
+    assert result.internal_cost_cad is None
