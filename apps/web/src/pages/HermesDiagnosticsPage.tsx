@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import HermesModelSwitcher from "../components/HermesModelSwitcher";
 import {
   getHermesDiagnostic,
   listHermesDiagnostics,
   runHermesDiagnostic,
   submitHermesDiagnosticSuggestion,
+  type AIModelConfigPublic,
   type HermesDiagnosticRecord,
   type JsonValue,
 } from "../api/client";
@@ -24,6 +26,7 @@ export default function HermesDiagnosticsPage({ embedded = false }: HermesDiagno
   const [isSavingSuggestion, setIsSavingSuggestion] = useState(false);
   const [isRunningAgent, setIsRunningAgent] = useState(false);
   const [suggestionNote, setSuggestionNote] = useState("");
+  const [activeHermesConfig, setActiveHermesConfig] = useState<AIModelConfigPublic | null>(null);
   const detailRequestId = useRef(0);
   const agentRunRequestId = useRef(0);
 
@@ -150,6 +153,8 @@ export default function HermesDiagnosticsPage({ embedded = false }: HermesDiagno
         </header>
       )}
 
+      <HermesModelSwitcher onConfigChange={setActiveHermesConfig} />
+
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div>
@@ -254,6 +259,7 @@ export default function HermesDiagnosticsPage({ embedded = false }: HermesDiagno
               suggestionNote={suggestionNote}
               isSavingSuggestion={isSavingSuggestion}
               isRunningAgent={isRunningAgent}
+              activeHermesConfig={activeHermesConfig}
               onNoteChange={setSuggestionNote}
               onRunAgent={runSelectedDiagnostic}
               onSaveSuggestion={saveSuggestion}
@@ -274,6 +280,7 @@ function DiagnosticDetail({
   suggestionNote,
   isSavingSuggestion,
   isRunningAgent,
+  activeHermesConfig,
   onNoteChange,
   onRunAgent,
   onSaveSuggestion,
@@ -282,6 +289,7 @@ function DiagnosticDetail({
   suggestionNote: string;
   isSavingSuggestion: boolean;
   isRunningAgent: boolean;
+  activeHermesConfig: AIModelConfigPublic | null;
   onNoteChange: (value: string) => void;
   onRunAgent: () => void;
   onSaveSuggestion: (action: "manual_review" | "learning_candidate" | "no_action") => void;
@@ -428,10 +436,14 @@ function DiagnosticDetail({
             <button
               className="btn-primary min-h-10 w-full px-3 py-2 sm:w-auto"
               type="button"
-              disabled={isRunningAgent || isSavingSuggestion}
+              disabled={!activeHermesConfig || isRunningAgent || isSavingSuggestion}
               onClick={onRunAgent}
             >
-              {isRunningAgent ? "Hermes 诊断中..." : "用当前模型运行 Hermes 诊断"}
+              {isRunningAgent
+                ? `${activeHermesConfig?.model_name || "Hermes"} 诊断中...`
+                : activeHermesConfig
+                  ? `用 ${activeHermesConfig.model_name} 运行 Hermes 诊断`
+                  : "请先配置 Hermes 模型"}
             </button>
             <textarea
               className="min-h-24 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none focus:border-teal-400 focus:ring-2 focus:ring-teal-100"
