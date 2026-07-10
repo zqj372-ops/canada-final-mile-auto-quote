@@ -1898,7 +1898,7 @@ body {
 
 @media (min-width: 1024px) {
   .quote-result-modal-content {
-    grid-template-columns: minmax(0, 1.16fr) minmax(20rem, 0.84fr);
+    grid-template-columns: minmax(34rem, 0.92fr) minmax(20rem, 1.08fr);
     align-items: start;
     padding: 1rem;
   }
