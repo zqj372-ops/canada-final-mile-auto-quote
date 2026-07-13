@@ -197,6 +197,18 @@ def test_l4k_concord_on_zone_quote_success() -> None:
     assert body["manual_review_required"] is False
 
 
+def test_invalid_postal_code_returns_one_focused_validation_error() -> None:
+    client = build_client()
+
+    response = client.post("/quotes/zone-calculate", json=base_payload(postal_code="not-a-postal-code"))
+
+    assert response.status_code == 422
+    details = response.json()["detail"]
+    assert len(details) == 1
+    assert details[0]["loc"][-2:] == ["quote", "postal_code"]
+    assert details[0]["msg"] == "Value error, postal_code must be a valid Canadian postal code"
+
+
 def test_sales_note_uses_customer_copy_template_with_cargo_totals() -> None:
     client = build_client()
 
@@ -216,7 +228,7 @@ def test_sales_note_uses_customer_copy_template_with_cargo_totals() -> None:
     assert "- 下单引用单号，未引用加收50人民币/票服务费" in sales_note
 
 
-def test_v6v_richmond_bc_origin_is_overridden_to_calgary() -> None:
+def test_v6v_stale_toronto_rule_cannot_be_reused_as_calgary_zone() -> None:
     client = build_client()
 
     response = client.post(
@@ -233,10 +245,57 @@ def test_v6v_richmond_bc_origin_is_overridden_to_calgary() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 5
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "origin_matrix_guard"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["total_price_usd"] is None
     assert "stale_origin_overridden" in body["risk_tags"]
-    assert body["manual_review_required"] is False
+    assert "origin_matrix_mismatch" in body["risk_tags"]
+    assert body["match_trace"]["expected_origin"] == "calgary"
+    assert body["match_trace"]["rejected_zone"] == 5
+    assert body["manual_review_required"] is True
+
+
+def test_postal_province_prevents_wrong_origin_from_parser_or_address_data() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "V6V 1A1", "preferred_city": "Richmond", "province": "ON"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "V6V",
+                "city": "RICHMOND",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 2,
+                "match_level": "bad_legacy_data",
+                "note": "Both province and origin are wrong for a V postal code.",
+            },
+        ],
+        prices=[
+            {
+                "origin": "toronto",
+                "zone": 2,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("120.00"),
+                "source": "test",
+                "last_updated": "2026-06-03",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(postal_code="V6V 1A1", city="Richmond", province="ON"),
+    )
+
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["province"] == "BC"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["total_price_usd"] is None
 
 
 def test_t1x_prefers_expected_calgary_origin_over_stale_toronto_record() -> None:
@@ -542,7 +601,7 @@ def test_inactive_zone_rules_are_ignored() -> None:
 
     body = response.json()
     assert body["source_type"] == "manual_required"
-    assert body["matched_by"] == "postal_family_not_found"
+    assert body["matched_by"] == "city_fallback_not_found"
     assert body["manual_review_required"] is True
 
 
@@ -1029,7 +1088,7 @@ def test_saskatoon_s7k_fuzzy_matches_calgary_zone_5_not_stale_toronto_zone_14() 
     assert body["manual_review_required"] is False
 
 
-def test_nanaimo_v9s_uses_nearest_bc_postal_family_anchor() -> None:
+def test_nanaimo_v9s_does_not_treat_fsa_character_distance_as_geography() -> None:
     client = build_client(
         postal_records=[
             {"postal_code": "V9S 5X9", "preferred_city": "Nanaimo", "province": "BC"},
@@ -1101,18 +1160,86 @@ def test_nanaimo_v9s_uses_nearest_bc_postal_family_anchor() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "zone_matrix"
-    assert body["matched_by"] == "postal_family_fallback"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 7
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "city_fallback_not_found"
+    assert body["origin"] is None
+    assert body["zone"] is None
     assert body["billing_pallets"] == 6
-    assert body["base_price_usd"] == "1050.00"
-    assert body["fuel_usd"] == "367.50"
-    assert body["total_price_usd"] == "1417.50"
-    assert "postal_family_fallback" in body["risk_tags"]
-    assert "nearest_postal_prefix_fallback" in body["risk_tags"]
-    assert body["match_trace"]["nearest_prefixes"] == ["V9P"]
-    assert body["manual_review_required"] is False
+    assert body["base_price_usd"] is None
+    assert body["fuel_usd"] is None
+    assert body["total_price_usd"] is None
+    assert "zone_not_found" in body["risk_tags"]
+    assert body["manual_review_required"] is True
+
+
+def test_port_colborne_l3k_does_not_borrow_woodbridge_l3l_zone() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "L3K 4B7", "preferred_city": "Port Colborne", "province": "ON"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "L3L",
+                "city": "WOODBRIDGE",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 2,
+                "match_level": "reference",
+                "note": "Alphabetically adjacent but geographically unrelated.",
+            },
+            {
+                "postal_prefix": "L3B",
+                "city": "WELLAND",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 5,
+                "match_level": "reference",
+                "note": "Nearby city with a conflicting Zone.",
+            },
+        ],
+        prices=[
+            {
+                "origin": "toronto",
+                "zone": 2,
+                "billing_pallets": 1,
+                "base_price_usd": Decimal("90.00"),
+                "source": "test",
+                "last_updated": "2026-06-03",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="484 Barrick Rd",
+            postal_code="L3K 4B7",
+            city="Port Colborne",
+            province="ON",
+            cbm=1,
+            weight_kg=1,
+            piece_count=1,
+            packaging_type="carton",
+            longest_side_cm=100,
+            explicit_pallet_count=1,
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "city_fallback_not_found"
+    assert body["preferred_city"] == "Port Colborne"
+    assert body["postal_prefix"] == "L3K"
+    assert body["city"] == "Port Colborne"
+    assert body["province"] == "ON"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["billing_pallets"] == 1
+    assert body["base_price_usd"] is None
+    assert body["total_price_usd"] is None
+    assert body["manual_review_required"] is True
 
 
 def test_edmonton_t6r_uses_calgary_zone9_correction() -> None:
@@ -1190,7 +1317,7 @@ def test_edmonton_t6r_uses_calgary_zone9_correction() -> None:
     assert body["manual_review_required"] is False
 
 
-def test_postal_family_fallback_requires_expected_origin_anchor() -> None:
+def test_city_fallback_requires_expected_origin_anchor() -> None:
     client = build_client(
         postal_records=[
             {"postal_code": "S7K 1X6", "preferred_city": "Saskatoon", "province": "SK"},
@@ -1237,7 +1364,7 @@ def test_postal_family_fallback_requires_expected_origin_anchor() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["source_type"] == "manual_required"
-    assert body["matched_by"] == "postal_family_expected_origin_not_found"
+    assert body["matched_by"] == "city_fallback_expected_origin_not_found"
     assert body["manual_review_required"] is True
 
 

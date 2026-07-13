@@ -307,8 +307,8 @@ def test_zone_gap_creates_hermes_diagnostic_without_changing_quote() -> None:
     body = response.json()
     assert body["source_type"] == "manual_required"
     assert body["manual_review_required"] is True
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 5
+    assert body["origin"] is None
+    assert body["zone"] is None
     assert body["billing_pallets"] == 1
     assert body["total_price_usd"] is None
 
@@ -325,6 +325,8 @@ def test_zone_gap_creates_hermes_diagnostic_without_changing_quote() -> None:
     assert package["address"]["expected_origin_by_province"] == "calgary"
     assert package["zone_hit"]["source_type"] == "manual_required"
     assert package["failure"]["manual_review_required"] is True
+    assert package["price_matrix"]["requested_origin"] is None
+    assert package["price_matrix"]["requested_zone"] is None
     assert package["price_matrix"]["exact_price_found"] is False
     assert package["neighboring_fsa"][0]["postal_prefix"] == "R3A"
     assert package["neighboring_fsa"][0]["origin"] == "calgary"
@@ -478,6 +480,46 @@ def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:
     assert body["matched_rule"].startswith("learned_manual_quote")
     assert "score 100" in body["matched_rule"]
     assert "hermes_corrective_override" in body["risk_tags"]
+
+
+def test_exact_learned_rule_cannot_cross_origin_price_matrices() -> None:
+    client = build_client(
+        learned_rows=[
+            {
+                "source_task_id": 99,
+                "quote_id": "manual-99",
+                "scope": "postal_prefix_city",
+                "postal_code": "L4K 2N2",
+                "postal_prefix": "L4K",
+                "city": "CONCORD",
+                "province": "ON",
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 3,
+                "conditions_json": {
+                    "address_type": "commercial",
+                    "requires_liftgate": False,
+                    "requires_pallet_jack": False,
+                    "requires_appointment": True,
+                    "detention_minutes": 0,
+                },
+                "total_price_usd": Decimal("999.00"),
+                "base_price_usd": Decimal("999.00"),
+                "confidence": 90,
+                "status": "active",
+                "usage_count": 0,
+                "note": "Wrong-origin learned record must be ignored.",
+            }
+        ]
+    )
+
+    response = client.post("/quotes/zone-calculate", json=payload())
+
+    body = response.json()
+    assert body["source_type"] == "zone_matrix"
+    assert body["origin"] == "toronto"
+    assert body["zone"] == 2
+    assert body["total_price_usd"] == "212.00"
 
 
 def test_exact_learned_rule_does_not_reuse_price_for_different_accessorials() -> None:

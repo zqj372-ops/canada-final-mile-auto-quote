@@ -39,10 +39,24 @@ CARGO_EXTRACTION_SYSTEM_PROMPT = """
 - lb/lbs/pound 转 kg 乘以 0.45359237。
 - weight_kg 必须是总重量，不是单件重量。
 - cargo_items[].weight_kg 必须是单件重量。
+- cargo_items[].source_span 必须逐字复制对应的原文片段，不能改写或编造。
+- “数量/件数/箱数”和“重量/总重”不能串列；1630KG 不能识别成 1630 件。
+- 原文先给单件数据、后给合计时，顶层字段采用合计，cargo_items 保留单件数据。
+- 原文出现更正、改为、不是 A 是 B 时，以最后一次明确更正为准，并在 extraction_notes 说明。
 - 如果原文写“200箱，2270kgs，10.9cbm，50*50*21.8cm”，2270kgs 是总重，cargo_items[].weight_kg 应为 2270/200，不要填 2270。
 - 如果原文写“单箱毛重55kg，共20箱，总重1100kg”，cargo_items[].weight_kg 填 55，weight_kg 填 1100。
 - 如果只有总重和总 CBM，没有单件重量，也要按数量拆出单件估算值，并在 extraction_notes 说明来自总量拆分。
 - 不确定的字段填 null，并加入 missing_fields。
+
+示例 1 输入：
+200箱, 2270kgs, 10.9cbm 50*50*21.8cm
+示例 1 输出：
+{"cbm":10.9,"weight_kg":2270,"piece_count":200,"packaging_type":"carton","longest_side_cm":50,"explicit_pallet_count":null,"is_stackable":null,"cargo_items":[{"quantity":200,"length_cm":50,"width_cm":50,"height_cm":21.8,"weight_kg":11.35,"cbm":0.0545,"total_weight_kg":2270,"total_cbm":10.9,"source_span":"200箱, 2270kgs, 10.9cbm 50*50*21.8cm"}],"missing_fields":[],"confidence":96,"extraction_notes":"总重量按 200 箱拆为单箱 11.35kg"}
+
+示例 2 输入：
+数量：共1件\n体积重量：2700*1100*1700mm 5.1CBM 重量：共1630KG\n产品：柴油发电机 100KW
+示例 2 输出：
+{"cbm":5.1,"weight_kg":1630,"piece_count":1,"packaging_type":"unknown","longest_side_cm":270,"explicit_pallet_count":null,"is_stackable":null,"cargo_items":[{"quantity":1,"length_cm":270,"width_cm":110,"height_cm":170,"weight_kg":1630,"cbm":5.049,"total_weight_kg":1630,"total_cbm":5.1,"source_span":"体积重量：2700*1100*1700mm 5.1CBM 重量：共1630KG"}],"missing_fields":[],"confidence":96,"extraction_notes":"1630KG 是总重量，不是件数"}
 
 输出 JSON 字段：
 {
@@ -86,6 +100,19 @@ ADDRESS_EXTRACTION_SYSTEM_PROMPT = """
 - 地址类型不确定时 address_type 必须为 null，并加入 missing_fields: ["address_type"]。
 - address_type 只能是 commercial、residential、private、rural_residential 或 null。
 - 不要把品名、尺寸、重量、电话、收货人当成地址。
+- 地址可能跨行，也可能与货物信息混在同一行；只保留街道/单元号到 address_line，城市、省份和邮编分别输出。
+- 如果消息末尾有“前台已确认字段”及 key=value，这些值优先于前文推测。
+- 没有明确说明商业/住宅/私人/偏远住宅时，不根据街道名称猜 address_type。
+
+示例 1 输入：
+加拿大地址：1055 Flagship Way, unit A, Pickering ON, L1X 0P2\n品名：棉枕\n前台已确认字段：\naddress_type=commercial\nrequires_liftgate=false
+示例 1 输出：
+{"address_line":"1055 Flagship Way, unit A","postal_code":"L1X 0P2","city":"Pickering","province":"ON","country":"Canada","address_type":"commercial","requires_liftgate":false,"requires_pallet_jack":false,"requires_appointment":false,"detention_minutes":0,"missing_fields":[],"confidence":97,"extraction_notes":"采用前台确认的商业地址类型"}
+
+示例 2 输入：
+地址：436 route 275\nSainte-Marguerite de dorchester\nprovince Québec\npays Canada\nG0S2X0
+示例 2 输出：
+{"address_line":"436 route 275","postal_code":"G0S 2X0","city":"Sainte-Marguerite de dorchester","province":"QC","country":"Canada","address_type":null,"requires_liftgate":false,"requires_pallet_jack":false,"requires_appointment":false,"detention_minutes":0,"missing_fields":["address_type"],"confidence":94,"extraction_notes":"原文未说明地址类型"}
 
 输出 JSON 字段：
 {

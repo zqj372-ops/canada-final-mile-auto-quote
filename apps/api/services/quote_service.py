@@ -22,7 +22,12 @@ from apps.api.services.quote_logic_explainer import attach_zone_quote_logic
 from packages.quote_engine.engine import QuoteEngine
 from packages.quote_engine.models import QuoteCalculationRequest, QuoteResult, ShipmentInput
 from packages.quote_engine.zone_engine import ZoneQuoteEngine
-from packages.quote_engine.zone_lookup import origin_label
+from packages.quote_engine.zone_lookup import (
+    ORIGIN_BY_PROVINCE,
+    get_province_from_postal_code,
+    normalize_origin,
+    origin_label,
+)
 from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult, ZoneQuoteSourceType
 
 
@@ -47,6 +52,7 @@ def calculate_zone_quote(
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
     result = apply_learned_quote_if_available(db, payload, result)
+    result = enforce_origin_matrix_safety(payload, result)
     result = attach_zone_quote_logic(payload, result)
     record_zone_quote_side_effects(
         db,
@@ -88,10 +94,78 @@ def apply_learned_quote_if_available(
     if candidate is None:
         return result
     learned_rule, match_score = candidate
+    if not _origin_matches_expected_route(payload, result, learned_rule.origin, learned_rule.zone):
+        return result
     if not _should_apply_learned_rule(result, learned_rule, match_score):
         return result
     repository.mark_used(learned_rule)
     return _result_from_learned_rule(payload, result, learned_rule, match_score=match_score)
+
+
+def enforce_origin_matrix_safety(
+    request: ZoneQuoteRequest,
+    result: ZoneQuoteResult,
+) -> ZoneQuoteResult:
+    if result.matched_by == "origin_matrix_guard":
+        return result
+
+    postal_province = get_province_from_postal_code(request.postal_code)
+    province = postal_province or result.province or request.province
+    expected_origin = ORIGIN_BY_PROVINCE.get(province or "")
+    actual_origin = normalize_origin(result.origin)
+    crossed_matrices = "stale_origin_overridden" in result.risk_tags
+    origin_mismatch = actual_origin is not None and actual_origin != expected_origin
+    if expected_origin is None or (not origin_mismatch and not crossed_matrices):
+        return result
+
+    rejected_origin = result.origin
+    rejected_zone = result.zone
+    # ponytail: a Zone number cannot cross price matrices; stay manual until a corrected rule exists.
+    return result.model_copy(
+        update={
+            "source_type": ZoneQuoteSourceType.MANUAL_REQUIRED,
+            "confidence": 0,
+            "province": province,
+            "origin": None,
+            "zone": None,
+            "base_price_usd": None,
+            "fuel_usd": None,
+            "accessorials": {},
+            "total_price_usd": None,
+            "risk_tags": sorted(set([*result.risk_tags, "origin_matrix_mismatch"])),
+            "manual_review_required": True,
+            "matched_rule": (
+                f"origin_matrix_guard + {province or 'unknown province'} expects {expected_origin}; "
+                f"rejected {rejected_origin or 'unknown origin'} Zone {rejected_zone or 'unknown'}"
+            ),
+            "matched_by": "origin_matrix_guard",
+            "match_trace": {
+                **result.match_trace,
+                "expected_origin": expected_origin,
+                "postal_province": postal_province,
+                "rejected_origin": rejected_origin,
+                "rejected_zone": rejected_zone,
+                "rejected_matched_by": result.matched_by,
+                "matched_by": "origin_matrix_guard",
+            },
+            "sales_note": "需要人工复核始发仓和 Zone 后才能向客户发送报价。",
+            "internal_note": "始发仓与 Zone 规则来源不一致，已阻止跨价格矩阵报价并转人工确认。",
+        }
+    )
+
+
+def _origin_matches_expected_route(
+    request: ZoneQuoteRequest,
+    result: ZoneQuoteResult,
+    origin: str | None,
+    zone: int | None,
+) -> bool:
+    province = get_province_from_postal_code(request.postal_code) or result.province or request.province
+    expected_origin = ORIGIN_BY_PROVINCE.get(province or "")
+    resolved_origin = normalize_origin(origin or result.origin)
+    if resolved_origin is None:
+        return zone is None
+    return expected_origin is None or resolved_origin == expected_origin
 
 
 def record_zone_quote_side_effects(

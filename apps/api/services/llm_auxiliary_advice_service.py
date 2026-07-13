@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apps.api.db.models import ManualQuoteTask, ZoneLookupRule
+from apps.api.db.models import ManualQuoteTask
 from apps.api.db.repositories.ai_model_config_repository import AIModelConfigRepository
 from apps.api.db.repositories.zone_repository import ZoneRepository
 from packages.ai_assistant.model_client import AIMessage, OpenAICompatibleClient, config_from_record
@@ -65,7 +65,7 @@ class LLMAuxiliaryAdviceService:
 
     def correct(self, request: ZoneQuoteRequest, result: ZoneQuoteResult) -> ZoneQuoteResult:
         evidence = self._build_evidence(request, result)
-        if not evidence["zone_options"] and not evidence["resolved_manual_tasks"]:
+        if not evidence["curated_safe_options"] and not evidence["resolved_manual_tasks"]:
             return result
 
         decision = self._ask_agent(request, result, evidence)
@@ -143,9 +143,6 @@ class LLMAuxiliaryAdviceService:
         zone_rules = []
         if city and province:
             zone_rules.extend(self.zone_repository.list_city_zone_rules(city, province))
-        if postal_prefix and province:
-            zone_rules.extend(self.zone_repository.list_postal_family_zone_rules(postal_prefix, province))
-        zone_rules.extend(self._province_expected_origin_rules(province, expected_origin))
 
         zone_options: list[dict[str, object]] = []
         seen_zone_options: set[tuple[str, int, str, str]] = set()
@@ -188,35 +185,17 @@ class LLMAuxiliaryAdviceService:
             "billing_pallets": billing_pallets,
             "zone_options": zone_options[:80],
             "curated_safe_options": curated_safe_options[:12],
-            "resolved_manual_tasks": self._resolved_manual_task_evidence(city, province, postal_prefix, billing_pallets),
+            "resolved_manual_tasks": self._resolved_manual_task_evidence(city, province, billing_pallets),
         }
-
-    def _province_expected_origin_rules(self, province: str | None, expected_origin: str | None) -> list[Any]:
-        normalized_province = normalize_province(province)
-        if not normalized_province or not expected_origin:
-            return []
-        records = self.db.scalars(
-            select(ZoneLookupRule)
-            .where(
-                ZoneLookupRule.active.is_(True),
-                ZoneLookupRule.province == normalized_province,
-                ZoneLookupRule.origin == expected_origin,
-            )
-            .order_by(ZoneLookupRule.priority.asc(), ZoneLookupRule.postal_prefix.asc(), ZoneLookupRule.id.asc())
-            .limit(80)
-        ).all()
-        return [self.zone_repository._rule_record(record) for record in records]
 
     def _resolved_manual_task_evidence(
         self,
         city: str | None,
         province: str | None,
-        postal_prefix: str | None,
         billing_pallets: int | None,
     ) -> list[dict[str, object]]:
         normalized_city = normalize_city(city)
         normalized_province = normalize_province(province)
-        postal_initial = (postal_prefix or "")[:1].upper()
         records = self.db.scalars(
             select(ManualQuoteTask)
             .where(ManualQuoteTask.status == "resolved", ManualQuoteTask.resolved_price_usd.is_not(None))
@@ -234,8 +213,7 @@ class LLMAuxiliaryAdviceService:
             if billing_pallets is not None and task_pallets != billing_pallets:
                 continue
             same_city = bool(task_city and normalized_city and task_city == normalized_city and task_province == normalized_province)
-            same_initial = bool(task_prefix and postal_initial and task_prefix[:1].upper() == postal_initial and task_province == normalized_province)
-            if not same_city and not same_initial:
+            if not same_city:
                 continue
             matches.append(
                 {
@@ -340,11 +318,11 @@ class LLMAuxiliaryAdviceService:
 _LLM_AUXILIARY_ADVICE_SYSTEM_PROMPT = """你是 LLM 辅助建议，负责加拿大尾端报价的智能纠错。
 你不能发明价格，不能修改客户货物数据，不能绕过后端校验。
 你只能在给定 evidence 中选择：
-1. use_zone_matrix：选择 evidence.zone_options 里已有的 origin + zone，且必须 has_price_for_billing_pallets=true。
+1. use_zone_matrix：只能选择 evidence.curated_safe_options 里已有的 origin + zone；这些候选必须来自同城市、同省份、正确始发仓且价格矩阵有对应托数。
 2. use_resolved_manual_quote：选择 evidence.resolved_manual_tasks 里的已解决人工任务。
 3. no_action：证据不足，保持人工复核。
 
-evidence.curated_safe_options 是后端根据同省、正确始发仓、邮编邻近、价格矩阵可用性预筛出的纠错候选。
+evidence.curated_safe_options 是后端根据同城市、同省、正确始发仓和价格矩阵可用性预筛出的纠错候选。
 如果 curated_safe_options 非空，且候选说明没有明显矛盾，优先选择排名最高的候选，返回 use_zone_matrix。
 不要选择 expected_origin_match=false 的旧始发仓记录。
 优先避免错误放价。旧始发仓和省份不一致时要谨慎；如果没有可靠依据，返回 no_action。
@@ -371,10 +349,10 @@ def _parse_json_object(content: str) -> dict[str, Any] | None:
 
 
 def _zone_option_supported(evidence: dict[str, object], origin: str, zone: int) -> bool:
-    for option in evidence.get("zone_options") or []:
+    for option in evidence.get("curated_safe_options") or []:
         if not isinstance(option, dict):
             continue
-        if option.get("origin") == origin and _int_value(option.get("zone")) == zone and option.get("has_price_for_billing_pallets"):
+        if option.get("origin") == origin and _int_value(option.get("zone")) == zone:
             return True
     return False
 
@@ -395,8 +373,7 @@ def _curated_safe_zone_options(
     city: str | None,
     expected_origin: str | None,
 ) -> list[dict[str, object]]:
-    requested_prefix = _normalize_prefix(postal_prefix)
-    if not requested_prefix or not expected_origin:
+    if not postal_prefix or not expected_origin:
         return []
 
     requested_city = normalize_city(city)
@@ -423,20 +400,6 @@ def _curated_safe_zone_options(
             basis="same_city_expected_origin",
             confidence_ceiling=82,
             min_support=1,
-        )
-    )
-
-    nearest_options = _nearest_relaxed_prefix_options(priced_expected_options, requested_prefix)
-    curated.extend(
-        _group_safe_options(
-            nearest_options,
-            reason=(
-                f"邮编前缀 {requested_prefix} 未命中；采用同省同首字母的最近邮编锚点，"
-                "且始发仓匹配、价格矩阵有对应托数。"
-            ),
-            basis="nearest_postal_initial_expected_origin",
-            confidence_ceiling=76,
-            min_support=2,
         )
     )
 
@@ -498,41 +461,6 @@ def _group_safe_options(
             }
         )
     return curated
-
-
-def _nearest_relaxed_prefix_options(
-    options: list[dict[str, object]],
-    requested_prefix: str,
-) -> list[dict[str, object]]:
-    scored: list[tuple[int, dict[str, object]]] = []
-    for option in options:
-        prefix = _normalize_prefix(_string(option.get("postal_prefix")))
-        distance = _relaxed_prefix_distance(prefix, requested_prefix)
-        if distance is None:
-            continue
-        scored.append((distance, option))
-    if not scored:
-        return []
-    nearest = min(distance for distance, _ in scored)
-    return [option for distance, option in scored if distance == nearest]
-
-
-def _relaxed_prefix_distance(candidate: str, requested: str) -> int | None:
-    if not candidate or not requested or candidate[0] != requested[0]:
-        return None
-    if len(candidate) >= 2 and len(requested) >= 2 and candidate[:2] == requested[:2]:
-        if len(candidate) >= 3 and len(requested) >= 3:
-            return abs(_prefix_rank(candidate[2]) - _prefix_rank(requested[2]))
-        return 0
-    if len(candidate) < 2 or len(requested) < 2:
-        return 100
-    return 100 + abs(_prefix_rank(candidate[1]) - _prefix_rank(requested[1])) * 10
-
-
-def _prefix_rank(value: str) -> int:
-    if value.isdigit():
-        return ord(value) - ord("0")
-    return 10 + ord(value.upper()) - ord("A")
 
 
 def _normalize_prefix(value: str | None) -> str:

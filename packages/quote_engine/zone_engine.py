@@ -6,10 +6,11 @@ from packages.quote_engine.pallet_calculator import calculate_billing_pallets
 from packages.quote_engine.pricing import money
 from packages.quote_engine.zone_config import ZonePricingConfig
 from packages.quote_engine.zone_lookup import (
+    ORIGIN_BY_PROVINCE,
     get_province_from_postal_code,
     lookup_zone,
     lookup_zone_by_city_province,
-    lookup_zone_by_postal_family_province,
+    normalize_origin,
     origin_label,
 )
 from packages.quote_engine.zone_models import (
@@ -41,9 +42,6 @@ class ZoneDataProvider(Protocol):
     def list_city_zone_rules(self, city: str, province: str | None) -> list[ZoneLookupRuleRecord]:
         ...
 
-    def list_postal_family_zone_rules(self, postal_prefix: str, province: str | None) -> list[ZoneLookupRuleRecord]:
-        ...
-
     def get_zone_price(self, origin: str, zone: int, billing_pallets: int) -> ZonePriceRecord | None:
         ...
 
@@ -67,8 +65,8 @@ class ZoneQuoteEngine:
 
         preferred_record = self.provider.get_preferred_city(request.postal_code)
         preferred_city = preferred_record.preferred_city if preferred_record else None
-        province = (preferred_record.province if preferred_record else None) or request.province
-        province = province or get_province_from_postal_code(request.postal_code)
+        province = get_province_from_postal_code(request.postal_code)
+        province = province or (preferred_record.province if preferred_record else None) or request.province
         city = preferred_city or request.city
 
         pallet_result = calculate_billing_pallets(
@@ -108,25 +106,46 @@ class ZoneQuoteEngine:
                 zone_decision = city_zone_decision
             else:
                 zone_decision = city_zone_decision
-        if (
-            zone_decision.manual_required
-            and zone_decision.matched_by
-            in {
-                "zone_not_found",
-                "province_not_found",
-                "city_not_found",
-                "city_fallback_not_found",
-                "city_fallback_expected_origin_not_found",
-            }
-            and province
-        ):
-            postal_family_rules = self.provider.list_postal_family_zone_rules(postal_prefix, province)
-            postal_family_decision = lookup_zone_by_postal_family_province(
+
+        expected_origin = ORIGIN_BY_PROVINCE.get(province or "")
+        stale_origin = "stale_origin_overridden" in zone_decision.risk_tags
+        origin_mismatch = (
+            zone_decision.origin is not None
+            and expected_origin is not None
+            and normalize_origin(zone_decision.origin) != expected_origin
+        )
+        if not zone_decision.manual_required and expected_origin and (stale_origin or origin_mismatch):
+            rejected_origin = zone_decision.origin
+            rejected_zone = zone_decision.zone
+            # ponytail: never reuse a Zone number across the Toronto and Calgary matrices.
+            return self._manual(
+                request,
+                (
+                    f"始发仓与 Zone 规则来源不一致：{province} 应从 {expected_origin} 起运，"
+                    f"已拒绝 {rejected_origin or '未知始发仓'} Zone {rejected_zone or '未知'}。"
+                ),
+                [*zone_decision.risk_tags, *pallet_result.risk_tags, "origin_matrix_mismatch"],
+                preferred_city=preferred_city,
                 postal_prefix=postal_prefix,
+                city=city,
                 province=province,
-                rules=postal_family_rules,
+                billing_pallets=pallet_result.billing_pallets,
+                pallet_breakdown=pallet_result.components,
+                matched_by="origin_matrix_guard",
+                candidate_count=zone_decision.candidate_count,
+                match_trace={
+                    **zone_decision.match_trace,
+                    "expected_origin": expected_origin,
+                    "rejected_origin": rejected_origin,
+                    "rejected_zone": rejected_zone,
+                    "rejected_matched_by": zone_decision.matched_by,
+                    "matched_by": "origin_matrix_guard",
+                },
+                internal_note="已在价格矩阵查询前阻止跨始发仓复用 Zone，需人工确认正确分区。",
             )
-            zone_decision = postal_family_decision
+        # FSA character order is not geographic distance. If neither the exact
+        # FSA nor a same-city/province anchor is available, the quote must stay
+        # manual instead of borrowing a price from an alphabetically nearby FSA.
         if zone_decision.manual_required or zone_decision.origin is None or zone_decision.zone is None:
             return self._manual(
                 request,

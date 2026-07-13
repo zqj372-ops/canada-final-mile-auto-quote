@@ -4,9 +4,9 @@ from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 import json
 import re
-from typing import Any
+from typing import Any, Callable, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from packages.ai_assistant.model_client import AIMessage, BaseAIClient
 from packages.ai_assistant.prompts import (
@@ -106,6 +106,9 @@ class QuoteExtractionError(Exception):
     pass
 
 
+ExtractionModel = TypeVar("ExtractionModel", bound=BaseModel)
+
+
 REQUIRED_FIELDS = {
     "postal_code",
     "cbm",
@@ -155,16 +158,13 @@ PROVINCE_ALIASES = {
 
 
 def extract_quote_draft(customer_message: str, client: BaseAIClient) -> AIExtractedQuoteDraft:
-    response = client.complete(
-        [
-            AIMessage(role="system", content=FIELD_EXTRACTION_SYSTEM_PROMPT),
-            AIMessage(role="user", content=customer_message),
-        ]
+    draft = _complete_validated_extraction(
+        customer_message,
+        client,
+        system_prompt=FIELD_EXTRACTION_SYSTEM_PROMPT,
+        sanitizer=_sanitize_extraction_data,
+        model_type=AIExtractedQuoteDraft,
     )
-    if response.error:
-        raise QuoteExtractionError(response.error)
-    data = _sanitize_extraction_data(_parse_json_object(response.content))
-    draft = AIExtractedQuoteDraft.model_validate(data)
     draft = apply_deterministic_extraction(draft, customer_message)
     draft.missing_fields = sorted(missing_required_fields(draft))
     return draft
@@ -195,6 +195,7 @@ def extract_quote_draft_with_agents(customer_message: str, client: BaseAIClient)
     draft = _draft_from_agent_outputs(cargo, address)
     fallback = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), customer_message)
     draft = _merge_agent_draft_with_fallback(draft, fallback)
+    draft = _reconcile_with_explicit_facts(draft, fallback, customer_message)
     draft = _validate_cargo_items_and_totals(draft)
     if errors:
         draft.validation_notes.extend(errors)
@@ -203,29 +204,68 @@ def extract_quote_draft_with_agents(customer_message: str, client: BaseAIClient)
 
 
 def _extract_cargo_with_agent(customer_message: str, client: BaseAIClient) -> CargoAgentExtraction:
-    response = client.complete(
-        [
-            AIMessage(role="system", content=CARGO_EXTRACTION_SYSTEM_PROMPT),
-            AIMessage(role="user", content=customer_message),
-        ]
+    return _complete_validated_extraction(
+        customer_message,
+        client,
+        system_prompt=CARGO_EXTRACTION_SYSTEM_PROMPT,
+        sanitizer=_sanitize_cargo_agent_data,
+        model_type=CargoAgentExtraction,
     )
-    if response.error:
-        raise QuoteExtractionError(response.error)
-    data = _sanitize_cargo_agent_data(_parse_json_object(response.content))
-    return CargoAgentExtraction.model_validate(data)
 
 
 def _extract_address_with_agent(customer_message: str, client: BaseAIClient) -> AddressAgentExtraction:
-    response = client.complete(
-        [
-            AIMessage(role="system", content=ADDRESS_EXTRACTION_SYSTEM_PROMPT),
-            AIMessage(role="user", content=customer_message),
-        ]
+    return _complete_validated_extraction(
+        customer_message,
+        client,
+        system_prompt=ADDRESS_EXTRACTION_SYSTEM_PROMPT,
+        sanitizer=_sanitize_address_agent_data,
+        model_type=AddressAgentExtraction,
     )
+
+
+def _complete_validated_extraction(
+    customer_message: str,
+    client: BaseAIClient,
+    *,
+    system_prompt: str,
+    sanitizer: Callable[[dict[str, Any]], dict[str, Any]],
+    model_type: type[ExtractionModel],
+) -> ExtractionModel:
+    messages = [
+        AIMessage(role="system", content=system_prompt),
+        AIMessage(role="user", content=customer_message),
+    ]
+    response = client.complete(messages)
     if response.error:
         raise QuoteExtractionError(response.error)
-    data = _sanitize_address_agent_data(_parse_json_object(response.content))
-    return AddressAgentExtraction.model_validate(data)
+
+    try:
+        return model_type.model_validate(sanitizer(_parse_json_object(response.content)))
+    except (QuoteExtractionError, ValidationError) as first_error:
+        repair = client.complete(
+            [
+                *messages,
+                AIMessage(role="assistant", content=response.content[:6000]),
+                AIMessage(
+                    role="user",
+                    content=(
+                        "上次输出未通过 JSON/schema 校验："
+                        f"{_compact_validation_error(first_error)}。"
+                        "请重新核对原始消息并输出完整 JSON；只输出 JSON。"
+                    ),
+                ),
+            ]
+        )
+        if repair.error:
+            raise QuoteExtractionError(repair.error) from first_error
+        try:
+            return model_type.model_validate(sanitizer(_parse_json_object(repair.content)))
+        except (QuoteExtractionError, ValidationError) as repair_error:
+            raise QuoteExtractionError("AI extraction failed schema validation after one repair retry.") from repair_error
+
+
+def _compact_validation_error(error: Exception) -> str:
+    return " ".join(str(error).split())[:1000]
 
 
 def _draft_from_agent_outputs(
@@ -306,6 +346,88 @@ def _merge_agent_draft_with_fallback(
     return draft
 
 
+def _reconcile_with_explicit_facts(
+    draft: AIExtractedQuoteDraft,
+    fallback: AIExtractedQuoteDraft,
+    customer_message: str,
+) -> AIExtractedQuoteDraft:
+    """Let explicit source facts and UI-confirmed fields overrule model guesses."""
+
+    corrections: list[str] = []
+    has_correction_language = bool(re.search(r"(?:更正|改为|修改为|不是.{0,20}是|以.+为准)", customer_message))
+    explicit_piece_count = None if has_correction_language else _find_authoritative_piece_count(customer_message)
+    explicit_weight = None if has_correction_language else _find_authoritative_weight(customer_message)
+
+    if explicit_piece_count is not None:
+        if draft.piece_count != explicit_piece_count:
+            corrections.append("piece_count")
+        draft.piece_count = explicit_piece_count
+        draft.cargo_items = _reconcile_cargo_item_quantities(
+            draft.cargo_items,
+            fallback.cargo_items,
+            piece_count=explicit_piece_count,
+            total_weight_kg=explicit_weight or draft.weight_kg,
+            total_cbm=draft.cbm,
+        )
+
+    if explicit_weight is not None:
+        normalized_weight = _quantize(explicit_weight, "0.1")
+        if draft.weight_kg != normalized_weight:
+            corrections.append("weight_kg")
+        draft.weight_kg = normalized_weight
+
+    before_confirmed = {
+        field: getattr(draft, field)
+        for field in (
+            "address_line",
+            "postal_code",
+            "city",
+            "province",
+            "packaging_type",
+            "address_type",
+            "requires_liftgate",
+            "requires_pallet_jack",
+            "requires_appointment",
+            "detention_minutes",
+            "explicit_pallet_count",
+            "is_stackable",
+        )
+    }
+    _apply_confirmed_fields(draft, _parse_confirmed_fields(customer_message))
+    if any(getattr(draft, field) != value for field, value in before_confirmed.items()):
+        corrections.append("confirmed_fields")
+
+    if corrections:
+        draft.validation_notes.append(f"explicit_source_override:{','.join(dict.fromkeys(corrections))}")
+    return draft
+
+
+def _reconcile_cargo_item_quantities(
+    cargo_items: list[ExtractedCargoItem],
+    fallback_items: list[ExtractedCargoItem],
+    *,
+    piece_count: int,
+    total_weight_kg: Decimal | None,
+    total_cbm: Decimal | None,
+) -> list[ExtractedCargoItem]:
+    if sum(item.quantity for item in cargo_items) == piece_count:
+        return cargo_items
+    if fallback_items and sum(item.quantity for item in fallback_items) == piece_count:
+        return fallback_items
+    if len(cargo_items) != 1:
+        return []
+
+    item = cargo_items[0]
+    updates: dict[str, Any] = {
+        "quantity": piece_count,
+        "total_weight_kg": total_weight_kg,
+        "total_cbm": total_cbm,
+    }
+    if total_weight_kg is not None:
+        updates["weight_kg"] = _quantize(total_weight_kg / Decimal(piece_count), "0.01")
+    return [item.model_copy(update=updates)]
+
+
 def _validate_cargo_items_and_totals(draft: AIExtractedQuoteDraft) -> AIExtractedQuoteDraft:
     if not draft.cargo_items:
         return draft
@@ -368,6 +490,16 @@ def _split_aggregate_weight_for_single_cargo_item(draft: AIExtractedQuoteDraft) 
         return
     item = draft.cargo_items[0]
     quantity = draft.piece_count or item.quantity
+    if quantity == 1 and item.weight_kg is None:
+        draft.cargo_items[0] = item.model_copy(
+            update={
+                "weight_kg": _quantize(draft.weight_kg, "0.01"),
+                "total_weight_kg": draft.weight_kg,
+                "total_cbm": draft.cbm,
+            }
+        )
+        draft.validation_notes.append("applied_total_weight_to_single_cargo_item")
+        return
     if quantity <= 1:
         return
 
@@ -422,6 +554,9 @@ def apply_deterministic_extraction(draft: AIExtractedQuoteDraft, customer_messag
     packaging = _infer_packaging_type(customer_message)
     if packaging and not draft.packaging_type:
         draft.packaging_type = packaging
+    explicit_pallet_count = _find_explicit_pallet_count(customer_message)
+    if explicit_pallet_count is not None:
+        draft.explicit_pallet_count = explicit_pallet_count
     _apply_confirmed_fields(draft, confirmed)
 
     notes = list(filter(None, [draft.extraction_notes]))
@@ -435,7 +570,7 @@ def apply_deterministic_extraction(draft: AIExtractedQuoteDraft, customer_messag
     if parsed["piece_count"] and draft.confidence < 75:
         draft.confidence = max(draft.confidence, 75)
     _clear_placeholder_fields(draft)
-    return draft
+    return _validate_cargo_items_and_totals(draft)
 
 
 def _clear_suspicious_model_piece_count(
@@ -976,14 +1111,14 @@ def _find_quantity(line: str, dimension_start: int, item_end: int) -> int:
     prefix = line[max(0, dimension_start - 24) : dimension_start]
     suffix = line[item_end : item_end + 32]
     suffix_quantity_match = re.search(
-        r"(?P<qty>\d{1,5})\s*(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托|pallets?)",
+        r"(?P<qty>\d{1,5})\s*(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托盘|托|pallets?)",
         suffix,
         re.IGNORECASE,
     )
     if suffix_quantity_match:
         return max(1, int(suffix_quantity_match.group("qty")))
     prefix_match = re.search(
-        r"(?P<qty>\d{1,5})\s*(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托|pallets?)\s*$",
+        r"(?P<qty>\d{1,5})\s*(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托盘|托|pallets?)\s*$",
         prefix,
         re.IGNORECASE,
     )
@@ -1037,6 +1172,20 @@ def _find_explicit_decimal(customer_message: str, unit_pattern: str) -> Decimal 
     return Decimal(match.group(1)) if match else None
 
 
+def _find_authoritative_weight(customer_message: str) -> Decimal | None:
+    patterns = [
+        r"(?:total\s*weight|总重量|总重|重量合计)\D{0,16}(\d+(?:\.\d+)?)\s*(kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)\b",
+        r"(?:合计|总计|一共)\D{0,16}(\d+(?:\.\d+)?)\s*(kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)\b",
+        r"(\d+(?:\.\d+)?)\s*(kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)\s*(?:total|合计|总重)",
+    ]
+    values = {
+        _to_kg(match.group(1), match.group(2))
+        for pattern in patterns
+        for match in re.finditer(pattern, customer_message, re.IGNORECASE)
+    }
+    return next(iter(values)) if len(values) == 1 else None
+
+
 def _find_explicit_weight(customer_message: str) -> Decimal | None:
     patterns = [
         r"(?:total\s*weight|总重量|总重|重量合计)\D{0,12}(\d+(?:\.\d+)?)\s*(kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)\b",
@@ -1064,6 +1213,21 @@ def _find_any_weight(customer_message: str) -> Decimal | None:
     return _to_kg(match.group(1), match.group(2))
 
 
+def _find_authoritative_piece_count(customer_message: str) -> int | None:
+    unit = r"(?:pcs?|pieces?|件|箱|托盘|托|ctns?|cartons?|boxes|pallets?)"
+    patterns = [
+        rf"(?:数量|箱数|件数|总件数|总箱数)\s*[:：]?\s*(?:共|合计|总计)?\s*(\d{{1,5}})\s*{unit}",
+        rf"(?:一共|共|合计|总计)\s*(\d{{1,5}})\s*{unit}",
+        rf"(\d{{1,5}})\s*{unit}\s*(?:total|合计|总计)",
+    ]
+    values = {
+        int(match.group(1))
+        for pattern in patterns
+        for match in re.finditer(pattern, customer_message, re.IGNORECASE)
+    }
+    return next(iter(values)) if len(values) == 1 else None
+
+
 def _find_explicit_piece_count(customer_message: str) -> int | None:
     patterns = [
         r"(?:数量|箱数|件数|总件数|总箱数)\s*[:：]?\s*(?:共|合计|总计)?\s*(\d{1,4})\s*(?:pcs?|pieces?|件|箱|ctns?|cartons?|boxes)",
@@ -1074,7 +1238,12 @@ def _find_explicit_piece_count(customer_message: str) -> int | None:
         match = re.search(pattern, customer_message, re.IGNORECASE)
         if match:
             return max(1, int(match.group(1)))
-    return None
+    return _find_explicit_pallet_count(customer_message)
+
+
+def _find_explicit_pallet_count(customer_message: str) -> int | None:
+    match = re.search(r"(\d{1,4})\s*(?:托盘|托|pallets?\b)", customer_message, re.IGNORECASE)
+    return max(1, int(match.group(1))) if match else None
 
 
 def _find_postal_code(customer_message: str) -> str | None:

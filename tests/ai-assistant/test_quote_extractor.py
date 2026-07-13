@@ -27,6 +27,19 @@ class FakeDualAIClient:
         return AIResponse(content=self.cargo if "货物字段 Agent" in first else self.address)
 
 
+class RepairingDualAIClient(FakeDualAIClient):
+    def __init__(self, *, cargo: str, address: str):
+        super().__init__(cargo=cargo, address=address)
+        self.cargo_calls = 0
+
+    def complete(self, messages: object) -> AIResponse:
+        first = messages[0].content if isinstance(messages, list) and messages else ""
+        if "货物字段 Agent" not in first:
+            return AIResponse(content=self.address)
+        self.cargo_calls += 1
+        return AIResponse(content="not json" if self.cargo_calls == 1 else self.cargo)
+
+
 def test_deterministic_extraction_normalizes_mixed_units() -> None:
     raw = """
     2pcs 67in x 55in x 34in 900lbs
@@ -242,6 +255,27 @@ def test_deterministic_extraction_overrides_ai_weight_as_piece_count() -> None:
     assert draft.cbm == Decimal("5.100")
     assert draft.weight_kg == Decimal("1630.0")
     assert draft.longest_side_cm == Decimal("270.0")
+    assert len(draft.cargo_items) == 1
+    assert draft.cargo_items[0].quantity == 1
+    assert draft.cargo_items[0].weight_kg == Decimal("1630.00")
+
+
+def test_deterministic_extraction_recognizes_chinese_pallet_count() -> None:
+    raw = """
+    3托盘 120*100*150cm
+    总重1200kg 总体积4.5CBM
+    285177 Frontier Road
+    Calgary AB T1X 0A0
+    """
+
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    assert draft.piece_count == 3
+    assert draft.explicit_pallet_count == 3
+    assert draft.weight_kg == Decimal("1200.0")
+    assert draft.cbm == Decimal("4.500")
+    assert draft.cargo_items[0].quantity == 3
+    assert draft.cargo_items[0].weight_kg == Decimal("400.00")
 
 
 def test_deterministic_extraction_clears_suspicious_model_piece_count() -> None:
@@ -504,3 +538,122 @@ def test_extract_quote_draft_with_agents_merges_cargo_and_address_outputs() -> N
     assert draft.cargo_items[0].quantity == 200
     assert draft.cargo_items[0].weight_kg == Decimal("11.35")
     assert "split_total_weight_across_single_cargo_line" in draft.validation_notes
+
+
+def test_extract_quote_draft_with_agents_repairs_invalid_json_once() -> None:
+    cargo = """
+    {
+      "cbm": 2.18,
+      "weight_kg": 352.5,
+      "piece_count": 15,
+      "packaging_type": "carton",
+      "longest_side_cm": 62.5,
+      "explicit_pallet_count": null,
+      "is_stackable": null,
+      "cargo_items": [],
+      "missing_fields": [],
+      "confidence": 90,
+      "extraction_notes": "repaired"
+    }
+    """
+    address = """
+    {
+      "address_line": "9699 Sills Ave #8",
+      "postal_code": "V6Y 0C8",
+      "city": "Richmond",
+      "province": "BC",
+      "country": "Canada",
+      "address_type": "commercial",
+      "requires_liftgate": false,
+      "requires_pallet_jack": false,
+      "requires_appointment": false,
+      "detention_minutes": 0,
+      "missing_fields": [],
+      "confidence": 90,
+      "extraction_notes": "parsed"
+    }
+    """
+    client = RepairingDualAIClient(cargo=cargo, address=address)
+
+    draft = extract_quote_draft_with_agents(
+        "15箱 合计352.5kg 2.18CBM\n9699 Sills Ave #8, Richmond, BC V6Y 0C8",
+        client,
+    )
+
+    assert client.cargo_calls == 2
+    assert draft.piece_count == 15
+    assert draft.weight_kg == Decimal("352.5")
+    assert draft.postal_code == "V6Y 0C8"
+
+
+def test_extract_quote_draft_with_agents_prefers_explicit_and_confirmed_fields() -> None:
+    cargo = """
+    {
+      "cbm": 5.1,
+      "weight_kg": 999,
+      "piece_count": 1630,
+      "packaging_type": "unknown",
+      "longest_side_cm": 270,
+      "explicit_pallet_count": null,
+      "is_stackable": null,
+      "cargo_items": [{
+        "quantity": 1630,
+        "length_cm": 270,
+        "width_cm": 110,
+        "height_cm": 170,
+        "weight_kg": 1,
+        "cbm": 5.049,
+        "total_weight_kg": 999,
+        "total_cbm": 5.1,
+        "source_span": "总重：1630KG"
+      }],
+      "missing_fields": [],
+      "confidence": 88,
+      "extraction_notes": "model confused weight with quantity"
+    }
+    """
+    address = """
+    {
+      "address_line": "436 route 275",
+      "postal_code": "G0S2X0",
+      "city": "Sainte-Marguerite de dorchester",
+      "province": "Québec",
+      "country": "Canada",
+      "address_type": "residential",
+      "requires_liftgate": true,
+      "requires_pallet_jack": true,
+      "requires_appointment": true,
+      "detention_minutes": 30,
+      "missing_fields": [],
+      "confidence": 88,
+      "extraction_notes": "guessed"
+    }
+    """
+    raw = """
+    数量：共1件
+    体积重量：2700*1100*1700mm 5.1CBM
+    总重：1630KG
+    地址：436 route 275
+    Sainte-Marguerite de dorchester Québec Canada G0S2X0
+
+    ---
+    前台已确认字段，仅用于字段提取，不允许 AI 计算价格：
+    address_type=commercial
+    requires_liftgate=false
+    requires_pallet_jack=false
+    requires_appointment=false
+    detention_minutes=0
+    """
+
+    draft = extract_quote_draft_with_agents(raw, FakeDualAIClient(cargo=cargo, address=address))
+
+    assert draft.piece_count == 1
+    assert draft.weight_kg == Decimal("1630.0")
+    assert draft.cargo_items[0].quantity == 1
+    assert draft.cargo_items[0].weight_kg == Decimal("1630.00")
+    assert draft.address_type == "commercial"
+    assert draft.requires_liftgate is False
+    assert draft.requires_pallet_jack is False
+    assert draft.requires_appointment is False
+    assert draft.detention_minutes == 0
+    assert "explicit_source_override:piece_count,weight_kg,confirmed_fields" in draft.validation_notes

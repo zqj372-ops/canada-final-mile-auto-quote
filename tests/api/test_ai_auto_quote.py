@@ -302,6 +302,55 @@ def test_ai_extraction_complete_calls_zone_quote_engine(monkeypatch: pytest.Monk
     assert body["address_validation"]["postal_code"] == "L4K 2N2"
 
 
+def test_ai_auto_quote_blocks_cross_origin_zone_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = build_client()
+    monkeypatch.setattr(
+        "apps.api.services.ai_quote_service.extract_quote_draft",
+        lambda _message, _client: AIExtractedQuoteDraft(
+            address_line="123 Test St",
+            postal_code="V6V 1A1",
+            city="Richmond",
+            province="BC",
+            cbm=Decimal("4.2"),
+            weight_kg=Decimal("850"),
+            piece_count=10,
+            packaging_type="carton",
+            address_type="commercial",
+            missing_fields=[],
+            confidence=95,
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.api.services.ai_quote_service.ZoneQuoteEngine.quote",
+        lambda _engine, _request: ZoneQuoteResult(
+            source_type="zone_matrix",
+            confidence=90,
+            postal_code="V6V 1A1",
+            postal_prefix="V6V",
+            city="Richmond",
+            province="BC",
+            origin="toronto",
+            zone=5,
+            billing_pallets=3,
+            base_price_usd=Decimal("120.00"),
+            fuel_usd=Decimal("42.00"),
+            total_price_usd=Decimal("162.00"),
+            manual_review_required=False,
+            matched_rule="unsafe test result",
+        ),
+    )
+
+    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
+
+    body = response.json()
+    assert body["quote_result"]["source_type"] == "manual_required"
+    assert body["quote_result"]["matched_by"] == "origin_matrix_guard"
+    assert body["quote_result"]["origin"] is None
+    assert body["quote_result"]["zone"] is None
+    assert body["quote_result"]["total_price_usd"] is None
+    assert body["manual_review_required"] is True
+
+
 def test_ai_optional_missing_fields_still_calls_zone_quote_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     client = build_client()
 

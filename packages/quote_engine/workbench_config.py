@@ -194,6 +194,7 @@ class QuoteWorkbenchConfig(BaseModel):
             "billing_pallets_manual_required": "计费托数需人工确认",
             "long_piece_count_suspicious": "超长件数量异常",
             "stale_origin_overridden": "始发仓已按省份规则覆盖",
+            "origin_matrix_mismatch": "始发仓与 Zone 价格矩阵冲突",
             "split_record_conflict": "邮编存在拆分记录冲突",
         }
     )

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy.orm import Session
 
 from apps.api.auth import QUOTE_WRITE_ROLES, require_roles
@@ -21,6 +21,13 @@ class ZoneQuoteWithNotifyRequest(BaseModel):
     notify_wecom: bool = False
     wecom_bot_id: int | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def wrap_flat_quote(cls, value: object) -> object:
+        if isinstance(value, dict) and "quote" not in value:
+            return {"quote": value}
+        return value
+
 
 @router.post("/calculate", response_model=QuoteResult, dependencies=[Depends(require_roles(*QUOTE_WRITE_ROLES))])
 def calculate_quote(shipment: ShipmentInput, db: Session = Depends(get_db)) -> QuoteResult:
@@ -29,23 +36,14 @@ def calculate_quote(shipment: ShipmentInput, db: Session = Depends(get_db)) -> Q
 
 @router.post("/zone-calculate", response_model=ZoneQuoteResult, dependencies=[Depends(require_roles(*QUOTE_WRITE_ROLES))])
 def calculate_zone_quote(
-    payload: ZoneQuoteWithNotifyRequest | ZoneQuoteRequest,
+    payload: ZoneQuoteWithNotifyRequest,
     db: Session = Depends(get_db),
 ) -> ZoneQuoteResult:
-    quote_payload, notify_email, email_config_id, notify_wecom, wecom_bot_id = _normalize_zone_payload(payload)
     return calculate_zone_quote_service(
         db,
-        quote_payload,
-        notify_email=notify_email,
-        email_config_id=email_config_id,
-        notify_wecom=notify_wecom,
-        wecom_bot_id=wecom_bot_id,
+        payload.quote,
+        notify_email=payload.notify_email,
+        email_config_id=payload.email_config_id,
+        notify_wecom=payload.notify_wecom,
+        wecom_bot_id=payload.wecom_bot_id,
     )
-
-
-def _normalize_zone_payload(
-    payload: ZoneQuoteWithNotifyRequest | ZoneQuoteRequest,
-) -> tuple[ZoneQuoteRequest, bool, int | None, bool, int | None]:
-    if isinstance(payload, ZoneQuoteWithNotifyRequest):
-        return payload.quote, payload.notify_email, payload.email_config_id, payload.notify_wecom, payload.wecom_bot_id
-    return payload, False, None, False, None

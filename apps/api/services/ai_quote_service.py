@@ -24,7 +24,12 @@ from apps.api.services.notification_service import (
     requested_notification_channels,
 )
 from apps.api.services.quote_logic_explainer import attach_zone_quote_logic
-from apps.api.services.quote_service import apply_learned_quote_if_available, record_zone_quote_side_effects, try_notification
+from apps.api.services.quote_service import (
+    apply_learned_quote_if_available,
+    enforce_origin_matrix_safety,
+    record_zone_quote_side_effects,
+    try_notification,
+)
 from apps.api.services.search_context_service import QuoteSearchContext, build_quote_search_context
 from packages.ai_assistant.model_client import AIMessage, OpenAICompatibleClient, config_from_record
 from packages.ai_assistant.output_guard import validate_zone_ai_output
@@ -209,6 +214,7 @@ def calculate_ai_auto_quote(
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     quote_result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(zone_request)
     quote_result = apply_learned_quote_if_available(db, zone_request, quote_result)
+    quote_result = enforce_origin_matrix_safety(zone_request, quote_result)
     quote_result = attach_zone_quote_logic(zone_request, quote_result)
     record_zone_quote_side_effects(
         db,

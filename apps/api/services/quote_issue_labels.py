@@ -23,6 +23,7 @@ RISK_TAG_LABELS: dict[str, str] = {
     "long_piece_count_suspicious": "超长件数量异常",
     "flat_rate_packaging_required": "特殊包装需按整托/人工确认",
     "stale_origin_overridden": "始发仓已按省份规则覆盖",
+    "origin_matrix_mismatch": "始发仓与 Zone 价格矩阵冲突",
     "split_record_conflict": "邮编存在拆分记录冲突",
     "ai_extraction_failed": "AI 字段提取失败",
     "ai_missing_fields": "AI 缺少必要字段",
