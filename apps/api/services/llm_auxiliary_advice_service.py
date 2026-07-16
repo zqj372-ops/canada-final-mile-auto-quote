@@ -249,6 +249,8 @@ class LLMAuxiliaryAdviceService:
         pricing = calculate_zone_price(
             base_price_usd=money(price_record.base_price_usd),
             address_type=request.address_type,
+            origin=decision.origin,
+            zone=decision.zone,
             requires_liftgate=request.requires_liftgate,
             requires_pallet_jack=request.requires_pallet_jack,
             requires_appointment=request.requires_appointment,

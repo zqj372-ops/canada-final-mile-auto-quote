@@ -130,6 +130,7 @@ def test_admin_can_manage_zone_pricing_config(monkeypatch: pytest.MonkeyPatch) -
         "/quote-configs/zone-pricing",
         json={
             "fuel_percent": "18.5",
+            "fuel_percent_by_zone": {"calgary|1": "12.5"},
             "residential_fee_usd": "55",
             "liftgate_fee_usd": "60",
             "pallet_jack_fee_usd": "50",
@@ -143,8 +144,10 @@ def test_admin_can_manage_zone_pricing_config(monkeypatch: pytest.MonkeyPatch) -
 
     assert read_response.status_code == 200
     assert read_response.json()["fuel_percent"] == "35"
+    assert read_response.json()["fuel_percent_by_zone"] == {}
     assert update_response.status_code == 200
     assert read_back.json()["fuel_percent"] == "18.5"
+    assert read_back.json()["fuel_percent_by_zone"] == {"calgary|1": "12.5"}
     assert read_back.json()["detention_free_minutes"] == 20
 
 

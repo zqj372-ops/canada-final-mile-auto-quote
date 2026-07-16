@@ -6,7 +6,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from apps.api.db.models import Base, CityAlias, PostalCodeCityLookup, PostalZoneOverride, ZoneLookupRule, ZonePriceMatrix
+from apps.api.db.models import (
+    Base,
+    CityAlias,
+    PostalCodeCityLookup,
+    PostalZoneOverride,
+    QuoteRuleConfig,
+    ZoneLookupRule,
+    ZonePriceMatrix,
+)
 from apps.api.db.session import get_db
 from apps.api.main import app
 
@@ -18,6 +26,7 @@ def build_client(
     city_aliases: list[dict[str, object]] | None = None,
     zone_rules: list[dict[str, object]] | None = None,
     prices: list[dict[str, object]] | None = None,
+    quote_rule_configs: list[dict[str, object]] | None = None,
 ) -> TestClient:
     engine = create_engine(
         "sqlite+pysqlite://",
@@ -38,6 +47,8 @@ def build_client(
             session.add(ZoneLookupRule(**record))
         for record in prices or default_prices():
             session.add(ZonePriceMatrix(**record))
+        for record in quote_rule_configs or []:
+            session.add(QuoteRuleConfig(**record))
         session.commit()
 
     def override_get_db() -> Generator[Session]:
@@ -197,6 +208,37 @@ def test_l4k_concord_on_zone_quote_success() -> None:
     assert body["manual_review_required"] is False
 
 
+def test_zone_quote_uses_zone_fuel_percent_override() -> None:
+    client = build_client(
+        quote_rule_configs=[
+            {
+                "key": "fuel_percent_by_zone",
+                "value": '{"calgary|1":"10"}',
+                "description": None,
+            }
+        ]
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="123 Calgary Trail",
+            postal_code="T1X 0A0",
+            city="Calgary",
+            province="AB",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 1
+    assert body["base_price_usd"] == "95.00"
+    assert body["fuel_usd"] == "9.50"
+    assert body["total_price_usd"] == "104.50"
+
+
 def test_invalid_postal_code_returns_one_focused_validation_error() -> None:
     client = build_client()
 
@@ -255,6 +297,106 @@ def test_v6v_stale_toronto_rule_cannot_be_reused_as_calgary_zone() -> None:
     assert body["match_trace"]["expected_origin"] == "calgary"
     assert body["match_trace"]["rejected_zone"] == 5
     assert body["manual_review_required"] is True
+
+
+def test_stale_exact_zone_uses_same_city_expected_origin_anchor() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "V6V 1A1", "preferred_city": "Richmond", "province": "BC"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "V6V",
+                "city": "RICHMOND",
+                "province": "BC",
+                "origin": "toronto",
+                "zone": 10,
+                "match_level": "legacy_anchor",
+                "note": "stale exact FSA row",
+            },
+            {
+                "postal_prefix": "V6W",
+                "city": "RICHMOND",
+                "province": "BC",
+                "origin": "calgary",
+                "zone": 5,
+                "match_level": "trusted_city_anchor",
+                "note": "same-city expected-origin anchor",
+            },
+        ],
+        prices=[
+            {
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("180.00"),
+                "source": "test",
+                "last_updated": "2026-06-03",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            postal_code="V6V 1A1",
+            city="Richmond",
+            province="BC",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "zone_matrix"
+    assert body["matched_by"] == "city_zone_fallback"
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 5
+    assert body["base_price_usd"] == "180.00"
+    assert body["manual_review_required"] is False
+    assert "stale_origin_overridden" not in body["risk_tags"]
+    assert "expected_origin_preferred" in body["risk_tags"]
+
+
+def test_city_fallback_ignores_cross_province_legacy_anchor() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "V4G 1N4", "preferred_city": "Delta", "province": "BC"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "K0E",
+                "city": "DELTA",
+                "province": "BC",
+                "origin": "toronto",
+                "zone": 10,
+                "match_level": "legacy_anchor",
+                "note": "K0E is an Ontario FSA, not a BC FSA",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="7939 Horne Street",
+            postal_code="V4G 1N4",
+            city="Delta",
+            province="BC",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "city_fallback_invalid_anchor"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["total_price_usd"] is None
+    assert "zone_rule_province_mismatch" in body["risk_tags"]
+    assert "K0E" in body["matched_rule"]
+    assert "V4G" in body["matched_rule"]
 
 
 def test_postal_province_prevents_wrong_origin_from_parser_or_address_data() -> None:
@@ -796,6 +938,60 @@ def test_surrey_v3w_uses_expected_origin_adjacent_city_anchor() -> None:
     assert body["total_price_usd"] == "405.00"
     assert "city_zone_prefix_family_fallback" in body["risk_tags"]
     assert "expected_origin_preferred" in body["risk_tags"]
+    assert body["manual_review_required"] is False
+
+
+def test_vancouver_v5l_uses_corrected_calgary_city_anchor() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "V5L 3K9", "preferred_city": "Vancouver", "province": "BC"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "V5K",
+                "city": "VANCOUVER",
+                "province": "BC",
+                "origin": "calgary",
+                "zone": 5,
+                "match_level": "L2",
+                "note": "BC unified Calgary anchor",
+            },
+        ],
+        prices=[
+            {
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 4,
+                "base_price_usd": Decimal("560.00"),
+                "source": "test",
+                "last_updated": "2026-06-03",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="1345 Clark Drive",
+            postal_code="V5L 3K9",
+            city="Vancouver",
+            province="BC",
+            cbm=7,
+            weight_kg=2,
+            piece_count=1,
+            packaging_type="carton",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "zone_matrix"
+    assert body["matched_by"] == "city_zone_fallback"
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 5
+    assert body["billing_pallets"] == 4
+    assert body["base_price_usd"] == "560.00"
     assert body["manual_review_required"] is False
 
 

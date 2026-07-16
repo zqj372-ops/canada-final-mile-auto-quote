@@ -39,6 +39,12 @@ def test_zone_lookup_loader_reads_records() -> None:
         and row["zone"] == 9
         for row in rows
     )
+    assert not any(
+        row["postal_prefix"] == "K0E"
+        and row["city"] == "DELTA"
+        and row["province"] == "BC"
+        for row in rows
+    )
     assert {"canonical_city", "priority", "active"} <= set(rows[0])
 
 

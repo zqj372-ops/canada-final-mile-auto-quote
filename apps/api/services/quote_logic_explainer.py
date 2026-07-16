@@ -94,6 +94,14 @@ def _manual_next_action(result_json: dict[str, Any]) -> str:
     suggested_zone = match_trace.get("suggested_zone")
     suggested_prefix = _text(match_trace.get("suggested_postal_prefix"))
     risk_tags = result_json.get("risk_tags") if isinstance(result_json.get("risk_tags"), list) else []
+    if "zone_rule_province_mismatch" in risk_tags:
+        invalid_examples = match_trace.get("invalid_rule_examples")
+        example = invalid_examples[0] if isinstance(invalid_examples, list) and invalid_examples else {}
+        invalid_prefix = _text(example.get("postal_prefix")) if isinstance(example, dict) else ""
+        return (
+            f"已忽略邮编前缀 {invalid_prefix or suggested_prefix or '-'} 的跨省旧 Zone 锚点；"
+            "请补充当前邮编前缀 + 城市 + 省份对应的正式 Zone 规则，确认后再放价。"
+        )
     if "city_zone_prefix_family_low_support" in risk_tags and suggested_origin and suggested_zone is not None:
         return (
             f"系统只找到相邻邮编锚点 {suggested_prefix or '-'} -> "

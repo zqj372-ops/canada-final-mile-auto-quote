@@ -740,6 +740,7 @@ export interface QuoteWorkbenchConfig {
 
 export interface ZonePricingConfig {
   fuel_percent: MoneyValue;
+  fuel_percent_by_zone: Record<string, MoneyValue>;
   residential_fee_usd: MoneyValue;
   liftgate_fee_usd: MoneyValue;
   pallet_jack_fee_usd: MoneyValue;

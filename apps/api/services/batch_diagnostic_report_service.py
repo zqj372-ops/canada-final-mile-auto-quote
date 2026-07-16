@@ -249,7 +249,15 @@ def _cluster_observations(
     fallback_only: bool = False,
     price_gap_only: bool = False,
 ) -> list[dict[str, object]]:
-    fallback_tags = {"city_zone_fallback", "city_zone_prefix_family_fallback", "postal_family_fallback", "nearest_postal_prefix_fallback", "expected_origin_preferred", "stale_origin_overridden"}
+    fallback_tags = {
+        "city_zone_fallback",
+        "city_zone_prefix_family_fallback",
+        "postal_family_fallback",
+        "nearest_postal_prefix_fallback",
+        "expected_origin_preferred",
+        "stale_origin_overridden",
+        "zone_rule_province_mismatch",
+    }
     clusters: dict[tuple[object, ...], dict[str, object]] = {}
     for item in observations:
         tags = {str(tag) for tag in _list(item.get("risk_tags"))}

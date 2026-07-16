@@ -10752,13 +10752,13 @@
       ],
       "V5K": [
         {
-          "zone": 10,
+          "zone": 5,
           "postal_prefix": "V5K",
           "city": "VANCOUVER",
           "province": "BC",
-          "origin": "多伦多",
-          "match_level": "L1",
-          "note": ""
+          "origin": "卡尔加里",
+          "match_level": "L2",
+          "note": "修正：V5K VANCOUVER 原 Toronto Zone10 错误，按 BC 统一 Calgary Zone5"
         }
       ],
       "B1J": [
@@ -26412,13 +26412,13 @@
       ],
       "VANCOUVER|BC": [
         {
-          "zone": 10,
+          "zone": 5,
           "postal_prefix": "V5K",
           "city": "VANCOUVER",
           "province": "BC",
-          "origin": "多伦多",
-          "match_level": "L1",
-          "note": ""
+          "origin": "卡尔加里",
+          "match_level": "L2",
+          "note": "修正：V5K VANCOUVER 原 Toronto Zone10 错误，按 BC 统一 Calgary Zone5"
         }
       ],
       "MAHONE BAY|NS": [
@@ -60525,13 +60525,13 @@
       "note": ""
     },
     {
-      "zone": 10,
+      "zone": 5,
       "postal_prefix": "V5K",
       "city": "VANCOUVER",
       "province": "BC",
-      "origin": "多伦多",
-      "match_level": "L1",
-      "note": ""
+      "origin": "卡尔加里",
+      "match_level": "L2",
+      "note": "修正：V5K VANCOUVER 原 Toronto Zone10 错误，按 BC 统一 Calgary Zone5"
     },
     {
       "zone": 11,

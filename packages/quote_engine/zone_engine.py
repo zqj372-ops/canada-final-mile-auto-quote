@@ -89,12 +89,23 @@ class ZoneQuoteEngine:
             aliases=self.provider.list_city_aliases(province),
             override=self.provider.get_postal_zone_override(request.postal_code),
         )
-        if (
+        expected_origin = ORIGIN_BY_PROVINCE.get(province or "")
+        origin_needs_repair = (
+            not zone_decision.manual_required
+            and expected_origin is not None
+            and (
+                "stale_origin_overridden" in zone_decision.risk_tags
+                or (
+                    zone_decision.origin is not None
+                    and normalize_origin(zone_decision.origin) != expected_origin
+                )
+            )
+        )
+        can_use_city_fallback = (
             zone_decision.manual_required
             and zone_decision.matched_by in {"zone_not_found", "province_not_found", "city_not_found"}
-            and city
-            and province
-        ):
+        )
+        if (can_use_city_fallback or origin_needs_repair) and city and province:
             city_zone_rules = self.provider.list_city_zone_rules(city, province)
             city_zone_decision = lookup_zone_by_city_province(
                 city=city,
@@ -102,12 +113,9 @@ class ZoneQuoteEngine:
                 rules=city_zone_rules,
                 requested_postal_prefix=postal_prefix,
             )
-            if not city_zone_decision.manual_required:
-                zone_decision = city_zone_decision
-            else:
+            if not city_zone_decision.manual_required or zone_decision.manual_required:
                 zone_decision = city_zone_decision
 
-        expected_origin = ORIGIN_BY_PROVINCE.get(province or "")
         stale_origin = "stale_origin_overridden" in zone_decision.risk_tags
         origin_mismatch = (
             zone_decision.origin is not None
@@ -204,6 +212,8 @@ class ZoneQuoteEngine:
         pricing = calculate_zone_price(
             base_price_usd=money(price_record.base_price_usd),
             address_type=request.address_type,
+            origin=zone_decision.origin,
+            zone=zone_decision.zone,
             requires_liftgate=request.requires_liftgate,
             requires_pallet_jack=request.requires_pallet_jack,
             requires_appointment=request.requires_appointment,

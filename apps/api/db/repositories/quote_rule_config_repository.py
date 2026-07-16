@@ -10,6 +10,7 @@ from packages.quote_engine.zone_config import ZonePricingConfig
 
 
 WORKBENCH_CONFIG_KEY = "quote_workbench_config"
+ZONE_FUEL_PERCENT_KEY = "fuel_percent_by_zone"
 
 DECIMAL_KEYS = {
     "fuel_percent",
@@ -74,6 +75,7 @@ class QuoteRuleConfigRepository:
     def save_zone_pricing_config(self, config: ZonePricingConfig) -> ZonePricingConfig:
         descriptions = {
             "fuel_percent": "Fuel surcharge percent applied to zone base price.",
+            ZONE_FUEL_PERCENT_KEY: "Fuel surcharge percent overrides keyed by origin and zone.",
             "residential_fee_usd": "Residential delivery accessorial fee.",
             "liftgate_fee_usd": "Liftgate accessorial fee.",
             "pallet_jack_fee_usd": "Pallet jack accessorial fee.",
@@ -81,9 +83,9 @@ class QuoteRuleConfigRepository:
             "detention_half_hour_fee_usd": "Detention fee per billable half hour.",
             "detention_free_minutes": "Free detention minutes before billing starts.",
         }
-        for key, value in config.model_dump().items():
+        for key, value in config.model_dump(mode="json").items():
             record = self.session.get(QuoteRuleConfig, key)
-            string_value = str(value)
+            string_value = json.dumps(value, sort_keys=True) if key == ZONE_FUEL_PERCENT_KEY else str(value)
             if record is None:
                 record = QuoteRuleConfig(
                     key=key,
@@ -97,12 +99,18 @@ class QuoteRuleConfigRepository:
         self.session.commit()
         return config
 
-    def _parse_value(self, key: str, value: str) -> Decimal | int | None:
+    def _parse_value(self, key: str, value: str) -> Decimal | int | dict[str, Decimal] | None:
         try:
             if key in DECIMAL_KEYS:
                 return Decimal(value)
+            if key == ZONE_FUEL_PERCENT_KEY:
+                parsed = json.loads(value)
+                if not isinstance(parsed, dict):
+                    return None
+                result = {str(zone_key): Decimal(str(percent)) for zone_key, percent in parsed.items()}
+                return result if all(percent >= 0 for percent in result.values()) else None
             if key == "detention_free_minutes":
                 return int(value)
-        except (InvalidOperation, ValueError):
+        except (InvalidOperation, TypeError, ValueError):
             return None
         return None

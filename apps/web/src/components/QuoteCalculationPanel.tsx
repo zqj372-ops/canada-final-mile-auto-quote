@@ -67,7 +67,6 @@ export default function QuoteCalculationPanel({
         <Metric label="计费托数" value={result?.billing_pallets ? `${result.billing_pallets} 托` : "待计算"} />
         <Metric label="托数拆解" value={formatPalletBreakdown(result?.pallet_breakdown)} />
         <Metric label="基础派送费" value={formatMoney(result?.base_price_usd, currency)} />
-        <Metric label="燃油附加费" value={formatMoney(result?.fuel_usd, currency)} />
         <Metric label="风险缓冲" value="未配置" />
       </div>
 

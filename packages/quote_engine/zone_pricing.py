@@ -18,6 +18,8 @@ def calculate_zone_price(
     *,
     base_price_usd: Decimal,
     address_type: AddressType,
+    origin: str | None = None,
+    zone: int | None = None,
     requires_liftgate: bool = False,
     requires_pallet_jack: bool = False,
     requires_appointment: bool = False,
@@ -25,7 +27,8 @@ def calculate_zone_price(
     config: ZonePricingConfig | None = None,
 ) -> ZonePricingResult:
     pricing_config = config or ZonePricingConfig()
-    fuel_usd = money(base_price_usd * pricing_config.fuel_percent / Decimal("100"))
+    fuel_percent = pricing_config.fuel_percent_for(origin, zone)
+    fuel_usd = money(base_price_usd * fuel_percent / Decimal("100"))
     accessorials: dict[str, Decimal] = {}
 
     if address_type in {AddressType.RESIDENTIAL, AddressType.PRIVATE, AddressType.RURAL_RESIDENTIAL}:

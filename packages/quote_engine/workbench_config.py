@@ -175,6 +175,7 @@ class QuoteWorkbenchConfig(BaseModel):
         default_factory=lambda: {
             "manual_required": "需要人工确认",
             "zone_not_found": "未命中邮编分区",
+            "zone_rule_province_mismatch": "Zone 锚点的邮编省份不一致",
             "zone_price_not_found": "未命中 Zone 价格矩阵",
             "city_zone_fallback": "按城市/省份匹配 Zone",
             "city_zone_prefix_family_fallback": "按同邮编族缩小城市 Zone",

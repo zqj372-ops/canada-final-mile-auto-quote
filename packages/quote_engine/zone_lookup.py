@@ -78,7 +78,30 @@ def get_province_from_postal_code(postal_code: str | None) -> str | None:
     normalized = normalize_postal_code(postal_code)
     if not normalized:
         return None
-    return PROVINCE_BY_POSTAL_INITIAL.get(normalized[0])
+    return get_province_from_postal_prefix(normalized[:3])
+
+
+def get_province_from_postal_prefix(postal_prefix: str | None) -> str | None:
+    """Return the province implied by a Canadian FSA/postal prefix."""
+
+    prefix = extract_fsa(postal_prefix)
+    if not prefix:
+        return None
+    return PROVINCE_BY_POSTAL_INITIAL.get(prefix[0])
+
+
+def postal_prefix_matches_province(postal_prefix: str | None, province: str | None) -> bool:
+    """Check the hard geographic relationship encoded by a Canadian FSA.
+
+    The Zone table contains legacy rows where a city was copied together with
+    a prefix from another province. Those rows must never become city-level
+    anchors. A prefix that cannot be interpreted is left to the normal lookup
+    rules so a future non-standard source is not silently discarded here.
+    """
+
+    prefix_province = get_province_from_postal_prefix(postal_prefix)
+    normalized_province = normalize_province(province)
+    return prefix_province is None or normalized_province is None or prefix_province == normalized_province
 
 
 def lookup_preferred_city_by_postal_code(
@@ -141,6 +164,8 @@ def lookup_zone(
     normalized_postal_code = normalize_postal_code(postal_code)
     normalized_province = normalize_province(province) or get_province_from_postal_code(normalized_postal_code)
     active_rules = [rule for rule in rules if rule.active]
+    invalid_rules = [rule for rule in active_rules if zone_rule_quality_issue(rule)]
+    active_rules = [rule for rule in active_rules if is_zone_rule_usable(rule)]
     prefix_rules = [rule for rule in active_rules if _normalize_prefix(rule.postal_prefix) == prefix]
     alias_map = _alias_map(aliases, normalized_province)
     city_candidates, alias_used = _city_candidates(input_city, preferred_city, alias_map)
@@ -153,6 +178,13 @@ def lookup_zone(
         "canonical_city_candidates": city_candidates,
         "candidate_count": len(prefix_rules),
     }
+    if invalid_rules:
+        trace.update(
+            {
+                "invalid_rule_count": len(invalid_rules),
+                "invalid_rule_examples": [_zone_rule_trace(rule) for rule in invalid_rules[:3]],
+            }
+        )
 
     if override is not None:
         rule = ZoneLookupRuleRecord(
@@ -318,8 +350,31 @@ def lookup_zone_by_city_province(
             },
         )
 
+    invalid_rules = [rule for rule in rules if rule.active and zone_rule_quality_issue(rule)]
     filtered = _filter_rules(rules, city, province)
     if not filtered:
+        if invalid_rules:
+            invalid_rule = invalid_rules[0]
+            issue = zone_rule_quality_issue(invalid_rule) or "Zone 锚点数据质量异常"
+            return ZoneLookupDecision(
+                manual_required=True,
+                matched_rule=(
+                    f"城市 {city} + {province} 的 Zone 锚点均为无效旧数据：{issue}。"
+                    f"已忽略该锚点，请补充 {prefix or '当前邮编前缀'} + {city} + {province} 的可信 Zone 规则。"
+                ),
+                risk_tags=("zone_not_found", "zone_rule_province_mismatch"),
+                matched_by="city_fallback_invalid_anchor",
+                candidate_count=len(invalid_rules),
+                match_trace={
+                    "fsa": prefix,
+                    "input_city": city,
+                    "province": normalized_province,
+                    "candidate_count": len(rules),
+                    "invalid_rule_count": len(invalid_rules),
+                    "invalid_rule_examples": [_zone_rule_trace(rule) for rule in invalid_rules[:3]],
+                    "matched_by": "city_fallback_invalid_anchor",
+                },
+            )
         return ZoneLookupDecision(
             manual_required=True,
             matched_rule=f"邮编前缀 {prefix or '未知'} 未命中，城市 {city} + {province} 也未匹配到 Zone 规则。",
@@ -358,6 +413,16 @@ def lookup_zone_by_city_province(
         )
 
     match_rules, origin_preference_applied = _prefer_expected_origin_rules(filtered, expected_origin)
+    invalid_origin_candidate_discarded = bool(
+        expected_origin
+        and any(normalize_origin(rule.origin) != expected_origin for rule in invalid_rules)
+    )
+    if invalid_origin_candidate_discarded and any(
+        normalize_origin(rule.origin) == expected_origin for rule in filtered
+    ):
+        # Keep the existing diagnostic signal when a stale cross-province
+        # candidate was discarded before the expected-origin rule was chosen.
+        origin_preference_applied = True
     prefix_family_label: str | None = None
     narrowed = _select_unique_prefix_family_rules(match_rules, prefix)
     if narrowed is not None:
@@ -380,6 +445,7 @@ def lookup_zone_by_city_province(
                 "city_filtered_count": len(filtered),
                 "expected_origin": expected_origin,
                 "origin_preference_applied": origin_preference_applied,
+                "invalid_rule_count": len(invalid_rules),
                 "unique_group_count": len(groups),
                 "matched_by": "city_fallback_split_record_conflict",
             },
@@ -458,6 +524,7 @@ def lookup_zone_by_city_province(
             "city_filtered_count": len(filtered),
             "expected_origin": expected_origin,
             "origin_preference_applied": origin_preference_applied,
+            "invalid_rule_count": len(invalid_rules),
             "prefix_family": prefix_family_label,
             "matched_by": "city_zone_fallback",
         },
@@ -475,6 +542,38 @@ def detect_split_record_conflict(
     if not filtered:
         return len(_unique_groups(rules)) > 1
     return len(_unique_groups(filtered)) > 1
+
+
+def zone_rule_quality_issue(rule: ZoneLookupRuleRecord) -> str | None:
+    """Return a deterministic data-quality issue for a Zone rule, if any."""
+
+    prefix_province = get_province_from_postal_prefix(rule.postal_prefix)
+    rule_province = normalize_province(rule.province)
+    if prefix_province and rule_province and prefix_province != rule_province:
+        return (
+            f"邮编前缀 {_normalize_prefix(rule.postal_prefix)} 属于 {prefix_province}，"
+            f"规则却标为 {rule_province}"
+        )
+    return None
+
+
+def is_zone_rule_usable(rule: ZoneLookupRuleRecord) -> bool:
+    """Whether a Zone rule is safe to use as pricing evidence."""
+
+    return bool(rule.active and zone_rule_quality_issue(rule) is None)
+
+
+def _zone_rule_trace(rule: ZoneLookupRuleRecord) -> dict[str, object]:
+    return {
+        "postal_prefix": _normalize_prefix(rule.postal_prefix),
+        "city": rule.canonical_city or rule.city,
+        "province": normalize_province(rule.province) or rule.province,
+        "inferred_province": get_province_from_postal_prefix(rule.postal_prefix),
+        "origin": normalize_origin(rule.origin) or rule.origin,
+        "zone": rule.zone,
+        "match_level": rule.match_level,
+        "note": rule.note,
+    }
 
 
 def _filter_rules(
@@ -496,8 +595,12 @@ def _filter_rules_by_province(
     normalized_province: str | None,
 ) -> list[ZoneLookupRuleRecord]:
     if not normalized_province:
-        return list(rules)
-    return [rule for rule in rules if normalize_province(rule.province) == normalized_province]
+        return [rule for rule in rules if is_zone_rule_usable(rule)]
+    return [
+        rule
+        for rule in rules
+        if is_zone_rule_usable(rule) and normalize_province(rule.province) == normalized_province
+    ]
 
 
 def _filter_rules_by_canonical_city(

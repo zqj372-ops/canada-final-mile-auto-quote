@@ -4,7 +4,11 @@ import json
 from typing import Any
 
 from packages.address_normalizer import extract_fsa, normalize_city, normalize_postal_code, normalize_province
-from packages.quote_engine.zone_lookup import get_province_from_postal_code, normalize_origin
+from packages.quote_engine.zone_lookup import (
+    get_province_from_postal_code,
+    normalize_origin,
+    postal_prefix_matches_province,
+)
 
 
 def load_zone_price_matrix(path: Path) -> list[dict[str, object]]:
@@ -39,11 +43,18 @@ def load_zone_lookup_rules(path: Path) -> list[dict[str, object]]:
 
     rows: list[dict[str, object]] = []
     for record in records:
+        postal_prefix = str(record["postal_prefix"]).upper()
+        province = str(record["province"]).upper()
+        if not postal_prefix_matches_province(postal_prefix, province):
+            # A city can be shared by different provinces, but an FSA cannot.
+            # Do not import a cross-province row that could later be reused as
+            # a city-level Zone anchor.
+            continue
         rows.append(
             {
-                "postal_prefix": str(record["postal_prefix"]).upper(),
+                "postal_prefix": postal_prefix,
                 "city": (normalize_city(str(record["city"])) or str(record["city"])).upper(),
-                "province": str(record["province"]).upper(),
+                "province": province,
                 "origin": normalize_origin(str(record["origin"])) or str(record["origin"]),
                 "zone": int(record["zone"]),
                 "canonical_city": (
