@@ -2,9 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - codex/hermes-learning-checkpoint-20260707
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -67,3 +70,93 @@ jobs:
         working-directory: apps/web
         run: npm audit --audit-level=moderate
         continue-on-error: true
+
+  deploy:
+    name: Deploy production
+    needs: test
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' ||
+      github.ref == 'refs/heads/codex/hermes-learning-checkpoint-20260707'))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: true
+    env:
+      DEPLOY_PATH: /home/opc/canada-final-mile-auto-quote
+      COMPOSE_PROJECT: canada_quote_oracle
+      COMPOSE_FILE: infra/docker-compose.prod.yml
+      ENV_FILE: .env.prod
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure production SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_JUMP_SSH_KEY: ${{ secrets.DEPLOY_JUMP_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d "$HOME/.ssh"
+          umask 077
+          printf '%s\n' "$DEPLOY_JUMP_SSH_KEY" > "$HOME/.ssh/deploy_jump_key"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_target_key"
+          cat > "$HOME/.ssh/config" <<'EOF'
+          Host deploy_jump
+            HostName 43.167.222.170
+            User ubuntu
+            IdentityFile ~/.ssh/deploy_jump_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            ServerAliveInterval 30
+            ServerAliveCountMax 3
+
+          Host production
+            HostName 150.230.208.231
+            User opc
+            IdentityFile ~/.ssh/deploy_target_key
+            IdentitiesOnly yes
+            ProxyJump deploy_jump
+            StrictHostKeyChecking yes
+            UserKnownHostsFile ~/.ssh/known_hosts
+            ServerAliveInterval 30
+            ServerAliveCountMax 3
+          EOF
+          cat > "$HOME/.ssh/known_hosts" <<'EOF'
+          43.167.222.170 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAikuCtZ6d6fx7PpzxFQutlatbKnUvHYgA/6FzhdPPrq
+          150.230.208.231 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINMlndhKdfHK+bn1WLv1325iqD45GEa1OWkNySHNqmpr
+          EOF
+          chmod 600 "$HOME/.ssh/config" "$HOME/.ssh/known_hosts"
+          ssh -o BatchMode=yes production 'printf "production ssh: ok\\n"'
+
+      - name: Sync source to production
+        run: |
+          set -euo pipefail
+          rsync -az --delete-delay --delay-updates \
+            --exclude='.git/' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='outputs/' \
+            --exclude='reference/private_address_agent_pack/' \
+            --exclude='node_modules/' \
+            --exclude='apps/web/dist/' \
+            --exclude='__pycache__/' \
+            --exclude='*.pyc' \
+            --exclude='.pytest_cache/' \
+            --exclude='.DS_Store' \
+            --exclude='._*' \
+            ./ "production:${DEPLOY_PATH}/"
+
+      - name: Rebuild production services
+        run: |
+          set -euo pipefail
+          ssh production "set -e; cd '${DEPLOY_PATH}'; sudo -n docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' up -d --build api web"
+
+      - name: Verify production health
+        run: |
+          set -euo pipefail
+          ssh production "set -e; for attempt in \$(seq 1 24); do if curl -fsS --max-time 10 http://127.0.0.1:28000/health; then exit 0; fi; sleep 5; done; exit 1"
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 https://quote.freightclaw.net/api/health
