@@ -491,7 +491,7 @@ function PageLoading() {
 }
 
 function normalizePath(pathname: string): RoutePath {
-  const strippedPath = stripBasePath(pathname);
+  const strippedPath = stripBasePath(pathname).replace(/\/+$/, "") || "/";
   if (strippedPath === "/manual-tasks") {
     return "/manual-tasks";
   }

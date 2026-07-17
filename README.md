@@ -118,6 +118,13 @@ cp .env.example .env
 docker compose -f infra/docker-compose.yml up --build
 ```
 
+## GitHub 自动部署
+
+推送到生产分支后，GitHub Actions 会先运行完整测试、数据库迁移验证和前端构建；
+全部通过后自动同步到生产服务器、重建 API/Web 容器并检查公网健康状态。服务器无需
+手工 `git pull`。Secrets、分支策略、部署版本记录和回退方法见
+[GitHub 自动部署说明](docs/GITHUB_DEPLOYMENT.md)。
+
 本地 Compose 会在 API 启动前自动执行 `alembic upgrade head`。如需加载演示数据：
 
 ```bash

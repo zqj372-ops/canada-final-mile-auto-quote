@@ -1,13 +1,25 @@
-import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type ReactNode,
+} from "react";
 import {
   getZonePricingConfig,
+  importZonePriceMatrixSpreadsheet,
   listZonePriceMatrix,
+  previewZonePriceMatrixImport,
   updateZonePricingConfig,
   upsertZonePriceMatrix,
   type MoneyValue,
   type ZonePriceMatrixListResponse,
   type ZonePriceMatrixPayload,
   type ZonePriceMatrixRecord,
+  type ZonePriceImportPreview,
+  type ZonePriceImportResult,
   type ZonePricingConfig,
 } from "../api/client";
 
@@ -64,6 +76,7 @@ export default function PricingSettingsPage() {
   const [isSavingMatrix, setIsSavingMatrix] = useState(false);
   const [activeSection, setActiveSection] = useState<PricingSettingsSection>("matrix");
   const [selectedZoneKey, setSelectedZoneKey] = useState("all");
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
   useEffect(() => {
     void loadAll();
@@ -452,6 +465,10 @@ export default function PricingSettingsPage() {
                       <PricingIcon name={changedFuelZones.length ? "alert" : "check"} />
                       {changedFuelZones.length ? `${changedFuelZones.length} 项未保存` : "已同步"}
                     </span>
+                    <button className="btn-secondary" type="button" onClick={() => setIsImportOpen(true)}>
+                      <PricingIcon name="upload" />
+                      表格导入
+                    </button>
                     <button className="btn-secondary" type="button" onClick={() => void savePricingChanges()} disabled={!pricingConfig || isSavingPricing || changedFuelZones.length === 0}>
                       {isSavingPricing ? "保存中..." : "保存燃油比例"}
                     </button>
@@ -558,6 +575,354 @@ export default function PricingSettingsPage() {
           </div>
         </section>
       )}
+
+      <ZonePriceImportDialog
+        open={isImportOpen}
+        matrixRows={matrixRows}
+        pallets={matrix?.billing_pallets ?? []}
+        pricingConfig={pricingConfig}
+        unsavedCount={changedCount}
+        onClose={() => setIsImportOpen(false)}
+        onImported={async (result) => {
+          await loadAll();
+          setNotice(
+            `表格导入完成：新增 ${result.inserted_count} 条，覆盖 ${result.updated_count} 条${
+              result.fuel_updated_count ? `，更新 ${result.fuel_updated_count} 个燃油比例` : ""
+            }。`,
+          );
+        }}
+      />
+    </div>
+  );
+}
+
+function ZonePriceImportDialog({
+  open,
+  matrixRows,
+  pallets,
+  pricingConfig,
+  unsavedCount,
+  onClose,
+  onImported,
+}: {
+  open: boolean;
+  matrixRows: ReturnType<typeof buildMatrixRows>;
+  pallets: number[];
+  pricingConfig: ZonePricingConfig | null;
+  unsavedCount: number;
+  onClose: () => void;
+  onImported: (result: ZonePriceImportResult) => Promise<void>;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<ZonePriceImportPreview | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setFile(null);
+    setPreview(null);
+    setLocalError(null);
+    setIsDragging(false);
+    setIsPreviewing(false);
+    setIsImporting(false);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [open]);
+
+  if (!open) {
+    return null;
+  }
+
+  async function selectFile(nextFile: File | undefined) {
+    if (!nextFile) {
+      return;
+    }
+    const extension = nextFile.name.split(".").pop()?.toLowerCase();
+    if (!extension || !["csv", "xlsx", "xls"].includes(extension)) {
+      setFile(null);
+      setPreview(null);
+      setLocalError("请选择 CSV、XLSX 或 XLS 表格文件。");
+      return;
+    }
+    if (nextFile.size > 10 * 1024 * 1024) {
+      setFile(null);
+      setPreview(null);
+      setLocalError("表格不能超过 10 MB。");
+      return;
+    }
+
+    setFile(nextFile);
+    setPreview(null);
+    setLocalError(null);
+    setIsPreviewing(true);
+    try {
+      setPreview(await previewZonePriceMatrixImport(nextFile));
+    } catch (caught) {
+      setLocalError(caught instanceof Error ? caught.message : "表格校验失败，请检查文件后重试。");
+    } finally {
+      setIsPreviewing(false);
+    }
+  }
+
+  function handleDrop(event: DragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    setIsDragging(false);
+    if (!isPreviewing && !isImporting) {
+      void selectFile(event.dataTransfer.files[0]);
+    }
+  }
+
+  async function confirmImport() {
+    if (!file || !preview?.can_import || unsavedCount > 0) {
+      return;
+    }
+    setLocalError(null);
+    setIsImporting(true);
+    try {
+      const result = await importZonePriceMatrixSpreadsheet(file);
+      await onImported(result);
+      onClose();
+    } catch (caught) {
+      setLocalError(caught instanceof Error ? caught.message : "表格导入失败，请稍后重试。");
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  const step = preview ? 3 : file ? 2 : 1;
+
+  return (
+    <div
+      className="pricing-import-backdrop"
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target && !isImporting) {
+          onClose();
+        }
+      }}
+    >
+      <section
+        className="pricing-import-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pricing-import-title"
+        aria-describedby="pricing-import-description"
+      >
+        <header className="pricing-import-header">
+          <div>
+            <span className="pricing-eyebrow">批量维护</span>
+            <h2 id="pricing-import-title">导入价格矩阵</h2>
+            <p id="pricing-import-description">上传后先校验并预览，确认后才会写入价格和分区燃油比例。</p>
+          </div>
+          <button
+            ref={closeButtonRef}
+            className="pricing-import-close"
+            type="button"
+            aria-label="关闭导入窗口"
+            onClick={onClose}
+            disabled={isImporting}
+          >
+            <PricingIcon name="close" />
+          </button>
+        </header>
+
+        <div className="pricing-import-body">
+          <ol className="pricing-import-steps" aria-label="导入步骤">
+            {["选择表格", "校验数据", "确认导入"].map((label, index) => {
+              const number = index + 1;
+              return (
+                <li className={number < step ? "is-complete" : number === step ? "is-active" : ""} key={label}>
+                  <span>{number < step ? <PricingIcon name="check" /> : number}</span>
+                  <strong>{label}</strong>
+                </li>
+              );
+            })}
+          </ol>
+
+          {unsavedCount > 0 && (
+            <div className="pricing-import-alert is-warning" role="alert">
+              <PricingIcon name="alert" />
+              <span>当前页面还有 {unsavedCount} 项未保存修改。请先保存或重新读取，再确认导入。</span>
+            </div>
+          )}
+
+          <div className="pricing-import-tools">
+            <div>
+              <strong>选择价格表</strong>
+              <span>支持宽表（1托、2托…）和明细表，最大 10 MB</span>
+            </div>
+            <button
+              className="pricing-template-button"
+              type="button"
+              onClick={() => downloadZoneMatrixTemplate(matrixRows, pallets, pricingConfig)}
+            >
+              <PricingIcon name="download" />
+              下载当前矩阵模板
+            </button>
+          </div>
+
+          <input
+            ref={fileInputRef}
+            className="pricing-import-file-input"
+            type="file"
+            accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+            onChange={(event) => {
+              void selectFile(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
+          <button
+            className={`pricing-import-dropzone ${isDragging ? "is-dragging" : ""} ${file ? "has-file" : ""}`}
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            onDragEnter={(event) => {
+              event.preventDefault();
+              setIsDragging(true);
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                setIsDragging(false);
+              }
+            }}
+            onDrop={handleDrop}
+            disabled={isPreviewing || isImporting}
+          >
+            <span className="pricing-import-file-icon"><PricingIcon name={file ? "file" : "upload"} /></span>
+            {file ? (
+              <span className="pricing-import-file-copy">
+                <strong>{file.name}</strong>
+                <small>{formatFileSize(file.size)} · 点击可更换文件</small>
+              </span>
+            ) : (
+              <span className="pricing-import-file-copy">
+                <strong>拖拽表格到这里，或点击选择文件</strong>
+                <small>CSV · XLSX · XLS</small>
+              </span>
+            )}
+            {isPreviewing && <span className="pricing-import-loading">正在校验…</span>}
+          </button>
+
+          {localError && (
+            <div className="pricing-import-alert is-error" role="alert">
+              <PricingIcon name="alert" />
+              <span>{localError}</span>
+            </div>
+          )}
+
+          {preview && (
+            <div className="pricing-import-preview">
+              <div className={`pricing-import-validation ${preview.can_import ? "is-valid" : "is-invalid"}`}>
+                <span><PricingIcon name={preview.can_import ? "check" : "alert"} /></span>
+                <div>
+                  <strong>{preview.can_import ? "校验通过，可以导入" : "发现问题，暂不能导入"}</strong>
+                  <small>
+                    读取 {preview.source_row_count} 行，解析出 {preview.row_count} 条价格
+                    {preview.invalid_row_count ? `，${preview.invalid_row_count} 行需修正` : ""}
+                  </small>
+                </div>
+              </div>
+
+              <dl className="pricing-import-summary">
+                <div><dt>价格记录</dt><dd>{preview.row_count}</dd></div>
+                <div><dt>新增</dt><dd>{preview.inserted_count}</dd></div>
+                <div><dt>覆盖</dt><dd>{preview.updated_count}</dd></div>
+                <div><dt>燃油比例</dt><dd>{preview.fuel_updated_count}</dd></div>
+              </dl>
+
+              {preview.errors.length > 0 && (
+                <div className="pricing-import-issues is-error">
+                  <strong>需要修正</strong>
+                  <ul>
+                    {preview.errors.slice(0, 6).map((issue, index) => (
+                      <li key={`${issue.row ?? "file"}-${issue.field ?? "row"}-${index}`}>
+                        {issue.row ? `第 ${issue.row} 行：` : ""}{issue.message}
+                      </li>
+                    ))}
+                  </ul>
+                  {preview.errors.length > 6 && <small>另有 {preview.errors.length - 6} 个问题未展开。</small>}
+                </div>
+              )}
+
+              {preview.warnings.length > 0 && (
+                <div className="pricing-import-issues is-warning">
+                  <strong>提示</strong>
+                  <ul>
+                    {preview.warnings.map((issue, index) => <li key={`${issue.field ?? "warning"}-${index}`}>{issue.message}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {preview.preview_rows.length > 0 && (
+                <div className="pricing-import-table-wrap">
+                  <table className="pricing-import-table">
+                    <thead>
+                      <tr>
+                        <th>表格行</th>
+                        <th>始发仓</th>
+                        <th>Zone</th>
+                        <th>托数</th>
+                        <th>基础派送费</th>
+                        <th>燃油</th>
+                        <th>处理</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {preview.preview_rows.map((row) => (
+                        <tr key={`${row.row}-${row.origin}-${row.zone}-${row.billing_pallets}`}>
+                          <td>{row.row}</td>
+                          <td><strong>{row.origin}</strong></td>
+                          <td>{row.zone}</td>
+                          <td>{row.billing_pallets} 托</td>
+                          <td>${formatInputValue(row.base_price_usd)}</td>
+                          <td>{row.fuel_percent === null ? "—" : `${formatInputValue(row.fuel_percent)}%`}</td>
+                          <td><span className={`pricing-import-action is-${row.action}`}>{row.action === "insert" ? "新增" : "覆盖"}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {preview.row_count > preview.preview_rows.length && (
+                    <span className="pricing-import-table-note">仅预览前 {preview.preview_rows.length} 条，确认后会导入全部有效记录。</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <footer className="pricing-import-footer">
+          <span>相同“始发仓 + Zone + 托数”的记录会被覆盖，不会产生重复价格。</span>
+          <div>
+            <button className="btn-secondary" type="button" onClick={onClose} disabled={isImporting}>取消</button>
+            <button
+              className="btn-primary"
+              type="button"
+              onClick={() => void confirmImport()}
+              disabled={!file || !preview?.can_import || unsavedCount > 0 || isImporting}
+            >
+              <PricingIcon name="upload" />
+              {isImporting ? "正在导入…" : `确认导入${preview?.row_count ? ` · ${preview.row_count}` : ""}`}
+            </button>
+          </div>
+        </footer>
+      </section>
     </div>
   );
 }
@@ -627,13 +992,32 @@ function Metric({ icon, label, value }: { icon: PricingIconName; label: string; 
   );
 }
 
-type PricingIconName = "alert" | "check" | "chevron" | "filter" | "fuel" | "info" | "pallet" | "plus" | "refresh" | "rows" | "save" | "warehouse";
+type PricingIconName =
+  | "alert"
+  | "check"
+  | "chevron"
+  | "close"
+  | "download"
+  | "file"
+  | "filter"
+  | "fuel"
+  | "info"
+  | "pallet"
+  | "plus"
+  | "refresh"
+  | "rows"
+  | "save"
+  | "upload"
+  | "warehouse";
 
 function PricingIcon({ name }: { name: PricingIconName }) {
   const paths: Record<PricingIconName, ReactNode> = {
     alert: <path d="M12 3 2.8 20h18.4L12 3Zm0 5.3v5.1m0 3.25h.01" />,
     check: <path d="m5 12 4.2 4L19 6.5" />,
     chevron: <path d="m9 6 6 6-6 6" />,
+    close: <path d="m6 6 12 12M18 6 6 18" />,
+    download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 19h14" /></>,
+    file: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5M9 13h6m-6 4h6" /></>,
     filter: <path d="M4 5h16M7 12h10m-6 7h2" />,
     fuel: <path d="M7 20V5.5A1.5 1.5 0 0 1 8.5 4h5A1.5 1.5 0 0 1 15 5.5V20M5 20h12M9 8h4m-4 3h4m6-3 1.5 1.5v5a1.5 1.5 0 0 1-3 0v-4" />,
     info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v5m0-8h.01" /></>,
@@ -642,6 +1026,7 @@ function PricingIcon({ name }: { name: PricingIconName }) {
     refresh: <path d="M20 11a8 8 0 0 0-14.7-4L4 9m0 0V4m0 5h5M4 13a8 8 0 0 0 14.7 4L20 15m0 0v5m0-5h-5" />,
     rows: <path d="M5 6h14M5 12h14M5 18h14M2.5 6h.01M2.5 12h.01M2.5 18h.01" />,
     save: <><path d="M5 3h12l2 2v16H5z" /><path d="M8 3v6h8V3m-8 13h8" /></>,
+    upload: <><path d="M12 16V4m0 0 4 4m-4-4-4 4" /><path d="M5 20h14" /></>,
     warehouse: <path d="M3 20V8l9-5 9 5v12M6 20v-7h12v7M9 16h6" />,
   };
   return (
@@ -750,6 +1135,64 @@ function buildNewPricePayload(draft: NewPriceDraft): ZonePriceMatrixPayload | nu
     source: draft.source.trim() || "admin-ui",
     last_updated: todayString(),
   };
+}
+
+function downloadZoneMatrixTemplate(
+  rows: ReturnType<typeof buildMatrixRows>,
+  pallets: number[],
+  pricingConfig: ZonePricingConfig | null,
+) {
+  const templatePallets = pallets.length
+    ? [...pallets].sort((left, right) => left - right)
+    : Array.from({ length: 26 }, (_, index) => index + 1);
+  const header = [
+    "始发仓",
+    "Zone",
+    "燃油附加比例(%)",
+    ...templatePallets.map((pallet) => `${pallet}托`),
+    "来源备注",
+    "更新日期",
+  ];
+  const dataRows: Array<Array<string | number>> = rows.length
+    ? rows.map((row) => {
+        const firstRecord = row.records.values().next().value as ZonePriceMatrixRecord | undefined;
+        return [
+          row.origin,
+          row.zone,
+          formatInputValue(pricingConfig?.fuel_percent_by_zone?.[zoneFuelKey(row.origin, row.zone)]),
+          ...templatePallets.map((pallet) => formatInputValue(row.records.get(pallet)?.base_price_usd)),
+          firstRecord?.source ?? "",
+          firstRecord?.last_updated ?? todayString(),
+        ];
+      })
+    : [["toronto", 1, "", ...templatePallets.map(() => ""), "供应商报价表", todayString()]];
+  const csv = `\ufeff${[header, ...dataRows]
+    .map((values) => values.map(escapeCsvCell).join(","))
+    .join("\r\n")}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `Zone价格矩阵导入模板_${todayString()}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function escapeCsvCell(value: string | number): string {
+  const text = String(value ?? "");
+  const safeText = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${safeText.replace(/"/g, '""')}"`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function todayString(): string {

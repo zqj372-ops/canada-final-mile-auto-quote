@@ -778,6 +778,51 @@ export interface ZonePriceMatrixPayload {
   last_updated?: string | null;
 }
 
+export interface ZonePriceImportIssue {
+  row: number | null;
+  field: string | null;
+  message: string;
+}
+
+export interface ZonePriceImportPreviewRow {
+  row: number;
+  origin: string;
+  zone: number;
+  billing_pallets: number;
+  base_price_usd: MoneyValue;
+  fuel_percent: MoneyValue;
+  action: "insert" | "update";
+}
+
+export interface ZonePriceImportPreview {
+  status: "valid" | "invalid";
+  can_import: boolean;
+  filename: string;
+  source_row_count: number;
+  row_count: number;
+  invalid_row_count: number;
+  inserted_count: number;
+  updated_count: number;
+  fuel_override_count: number;
+  fuel_updated_count: number;
+  preview_rows: ZonePriceImportPreviewRow[];
+  errors: ZonePriceImportIssue[];
+  warnings: ZonePriceImportIssue[];
+}
+
+export interface ZonePriceImportResult {
+  status: "imported";
+  resource: "zone_price_matrix";
+  filename: string;
+  source_row_count: number;
+  row_count: number;
+  inserted_count: number;
+  updated_count: number;
+  skipped_count: number;
+  fuel_override_count: number;
+  fuel_updated_count: number;
+}
+
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || "/api"
 ).replace(/\/$/, "");
@@ -806,10 +851,11 @@ async function request<T>(
 ): Promise<T> {
   const apiKey = getStoredApiKey(apiKeyScope);
   const authToken = getStoredAuthToken();
+  const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormDataBody ? {} : { "Content-Type": "application/json" }),
       ...(authToken ? { Authorization: `Bearer ${authToken}` } : apiKey ? { "X-API-Key": apiKey } : {}),
       ...(options.headers ?? {}),
     },
@@ -1185,6 +1231,24 @@ export function updateZonePriceMatrix(
   return request<ZonePriceMatrixRecord>(`/quote-configs/zone-price-matrix/${recordId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+}
+
+export function previewZonePriceMatrixImport(file: File): Promise<ZonePriceImportPreview> {
+  const body = new FormData();
+  body.append("file", file);
+  return request<ZonePriceImportPreview>("/imports/zone-price-matrix/preview", {
+    method: "POST",
+    body,
+  });
+}
+
+export function importZonePriceMatrixSpreadsheet(file: File): Promise<ZonePriceImportResult> {
+  const body = new FormData();
+  body.append("file", file);
+  return request<ZonePriceImportResult>("/imports/zone-price-matrix", {
+    method: "POST",
+    body,
   });
 }
 

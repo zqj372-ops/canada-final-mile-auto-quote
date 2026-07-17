@@ -18,6 +18,7 @@ dependencies = [
   "wecom-aibot-python-sdk>=1.0.2,<2.0",
   "pandas>=2.2,<3.0",
   "openpyxl>=3.1,<4.0",
+  "xlrd>=2.0,<3.0",
   "python-multipart>=0.0.9,<1.0",
   "cryptography>=42,<50"
 ]

@@ -1,4 +1,4 @@
-name: CI
+name: CI & Deploy
 
 on:
   push:
@@ -8,6 +8,9 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -80,14 +83,22 @@ jobs:
       (github.ref == 'refs/heads/main' ||
       github.ref == 'refs/heads/codex/hermes-learning-checkpoint-20260707'))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://quote.freightclaw.net
     concurrency:
       group: production-deploy
-      cancel-in-progress: true
+      # A newer push waits for the active deployment instead of interrupting
+      # rsync or Docker Compose halfway through an update.
+      cancel-in-progress: false
     env:
       DEPLOY_PATH: /home/opc/canada-final-mile-auto-quote
       COMPOSE_PROJECT: canada_quote_oracle
       COMPOSE_FILE: infra/docker-compose.prod.yml
       ENV_FILE: .env.prod
+      DEPLOY_SHA: ${{ github.sha }}
+      DEPLOY_REF: ${{ github.ref_name }}
 
     steps:
       - name: Checkout
@@ -99,6 +110,10 @@ jobs:
           DEPLOY_JUMP_SSH_KEY: ${{ secrets.DEPLOY_JUMP_SSH_KEY }}
         run: |
           set -euo pipefail
+          if [[ -z "$DEPLOY_SSH_KEY" || -z "$DEPLOY_JUMP_SSH_KEY" ]]; then
+            echo "::error::Production deployment secrets are not configured."
+            exit 1
+          fi
           install -m 700 -d "$HOME/.ssh"
           umask 077
           printf '%s\n' "$DEPLOY_JUMP_SSH_KEY" > "$HOME/.ssh/deploy_jump_key"
@@ -139,6 +154,7 @@ jobs:
             --exclude='.git/' \
             --exclude='.env' \
             --exclude='.env.*' \
+            --exclude='.deploy-state/' \
             --exclude='outputs/' \
             --exclude='reference/private_address_agent_pack/' \
             --exclude='node_modules/' \
@@ -160,3 +176,15 @@ jobs:
           set -euo pipefail
           ssh production "set -e; for attempt in \$(seq 1 24); do if curl -fsS --max-time 10 http://127.0.0.1:28000/health; then exit 0; fi; sleep 5; done; exit 1"
           curl --fail --silent --show-error --retry 5 --retry-delay 5 https://quote.freightclaw.net/api/health
+
+      - name: Record deployed revision
+        run: |
+          set -euo pipefail
+          ssh production "set -e; install -d '${DEPLOY_PATH}/.deploy-state'; printf '%s\n' '${DEPLOY_SHA}' > '${DEPLOY_PATH}/.deploy-state/current-sha'; printf '%s\n' '${DEPLOY_REF}' > '${DEPLOY_PATH}/.deploy-state/current-ref'; date -u '+%Y-%m-%dT%H:%M:%SZ' > '${DEPLOY_PATH}/.deploy-state/deployed-at'"
+          {
+            echo "## Production deployment succeeded"
+            echo
+            echo "- Ref: \`${DEPLOY_REF}\`"
+            echo "- Commit: \`${DEPLOY_SHA}\`"
+            echo "- URL: https://quote.freightclaw.net"
+          } >> "$GITHUB_STEP_SUMMARY"
