@@ -42,6 +42,13 @@ type QuoteWorkspaceStage = "input" | "parsed";
 type SalesQuoteRecordStatus = "quoted" | "manual_required";
 type SalesQuoteRecordFilter = SalesQuoteRecordStatus | "all";
 
+const RURAL_CONFIRMATION_CHECKS = [
+  "完整街道地址、城市和邮编是否彼此一致",
+  "大型卡车能否进入，现场是否具备装卸条件",
+  "是否需要尾板、手叉车、预约或其他附加服务",
+  "偏远地区附加费及供应商最终派送条件是否已确认",
+];
+
 export default function QuotePage({ adminHref: _adminHref }: { adminHref: string }) {
   const [config, setConfig] = useState<QuoteWorkbenchConfig | null>(null);
   const [rawInput, setRawInput] = useState("");
@@ -636,13 +643,33 @@ function QuoteResultDialog({
   salesText: string;
   searchContext: QuoteSearchContext | null;
 }) {
+  const [acknowledgedQuoteKey, setAcknowledgedQuoteKey] = useState<string | null>(null);
+  const ruralPostalPrefix = extractPostalPrefix(
+    result?.postal_prefix || result?.postal_code || parsed.address.postal_code,
+  );
+  const requiresRuralConfirmation = Boolean(
+    result?.risk_tags.includes("rural_fsa_secondary_confirmation") ||
+      (ruralPostalPrefix && ruralPostalPrefix[1] === "0"),
+  );
+  const confirmationKey =
+    result?.quote_id ||
+    [parsed.address.postal_code, parsed.address.city, parsed.address.address_line]
+      .filter(Boolean)
+      .join("|");
+  const ruralConfirmationAcknowledged = Boolean(
+    requiresRuralConfirmation && confirmationKey && acknowledgedQuoteKey === confirmationKey,
+  );
+  const showRuralConfirmation = Boolean(
+    isOpen && requiresRuralConfirmation && confirmationKey && !ruralConfirmationAcknowledged,
+  );
+
   useEffect(() => {
     if (!isOpen) {
       return;
     }
     const previousOverflow = document.body.style.overflow;
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !showRuralConfirmation) {
         onClose();
       }
     }
@@ -652,7 +679,7 @@ function QuoteResultDialog({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, showRuralConfirmation]);
 
   if (!isOpen) {
     return null;
@@ -670,7 +697,7 @@ function QuoteResultDialog({
       className="quote-result-modal-backdrop"
       role="presentation"
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
+        if (!showRuralConfirmation && event.target === event.currentTarget) {
           onClose();
         }
       }}
@@ -680,6 +707,14 @@ function QuoteResultDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="quote-result-modal-title"
+        aria-hidden={showRuralConfirmation || undefined}
+        ref={(element) => {
+          if (showRuralConfirmation) {
+            element?.setAttribute("inert", "");
+          } else {
+            element?.removeAttribute("inert");
+          }
+        }}
       >
         <header className="quote-result-modal-header">
           <div className="min-w-0">
@@ -693,7 +728,7 @@ function QuoteResultDialog({
             type="button"
             onClick={onClose}
             aria-label="关闭报价结果"
-            autoFocus
+            autoFocus={!showRuralConfirmation}
           >
             <span aria-hidden="true">×</span>
           </button>
@@ -708,6 +743,8 @@ function QuoteResultDialog({
               aiParsed={aiParsed}
               salesText={salesText}
               onExport={onExport}
+              ruralConfirmationRequired={requiresRuralConfirmation}
+              ruralConfirmationAcknowledged={ruralConfirmationAcknowledged}
             />
             <QuoteRiskPanel risks={risks} manualRequired={manualRequired} />
             {searchContext ? <SearchVerificationPanel searchContext={searchContext} /> : null}
@@ -723,6 +760,134 @@ function QuoteResultDialog({
             </div>
             <AddressMapPreview parsed={parsed} mapMode="expanded" />
           </aside>
+        </div>
+      </section>
+      {showRuralConfirmation && (
+        <RuralPostalConfirmationDialog
+          inputCity={parsed.address.city}
+          manualRequired={manualRequired}
+          postalCode={result?.postal_code || parsed.address.postal_code}
+          postalPrefix={ruralPostalPrefix}
+          systemCity={result?.preferred_city || result?.city || parsed.address.city}
+          onAcknowledge={() => setAcknowledgedQuoteKey(confirmationKey)}
+          onReturnToEdit={onClose}
+        />
+      )}
+    </div>
+  );
+}
+
+function RuralPostalConfirmationDialog({
+  inputCity,
+  manualRequired,
+  onAcknowledge,
+  onReturnToEdit,
+  postalCode,
+  postalPrefix,
+  systemCity,
+}: {
+  inputCity: string | null;
+  manualRequired: boolean;
+  onAcknowledge: () => void;
+  onReturnToEdit: () => void;
+  postalCode: string | null;
+  postalPrefix: string | null;
+  systemCity: string | null;
+}) {
+  const cityChanged = Boolean(
+    inputCity && systemCity && inputCity.trim().toLowerCase() !== systemCity.trim().toLowerCase(),
+  );
+
+  return (
+    <div className="rural-confirmation-backdrop" role="presentation">
+      <section
+        className="rural-confirmation-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="rural-confirmation-title"
+        aria-describedby="rural-confirmation-description"
+        onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+          if (event.key !== "Tab") {
+            return;
+          }
+          const focusableElements = Array.from(
+            event.currentTarget.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ),
+          );
+          const firstFocusable = focusableElements[0];
+          const lastFocusable = focusableElements[focusableElements.length - 1];
+          if (!firstFocusable || !lastFocusable) {
+            event.preventDefault();
+            return;
+          }
+          if (event.shiftKey && document.activeElement === firstFocusable) {
+            event.preventDefault();
+            lastFocusable.focus();
+          } else if (!event.shiftKey && document.activeElement === lastFocusable) {
+            event.preventDefault();
+            firstFocusable.focus();
+          }
+        }}
+      >
+        <div className="rural-confirmation-icon" aria-hidden="true">!</div>
+        <p className="text-xs font-bold uppercase tracking-wide text-amber-700">发价前必须确认</p>
+        <h2 id="rural-confirmation-title" className="mt-2 text-2xl font-bold text-slate-950">
+          乡村邮编二次确认
+        </h2>
+        <p id="rural-confirmation-description" className="mt-3 text-sm leading-6 text-slate-700">
+          邮编前缀 <strong>{postalPrefix || "待确认"}</strong> 第二位为 0，属于乡村 FSA。
+          {manualRequired
+            ? "该票同时存在人工复核原因，地址确认不代表价格已审核。"
+            : "报价已计算完成，但复制或导出前必须再次核对派送条件。"}
+        </p>
+
+        <div className="rural-confirmation-address">
+          <div>
+            <span>完整邮编</span>
+            <strong>{postalCode || "待确认"}</strong>
+          </div>
+          <div>
+            <span>系统城市</span>
+            <strong>{systemCity || "待确认"}</strong>
+          </div>
+          {cityChanged && (
+            <div className="rural-confirmation-city-change">
+              <span>原询价城市</span>
+              <strong>{inputCity}</strong>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4">
+          <p className="text-sm font-bold text-slate-900">继续前，请确认以下项目：</p>
+          <ul className="rural-confirmation-checklist">
+            {RURAL_CONFIRMATION_CHECKS.map((item, index) => (
+              <li key={item}>
+                <span aria-hidden="true">{index + 1}</span>
+                <p>{item}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <p className="rural-confirmation-footnote">
+          点击确认仅表示已完成地址与派送条件核对；最终价格仍以供应商实测地址为准。
+        </p>
+
+        <div className="rural-confirmation-actions">
+          <button className="btn-secondary" type="button" onClick={onReturnToEdit}>
+            返回修改地址
+          </button>
+          <button className="btn-primary" type="button" onClick={onAcknowledge} autoFocus>
+            我已核对，继续查看报价
+          </button>
         </div>
       </section>
     </div>
@@ -1310,6 +1475,14 @@ function buildEmptyParsedQuoteInput(config: QuoteWorkbenchConfig): ParsedQuoteIn
     risk_hints: [],
     confidence: 0,
   };
+}
+
+function extractPostalPrefix(value: string | null | undefined): string | null {
+  const compact = String(value || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  const match = compact.match(/^([ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTVWXYZ])/);
+  return match?.[1] ?? null;
 }
 
 function buildRiskMessages(

@@ -9,6 +9,8 @@ export default function QuoteCalculationPanel({
   aiParsed,
   salesText,
   onExport,
+  ruralConfirmationRequired = false,
+  ruralConfirmationAcknowledged = false,
 }: {
   config: QuoteWorkbenchConfig;
   parsed: ParsedQuoteInput;
@@ -16,14 +18,20 @@ export default function QuoteCalculationPanel({
   aiParsed: boolean;
   salesText: string;
   onExport: () => void;
+  ruralConfirmationRequired?: boolean;
+  ruralConfirmationAcknowledged?: boolean;
 }) {
   const waitingForAI = !aiParsed && !result;
   const manualRequired = result?.manual_review_required ?? (aiParsed && Boolean(parsed.missing_fields.length));
   const totalPrice = result?.total_price_usd;
   const currency = config.copy_template?.currency_code ?? "USD";
   const manualPriceText = config.copy_template?.manual_price_text ?? "需要人工确认";
-  const requiresRuralConfirmation = result?.risk_tags.includes(
-    "rural_fsa_secondary_confirmation",
+  const requiresRuralConfirmation = Boolean(
+    ruralConfirmationRequired ||
+      result?.risk_tags.includes("rural_fsa_secondary_confirmation"),
+  );
+  const ruralActionsLocked = Boolean(
+    requiresRuralConfirmation && !ruralConfirmationAcknowledged,
   );
 
   return (
@@ -61,12 +69,16 @@ export default function QuoteCalculationPanel({
       )}
 
       {requiresRuralConfirmation && (
-        <div className="mt-3 rounded-md border-2 border-amber-400 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-900" role="alert">
-          乡村邮编需二次确认：当前 FSA 第二位为 0。
-          {manualRequired
-            ? "本票仍需先处理上方人工复核原因；处理完成后，"
-            : "系统可继续按已命中规则计算；"}
-          发价前必须再次核对完整地址、服务城市、卡车准入和偏远附加费。
+        <div
+          className={`mt-3 rounded-md border-2 px-3 py-2 text-sm font-semibold leading-6 ${
+            ruralConfirmationAcknowledged
+              ? "border-teal-300 bg-teal-50 text-teal-900"
+              : "border-amber-400 bg-amber-50 text-amber-900"
+          }`}
+          role="status"
+        >
+          {ruralConfirmationAcknowledged ? "已完成本次乡村邮编二次确认。" : "乡村邮编需二次确认。"}
+          仍请保留完整地址、服务城市、卡车准入和偏远附加费的核对记录。
         </div>
       )}
 
@@ -111,8 +123,16 @@ export default function QuoteCalculationPanel({
       </div>
 
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-        <QuoteCopyButton text={salesText} disabled={manualRequired || !salesText.trim()} />
-        <button className="btn-secondary" type="button" onClick={onExport} disabled={!salesText.trim()}>
+        <QuoteCopyButton
+          text={salesText}
+          disabled={manualRequired || !salesText.trim() || ruralActionsLocked}
+        />
+        <button
+          className="btn-secondary"
+          type="button"
+          onClick={onExport}
+          disabled={!salesText.trim() || ruralActionsLocked}
+        >
           导出报价
         </button>
       </div>
