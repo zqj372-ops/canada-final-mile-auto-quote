@@ -77,7 +77,36 @@ def test_maps_local_verify_returns_manual_note_when_postal_missing_from_lookup()
     assert body["status"] == "postal_not_found"
     assert body["postal_prefix"] == "G0S"
     assert body["province"] == "QC"
-    assert body["risk_tags"] == ["postal_lookup_not_found"]
+    assert body["risk_tags"] == [
+        "postal_lookup_not_found",
+        "rural_fsa_secondary_confirmation",
+    ]
+    assert "邮编前缀 G0S 第二位为 0" in body["note_zh"]
+    assert "必须再次确认完整地址" in body["note_zh"]
+
+
+def test_maps_local_verify_flags_exact_rural_postal_match_for_secondary_confirmation() -> None:
+    client = build_client()
+
+    response = client.get(
+        "/maps/local-verify",
+        params={
+            "postal_code": "N0A 1M0",
+            "city": "Ohsweken",
+            "province": "ON",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["matched"] is True
+    assert body["status"] == "verified"
+    assert body["confidence"] == 95
+    assert body["risk_tags"] == [
+        "local_postal_verified",
+        "rural_fsa_secondary_confirmation",
+    ]
+    assert "二次确认提醒" in body["note_zh"]
 
 
 def test_maps_local_verify_recognizes_v3x0l7_as_surrey() -> None:
@@ -153,6 +182,29 @@ def test_maps_local_verify_suggests_city_for_unanimous_fsa_only() -> None:
     assert "不覆盖 Zone 或价格规则" in body["note_zh"]
 
 
+def test_maps_local_verify_keeps_rural_warning_on_fsa_city_suggestion() -> None:
+    client = build_client()
+
+    response = client.get(
+        "/maps/local-verify",
+        params={
+            "postal_code": "T0A 0C3",
+            "province": "AB",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "postal_fsa_suggested"
+    assert body["preferred_city"] == "Smoky Lake"
+    assert body["risk_tags"] == [
+        "postal_lookup_not_found",
+        "fsa_city_consensus",
+        "rural_fsa_secondary_confirmation",
+    ]
+    assert "邮编前缀 T0A 第二位为 0" in body["note_zh"]
+
+
 def test_maps_local_verify_does_not_guess_for_multi_city_fsa() -> None:
     client = build_client()
 
@@ -197,6 +249,16 @@ def build_client() -> TestClient:
         )
         session.add(
             PostalCodeCityLookup(
+                postal_code="N0A 1M0",
+                preferred_city="Ohsweken",
+                province="ON",
+                fsa="N0A",
+                official_city="Ohsweken",
+                source="test_rural_exact",
+            )
+        )
+        session.add(
+            PostalCodeCityLookup(
                 postal_code="V3X 0L7",
                 preferred_city="Surrey",
                 province="BC",
@@ -225,6 +287,18 @@ def build_client() -> TestClient:
                         fsa="V9Z",
                         official_city="Sooke",
                         source="test_fsa_consensus",
+                    )
+                )
+        for letter in "AB":
+            for digit in range(10):
+                session.add(
+                    PostalCodeCityLookup(
+                        postal_code=f"T0A 0{letter}{digit}",
+                        preferred_city="Smoky Lake",
+                        province="AB",
+                        fsa="T0A",
+                        official_city="Smoky Lake",
+                        source="test_rural_fsa_consensus",
                     )
                 )
         for digit in range(10):

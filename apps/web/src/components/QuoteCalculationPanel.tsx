@@ -22,6 +22,9 @@ export default function QuoteCalculationPanel({
   const totalPrice = result?.total_price_usd;
   const currency = config.copy_template?.currency_code ?? "USD";
   const manualPriceText = config.copy_template?.manual_price_text ?? "需要人工确认";
+  const requiresRuralConfirmation = result?.risk_tags.includes(
+    "rural_fsa_secondary_confirmation",
+  );
 
   return (
     <section className="panel min-w-0 p-4">
@@ -54,6 +57,16 @@ export default function QuoteCalculationPanel({
       {!waitingForAI && manualRequired && (
         <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-700">
           需人工确认，不要直接发客户。原因：{result?.matched_rule || parsed.missing_fields.join("、") || "价格表未命中"}
+        </div>
+      )}
+
+      {requiresRuralConfirmation && (
+        <div className="mt-3 rounded-md border-2 border-amber-400 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-900" role="alert">
+          乡村邮编需二次确认：当前 FSA 第二位为 0。
+          {manualRequired
+            ? "本票仍需先处理上方人工复核原因；处理完成后，"
+            : "系统可继续按已命中规则计算；"}
+          发价前必须再次核对完整地址、服务城市、卡车准入和偏远附加费。
         </div>
       )}
 

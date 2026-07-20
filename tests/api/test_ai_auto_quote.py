@@ -239,6 +239,7 @@ def test_ai_provider_failure_returns_manual_review_instead_of_502(monkeypatch: p
     assert len(tasks) == 1
     assert len(tasks[0]["quote_id"]) == 15
     assert "ai_extraction_failed" in tasks[0]["risk_tags"]
+    assert "rural_fsa_secondary_confirmation" in tasks[0]["risk_tags"]
 
 
 def test_ai_provider_failure_uses_complete_deterministic_fallback(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -23,3 +23,8 @@ def extract_fsa(value: str | None) -> str | None:
 def is_valid_fsa(value: str | None) -> bool:
     return bool(value and FSA_RE.match(value.upper()))
 
+
+def is_rural_fsa(value: str | None) -> bool:
+    """Return whether a Canadian postal code/FSA identifies a rural area."""
+    fsa = extract_fsa(value)
+    return bool(fsa and fsa[1] == "0")

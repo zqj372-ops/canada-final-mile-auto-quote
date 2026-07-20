@@ -206,6 +206,45 @@ def test_l4k_concord_on_zone_quote_success() -> None:
     assert body["accessorials"]["appointment_fee_usd"] == "50.00"
     assert body["total_price_usd"] == "212.00"
     assert body["manual_review_required"] is False
+    assert "rural_fsa_secondary_confirmation" not in body["risk_tags"]
+
+
+def test_rural_postal_quote_keeps_price_but_requires_secondary_confirmation() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "T0B 3L0", "preferred_city": "Mundare", "province": "AB"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "T0B",
+                "city": "MUNDARE",
+                "province": "AB",
+                "origin": "calgary",
+                "zone": 1,
+                "match_level": "test",
+                "note": "",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="5008 50 St",
+            postal_code="T0B 3L0",
+            city="Mundare",
+            province="AB",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "zone_matrix"
+    assert body["manual_review_required"] is False
+    assert body["total_price_usd"] == "128.25"
+    assert "rural_fsa_secondary_confirmation" in body["risk_tags"]
+    assert "二次确认：该地址为乡村邮编" in body["sales_note"]
 
 
 def test_city_postal_zone_conflict_explains_both_candidates() -> None:
@@ -255,6 +294,7 @@ def test_city_postal_zone_conflict_explains_both_candidates() -> None:
         "地址信息对应不同 Zone：输入城市 Hagersville → 多伦多 Zone 5；"
         "邮编 N0A 1M0 对应城市 Ohsweken → 多伦多 Zone 6。请核对城市或邮编后再报价。"
     )
+    assert "rural_fsa_secondary_confirmation" in body["risk_tags"]
 
 
 def test_zone_quote_uses_zone_fuel_percent_override() -> None:

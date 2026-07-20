@@ -43,6 +43,7 @@ from packages.ai_assistant.quote_extractor import (
     extract_quote_draft_with_agents as extract_quote_draft,
     missing_required_fields,
 )
+from packages.quote_engine.risk_tags import rural_fsa_risk_tags
 from packages.quote_engine.zone_engine import ZoneQuoteEngine
 from packages.quote_engine.quote_id import generate_quote_id
 from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult
@@ -110,7 +111,7 @@ def calculate_ai_auto_quote(
                 db,
                 quote_id=generate_quote_id(),
                 reason="AI 字段提取失败，已转人工复核",
-                risk_tags=["ai_extraction_failed"],
+                risk_tags=["ai_extraction_failed", *rural_fsa_risk_tags(extraction.postal_code)],
                 request_json={
                     "customer_message": payload.customer_message,
                     "ai_config_id": payload.ai_config_id,
@@ -150,7 +151,7 @@ def calculate_ai_auto_quote(
             db,
             quote_id=generate_quote_id(),
             reason=f"AI 解析缺少字段：{', '.join(missing_fields)}",
-            risk_tags=["ai_missing_fields", *missing_fields],
+            risk_tags=["ai_missing_fields", *missing_fields, *rural_fsa_risk_tags(extraction.postal_code)],
             request_json={
                 "customer_message": payload.customer_message,
                 "ai_config_id": payload.ai_config_id,

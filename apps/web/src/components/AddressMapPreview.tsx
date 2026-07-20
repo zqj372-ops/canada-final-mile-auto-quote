@@ -126,7 +126,12 @@ function LocalValidationSummary({
     );
   }
 
-  const tone = validation.matched
+  const requiresSecondaryConfirmation = validation.risk_tags.includes(
+    "rural_fsa_secondary_confirmation",
+  );
+  const tone = requiresSecondaryConfirmation
+    ? "border-amber-300 bg-amber-50 text-amber-900"
+    : validation.matched
     ? validation.status === "corrected_by_postal_lookup"
       ? "border-amber-200 bg-amber-50 text-amber-700"
       : "border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -141,11 +146,19 @@ function LocalValidationSummary({
   return (
     <div className={`mt-3 rounded-md border p-3 ${tone}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-semibold">本地邮编库验证：{statusLabel}</p>
+        <p className="text-sm font-semibold">
+          本地邮编库验证：{statusLabel}
+          {requiresSecondaryConfirmation ? " · 需二次确认" : ""}
+        </p>
         <span className="rounded-full border border-current/30 px-2 py-0.5 text-xs font-semibold">
           {validation.confidence}%
         </span>
       </div>
+      {requiresSecondaryConfirmation && (
+        <div className="mt-2 rounded-md border border-amber-300 bg-white/70 px-3 py-2 text-sm font-semibold leading-6">
+          乡村邮编提醒：发价或派送前，请二次确认完整地址、服务城市、大型卡车准入和可能的附加费。
+        </div>
+      )}
       <p className="mt-2 text-sm leading-6">{validation.note_zh}</p>
       {canonical && (
         <p className="mt-2 text-xs leading-5 opacity-90">

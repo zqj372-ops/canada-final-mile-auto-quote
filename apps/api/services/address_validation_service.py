@@ -7,8 +7,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from apps.api.db.repositories.zone_repository import ZoneRepository
-from packages.address_normalizer import clean_address, normalize_city, normalize_postal_code, normalize_province
+from packages.address_normalizer import (
+    clean_address,
+    extract_fsa,
+    is_rural_fsa,
+    normalize_city,
+    normalize_postal_code,
+    normalize_province,
+)
 from packages.ai_assistant.quote_extractor import AIExtractedQuoteDraft
+from packages.quote_engine.risk_tags import RURAL_FSA_SECONDARY_CONFIRMATION_TAG
 from packages.quote_engine.zone_lookup import get_province_from_postal_code
 
 
@@ -131,11 +139,17 @@ def build_local_address_validation(
                 province_consistent=province_consistent,
                 source="local_postal_fsa_consensus",
                 fsa_city_counts=fsa_city_counts,
-                risk_tags=["postal_lookup_not_found", "fsa_city_consensus"],
-                note_zh=(
-                    f"本地完整邮编库尚未收录 {normalized_postal}，但 {postal_prefix} 现有 "
-                    f"{fsa_record_count} 条记录全部对应 {suggested_city}, {province_from_postal or '未知省份'}。"
-                    "该城市仅作为地址补全建议，不覆盖 Zone 或价格规则。"
+                risk_tags=_with_rural_confirmation_tag(
+                    ["postal_lookup_not_found", "fsa_city_consensus"],
+                    normalized_postal,
+                ),
+                note_zh=_with_rural_confirmation_note(
+                    (
+                        f"本地完整邮编库尚未收录 {normalized_postal}，但 {postal_prefix} 现有 "
+                        f"{fsa_record_count} 条记录全部对应 {suggested_city}, {province_from_postal or '未知省份'}。"
+                        "该城市仅作为地址补全建议，不覆盖 Zone 或价格规则。"
+                    ),
+                    normalized_postal,
                 ),
             )
 
@@ -159,11 +173,14 @@ def build_local_address_validation(
             input_province=normalized_province,
             province=province_from_postal,
             fsa_city_counts=fsa_city_counts,
-            risk_tags=risk_tags,
-            note_zh=(
-                f"本地邮编库未找到 {normalized_postal} 的城市记录。"
-                f"{candidate_detail}"
-                "地图仅供人工目视确认，系统不能用地图结果覆盖价格规则。"
+            risk_tags=_with_rural_confirmation_tag(risk_tags, normalized_postal),
+            note_zh=_with_rural_confirmation_note(
+                (
+                    f"本地邮编库未找到 {normalized_postal} 的城市记录。"
+                    f"{candidate_detail}"
+                    "地图仅供人工目视确认，系统不能用地图结果覆盖价格规则。"
+                ),
+                normalized_postal,
             ),
         )
 
@@ -219,8 +236,8 @@ def build_local_address_validation(
         latitude=float(record.latitude) if record.latitude is not None else None,
         longitude=float(record.longitude) if record.longitude is not None else None,
         source=record.source,
-        risk_tags=risk_tags,
-        note_zh=note_zh,
+        risk_tags=_with_rural_confirmation_tag(risk_tags, normalized_postal),
+        note_zh=_with_rural_confirmation_note(note_zh, normalized_postal),
     )
 
 
@@ -264,4 +281,20 @@ def _build_note(
     return (
         f"本地邮编库命中 {postal_code} -> {location}，"
         "城市/省份与解析结果一致。地图仅供人工目视确认，不参与金额计算。"
+    )
+
+
+def _with_rural_confirmation_tag(tags: list[str], postal_code: str) -> list[str]:
+    if not is_rural_fsa(postal_code):
+        return tags
+    return [*tags, RURAL_FSA_SECONDARY_CONFIRMATION_TAG]
+
+
+def _with_rural_confirmation_note(note: str, postal_code: str) -> str:
+    if not is_rural_fsa(postal_code):
+        return note
+    postal_prefix = extract_fsa(postal_code) or postal_code[:3]
+    return (
+        f"{note} 二次确认提醒：邮编前缀 {postal_prefix} 第二位为 0，属于乡村 FSA；"
+        "报价或派送前必须再次确认完整地址、服务城市、大型卡车准入及可能的偏远地区附加费。"
     )

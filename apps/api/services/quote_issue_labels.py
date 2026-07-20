@@ -5,6 +5,7 @@ RISK_TAG_LABELS: dict[str, str] = {
     "zone_rule_province_mismatch": "Zone 锚点的邮编省份不一致",
     "zone_price_not_found": "未命中 Zone 价格矩阵",
     "zone_price_disabled": "分区价格已关闭",
+    "rural_fsa_secondary_confirmation": "乡村邮编需二次确认",
     "city_zone_fallback": "按城市/省份匹配 Zone",
     "city_zone_prefix_family_fallback": "按同邮编族缩小城市 Zone",
     "city_zone_prefix_family_low_support": "同邮编族锚点证据不足",

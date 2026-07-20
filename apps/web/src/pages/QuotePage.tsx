@@ -1360,6 +1360,11 @@ function buildSalesText(
     result?.total_price_usd && !result.manual_review_required
       ? `${config.copy_template.currency_code} ${Number(result.total_price_usd).toFixed(2)}`
       : config.copy_template.manual_price_text;
+  const ruralConfirmationLines = result?.risk_tags.includes(
+    "rural_fsa_secondary_confirmation",
+  )
+    ? ["特别提醒：该地址为乡村邮编，完整地址、卡车准入及可能附加费需二次确认。"]
+    : [];
 
   return [
     "加拿大尾端派送报价如下：",
@@ -1368,6 +1373,7 @@ function buildSalesText(
     `最大单件：${maxDimensions}`,
     `计费密度：${parsed.density_kg_per_cbm !== null ? `约 ${parsed.density_kg_per_cbm.toFixed(1)} KG/CBM` : "待确认"}`,
     `报价合计：${totalPrice}`,
+    ...ruralConfirmationLines,
     "费用包含：",
     ...config.copy_template.included_items.map((item) => `- ${item}`),
     "费用不含：",

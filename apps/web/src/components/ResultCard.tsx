@@ -12,6 +12,9 @@ export default function ResultCard({ result }: ResultCardProps) {
   );
   const isManual = result.manual_review_required;
   const canCopy = !isManual && Boolean(result.sales_note);
+  const requiresRuralConfirmation = result.risk_tags.includes(
+    "rural_fsa_secondary_confirmation",
+  );
 
   async function copySalesNote() {
     if (!result.sales_note) {
@@ -76,6 +79,11 @@ export default function ResultCard({ result }: ResultCardProps) {
           <div className="mt-3 rounded-md border border-red-300 bg-white px-3 py-2 text-sm text-red-900">
             系统没有可直接发送给客户的自动报价。请进入人工确认池处理，原因：
             <span className="font-medium"> {result.matched_rule}</span>
+          </div>
+        )}
+        {requiresRuralConfirmation && (
+          <div className="mt-3 rounded-md border-2 border-amber-400 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-900" role="alert">
+            乡村邮编需二次确认：发价前请重新核对完整地址、服务城市、大型卡车准入及可能附加费。
           </div>
         )}
       </div>

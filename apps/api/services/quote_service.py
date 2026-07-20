@@ -21,6 +21,7 @@ from apps.api.services.notification_service import (
 from apps.api.services.quote_logic_explainer import attach_zone_quote_logic
 from packages.quote_engine.engine import QuoteEngine
 from packages.quote_engine.models import QuoteCalculationRequest, QuoteResult, ShipmentInput
+from packages.quote_engine.risk_tags import RURAL_FSA_SECONDARY_CONFIRMATION_TAG, rural_fsa_risk_tags
 from packages.quote_engine.zone_config import ZonePricingConfig
 from packages.quote_engine.zone_engine import ZoneQuoteEngine
 from packages.quote_engine.zone_lookup import (
@@ -275,6 +276,7 @@ def _result_from_learned_rule(
     total_price = Decimal(rule.total_price_usd).quantize(Decimal("0.01"))
     base_price = Decimal(rule.base_price_usd or rule.total_price_usd).quantize(Decimal("0.01"))
     risk_tags = ["learned_quote_reused", "learned_from_manual_task"]
+    risk_tags.extend(rural_fsa_risk_tags(request.postal_code))
     if is_corrective_override:
         risk_tags.extend(original.risk_tags)
         risk_tags.append("hermes_corrective_override")
@@ -314,6 +316,11 @@ def _result_from_learned_rule(
 def _build_learned_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult) -> str:
     origin = origin_label(result.origin) or "人工确认线路"
     zone = f"（Zone {result.zone}）" if result.zone is not None else ""
+    rural_confirmation_lines = (
+        ["- 该地址为乡村邮编，完整地址、卡车准入及可能附加费需再次核实"]
+        if RURAL_FSA_SECONDARY_CONFIRMATION_TAG in result.risk_tags
+        else []
+    )
     return "\n".join(
         [
             f"地址：{request.address_line or ''}".rstrip(),
@@ -324,6 +331,7 @@ def _build_learned_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult
             "备注：此报价来源于此前人工确认后的学习记录，金额已由后端锁定，AI 不参与改价。",
             "- 送货到门口路边，不含其他任何操作",
             "- 如地址类型、卸货条件、复重复尺变化，费用可能需要重新确认",
+            *rural_confirmation_lines,
         ]
     )
 

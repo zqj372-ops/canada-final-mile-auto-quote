@@ -4,6 +4,7 @@ from typing import Protocol
 from packages.address_normalizer import extract_fsa
 from packages.quote_engine.pallet_calculator import calculate_billing_pallets
 from packages.quote_engine.pricing import money
+from packages.quote_engine.risk_tags import RURAL_FSA_SECONDARY_CONFIRMATION_TAG, rural_fsa_risk_tags
 from packages.quote_engine.zone_config import ZonePricingConfig
 from packages.quote_engine.zone_lookup import (
     ORIGIN_BY_PROVINCE,
@@ -312,7 +313,7 @@ class ZoneQuoteEngine:
             zone=zone,
             billing_pallets=billing_pallets,
             pallet_breakdown=pallet_breakdown or {},
-            risk_tags=sorted(set(risk_tags)),
+            risk_tags=sorted(set([*risk_tags, *rural_fsa_risk_tags(request.postal_code)])),
             manual_review_required=True,
             matched_rule=matched_rule,
             matched_by=matched_by,
@@ -334,12 +335,18 @@ def build_zone_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult) ->
     if request.longest_side_cm is not None:
         cargo_line += f"，最长边{request.longest_side_cm}CM"
 
+    rural_confirmation_lines = (
+        ["二次确认：该地址为乡村邮编，完整地址、卡车准入及可能附加费需再次核实。"]
+        if RURAL_FSA_SECONDARY_CONFIRMATION_TAG in result.risk_tags
+        else []
+    )
     return "\n".join(
         [
             "加拿大尾端派送报价：",
             f"目的地：{_destination_line(request, result)}",
             f"货物总计：{cargo_line}",
             f"报价：USD {amount}（{origin_label(result.origin)}派送）",
+            *rural_confirmation_lines,
             "注：不带尾板，自卸货",
             "- 送货到门口路边，不含其他操作",
             "- 无卸货平台需尾板 +50USD/票",
@@ -362,7 +369,7 @@ def _destination_line(request: ZoneQuoteRequest, result: ZoneQuoteResult) -> str
 
 
 def _request_risk_tags(request: ZoneQuoteRequest) -> list[str]:
-    tags: list[str] = []
+    tags = rural_fsa_risk_tags(request.postal_code)
     if request.requires_liftgate:
         tags.append("liftgate_required")
     if request.requires_pallet_jack:
