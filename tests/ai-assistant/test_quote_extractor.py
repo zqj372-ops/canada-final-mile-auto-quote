@@ -175,6 +175,110 @@ def test_cargo_inquiry_format_corpus(raw: str, expected: dict[str, object]) -> N
         assert (item.length_cm, item.width_cm, item.height_cm) == expected["dimensions"]
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            """
+加拿大地址：6155 rue LaFontaine h1n2b8 Montreal QC Canada h1n2b8
+品名：液压剪角机
+尺寸：60x36x50cm/68kg*4
+55x36x36cm/45kg*4
+60x36x50cm/57kg*3
+55x36x36cm/38kg*3
+总重：1.3cbm 737kg
+""",
+            {
+                "piece_count": 14,
+                "weight_kg": Decimal("737.0"),
+                "cbm": Decimal("1.300"),
+                "quantities": [4, 4, 3, 3],
+                "dimensions": [
+                    (Decimal("60.0"), Decimal("36.0"), Decimal("50.0")),
+                    (Decimal("55.0"), Decimal("36.0"), Decimal("36.0")),
+                    (Decimal("60.0"), Decimal("36.0"), Decimal("50.0")),
+                    (Decimal("55.0"), Decimal("36.0"), Decimal("36.0")),
+                ],
+                "weights": [Decimal("68.00"), Decimal("45.00"), Decimal("57.00"), Decimal("38.00")],
+                "postal_code": "H1N 2B8",
+            },
+        ),
+        (
+            """
+地址：27 Arthur Griffin Crescent，Caledon East, Ontario, Canada，L7C 4E9
+箱规：3.21*0.27*0.25m*38kg*4
+3.17*0.27*0.25*42kg*2
+4.13*0.27*0.25*60kg*1
+总：296kg1.6cbm 除湿机
+""",
+            {
+                "piece_count": 7,
+                "weight_kg": Decimal("296.0"),
+                "cbm": Decimal("1.600"),
+                "quantities": [4, 2, 1],
+                "dimensions": [
+                    (Decimal("321.0"), Decimal("27.0"), Decimal("25.0")),
+                    (Decimal("317.0"), Decimal("27.0"), Decimal("25.0")),
+                    (Decimal("413.0"), Decimal("27.0"), Decimal("25.0")),
+                ],
+                "weights": [Decimal("38.00"), Decimal("42.00"), Decimal("60.00")],
+                "postal_code": "L7C 4E9",
+            },
+        ),
+        (
+            """
+1595 Sour Springs Rd, Hagersville, Ontario, Canada, N0A 1M0 96x120x70cm 115kg每件 共3件
+加拿大海派ddp
+345kg =2.42cbm
+""",
+            {
+                "piece_count": 3,
+                "weight_kg": Decimal("345.0"),
+                "cbm": Decimal("2.420"),
+                "quantities": [3],
+                "dimensions": [(Decimal("96.0"), Decimal("120.0"), Decimal("70.0"))],
+                "weights": [Decimal("115.00")],
+                "postal_code": "N0A 1M0",
+            },
+        ),
+    ],
+    ids=["weight-times-quantity", "inherited-meter-unit", "each-weight-with-compact-totals"],
+)
+def test_real_world_compact_cargo_inquiries(raw: str, expected: dict[str, object]) -> None:
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    assert draft.piece_count == expected["piece_count"]
+    assert draft.weight_kg == expected["weight_kg"]
+    assert draft.cbm == expected["cbm"]
+    assert draft.postal_code == expected["postal_code"]
+    assert [item.quantity for item in draft.cargo_items] == expected["quantities"]
+    assert [
+        (item.length_cm, item.width_cm, item.height_cm)
+        for item in draft.cargo_items
+    ] == expected["dimensions"]
+    assert [item.weight_kg for item in draft.cargo_items] == expected["weights"]
+    assert sum(item.quantity for item in draft.cargo_items) == draft.piece_count
+
+
+def test_consecutive_cargo_lines_inherit_the_first_dimension_unit() -> None:
+    raw = """
+    箱规：3.21*1.27*1.25m*38kg*2
+    3.17*1.20*1.10*42kg*1
+    """
+
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    assert draft.piece_count == 3
+    assert draft.weight_kg == Decimal("118.0")
+    assert [
+        (item.length_cm, item.width_cm, item.height_cm)
+        for item in draft.cargo_items
+    ] == [
+        (Decimal("321.0"), Decimal("127.0"), Decimal("125.0")),
+        (Decimal("317.0"), Decimal("120.0"), Decimal("110.0")),
+    ]
+
+
 def test_deterministic_extraction_normalizes_mixed_units() -> None:
     raw = """
     2pcs 67in x 55in x 34in 900lbs

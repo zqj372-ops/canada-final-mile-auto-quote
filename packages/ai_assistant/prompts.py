@@ -16,6 +16,8 @@ FIELD_EXTRACTION_SYSTEM_PROMPT = """
 - lb/lbs/pound 转 kg 乘以 0.45359237，g/克 转 kg 除以 1000，MT/t/tonne 按公吨转 kg 乘以 1000。
 - CFT/CUFT/FT3/cu ft 为立方英尺，转 CBM 乘以 0.028316846592；cu in/in3 转 CBM 乘以 0.000016387064。
 - “each/per carton/per piece/单箱/每件”后的重量是单件重量；明确的 total/GW/G.W./G/W/总重优先作为总重，否则才用单件重量乘以数量。
+- 必须识别“60x36x50cm/68kg*4”这种“长宽高/单件重量*数量”紧凑写法，最后的 *4 是 4 件。
+- 同一组连续箱规只在首行写单位时，后续行继承该尺寸单位；3.17*0.27*0.25 这类数值在箱规语境中通常是米，不能解析成几厘米。
 - 如原文给了多件尺寸重量，要汇总 piece_count、cbm、weight_kg，并给出最长边 longest_side_cm。
 - CBM 公式为长(cm) * 宽(cm) * 高(cm) / 1000000；weight_kg 必须是总重量。
 - 可以识别加拿大邮编格式，例如 T0B 3L0 / t0b3l0。
@@ -49,6 +51,9 @@ CARGO_EXTRACTION_SYSTEM_PROMPT = """
 - 如果原文写“200箱，2270kgs，10.9cbm，50*50*21.8cm”，2270kgs 是总重，cargo_items[].weight_kg 应为 2270/200，不要填 2270。
 - 如果原文写“单箱毛重55kg，共20箱，总重1100kg”，cargo_items[].weight_kg 填 55，weight_kg 填 1100。
 - each/per carton/per piece/per pkg/单箱/每件/每板明确表示单件值；已给 total/GW/G.W./G/W/TOTAL WT/TTL WT/总重时以总重为准，否则才用单件重量 × 数量得到总重。
+- 必须识别“60x36x50cm/68kg*4”或“3.21*0.27*0.25m*38kg*4”：前三个数是单件尺寸，38kg 是单件重量，末尾 *4 是数量；cargo_items[].quantity 填 4，总件数必须等于各明细 quantity 之和。
+- 连续箱规可能只在第一行写 m/cm/mm，后续行应继承同组单位；如 3.21*0.27*0.25m 后的 3.17*0.27*0.25、4.13*0.27*0.25 也按 m 处理。
+- 汇总行字段顺序可能混乱或无空格，例如“总重：1.3cbm 737kg”、“总：296kg1.6cbm”、“345kg =2.42cbm”；需分别提取总重和总体积，不要受字段顺序影响。
 - 如果只有总件数、总重和总 CBM，没有尺寸，也必须保留一条汇总 cargo_items：quantity 填总件数，长宽高填 null，单件重量和单件 CBM 按总量除以数量，并在 total_weight_kg、total_cbm 和 extraction_notes 中标明汇总来源；绝不编造尺寸。
 - 必须识别常见货代缩写：QTY/NO. OF PACKAGES/PKG COUNT/PCS/CTNS/PKGS/SKIDS/PLTS 表示数量，GW/G.W./G/W/TOTAL WT/TTL WT/Gross Weight 表示总毛重，VOL/VOLUME/MEAS/CUBE/CBM/C.B.M./CFT 表示总体积。
 - 数字可能带千位分隔符或小数逗号：2,814 KGS、1,200 CTNS 分别是 2814 KG、1200 件；3,5 CBM 在明确的小数语境中是 3.5 CBM。

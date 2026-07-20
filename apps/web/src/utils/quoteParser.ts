@@ -44,6 +44,7 @@ interface ParsedAggregateTotals {
 }
 
 const NUMBER_TOKEN_SOURCE = String.raw`(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?)`;
+const HORIZONTAL_SPACE_SOURCE = String.raw`[^\S\r\n]*`;
 const PIECE_UNIT_SOURCE = String.raw`(?:pcs?|pieces?|units?|ctns?|cartons?|boxes|pkgs?|packages?|cases?|bags?|sacks?|rolls?|drums?|crates?|skids?|skds?|bundles?|sets?|pallets?|plts?|件|箱|包|袋|卷|桶|架|捆|套|台|托盘|托)`;
 const DIMENSION_UNIT_SOURCE = String.raw`(?:millimet(?:er|re)s?|mms?|centimet(?:er|re)s?|cms?|met(?:er|re)s?|mm|cm|m|毫米|厘米|米|inches|inch|in|"|feet|foot|ft|英尺|英寸)`;
 const WEIGHT_UNIT_SOURCE = String.raw`(?:metric\s*(?:tons?|tonnes?)|tonnes?|kilograms?|kgs?|kg|公斤|千克|pounds?|lbs?|lb|磅|grams?|g|克|m\.?t\.?|t)`;
@@ -60,13 +61,22 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
   const cargoItems: ParsedCargoItem[] = [];
   const addressLines: string[] = [];
   const allowNumericTable = hasDimensionWeightTable(rawInput);
+  let dimensionUnitHint: string | undefined;
 
   for (const line of lines) {
-    const items = parseCargoLineItems(line, cargoItems.length + 1, config, allowNumericTable);
+    const items = parseCargoLineItems(
+      line,
+      cargoItems.length + 1,
+      config,
+      allowNumericTable,
+      dimensionUnitHint,
+    );
     if (items.length) {
       cargoItems.push(...items);
+      dimensionUnitHint = findDimensionUnitHint(line, config) ?? dimensionUnitHint;
     } else {
       addressLines.push(line);
+      dimensionUnitHint = undefined;
     }
   }
 
@@ -184,10 +194,10 @@ function parseAggregateTotals(rawInput: string, cargoItemCount: number): ParsedA
 function findExplicitPieceCount(rawInput: string): number | null {
   const normalized = normalizeCargoText(rawInput);
   const patterns = [
-    new RegExp(String.raw`${PIECE_COUNT_LABEL_SOURCE}\s*[:：=#-]?\s*(?:共|合计|总计)?\s*(${NUMBER_TOKEN_SOURCE})\s*${PIECE_UNIT_SOURCE}?`, "i"),
-    new RegExp(String.raw`(?:一共|共|合计|总计|总件数|件数)[^\d\n\r]{0,8}(${NUMBER_TOKEN_SOURCE})\s*${PIECE_UNIT_SOURCE}`, "i"),
-    new RegExp(String.raw`(${NUMBER_TOKEN_SOURCE})\s*${PIECE_UNIT_SOURCE}`, "i"),
-    new RegExp(String.raw`(?:ctns?|cartons?|pkgs?|packages?|pcs?|pieces?|skids?|skds?|pallets?|plts?)\s*[:：=#-]?\s*(${NUMBER_TOKEN_SOURCE})\b`, "i"),
+    new RegExp(String.raw`${PIECE_COUNT_LABEL_SOURCE}${HORIZONTAL_SPACE_SOURCE}[:：=#-]?${HORIZONTAL_SPACE_SOURCE}(?:共|合计|总计)?${HORIZONTAL_SPACE_SOURCE}(${NUMBER_TOKEN_SOURCE})${HORIZONTAL_SPACE_SOURCE}${PIECE_UNIT_SOURCE}?`, "i"),
+    new RegExp(String.raw`(?:一共|共|合计|总计|总件数|件数)[^\d\n\r]{0,8}(${NUMBER_TOKEN_SOURCE})${HORIZONTAL_SPACE_SOURCE}${PIECE_UNIT_SOURCE}`, "i"),
+    new RegExp(String.raw`(${NUMBER_TOKEN_SOURCE})${HORIZONTAL_SPACE_SOURCE}${PIECE_UNIT_SOURCE}`, "i"),
+    new RegExp(String.raw`(?:ctns?|cartons?|pkgs?|packages?|pcs?|pieces?|skids?|skds?|pallets?|plts?)${HORIZONTAL_SPACE_SOURCE}[:：=#-]?${HORIZONTAL_SPACE_SOURCE}(${NUMBER_TOKEN_SOURCE})\b`, "i"),
   ];
   for (const pattern of patterns) {
     const match = normalized.match(pattern);
@@ -201,8 +211,9 @@ function findExplicitPieceCount(rawInput: string): number | null {
 function findExplicitAggregateWeight(value: string): number | null {
   const patterns = [
     new RegExp(String.raw`${TOTAL_WEIGHT_LABEL_SOURCE}\s*[:：=#-]?\s*(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})(?=$|[^A-Za-z])`, "gi"),
+    new RegExp(String.raw`${TOTAL_WEIGHT_LABEL_SOURCE}[^\n\r]{0,32}?(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})(?=$|[^A-Za-z])`, "gi"),
     new RegExp(String.raw`(?:weight|wt|重量|毛重)\s*[:：=]\s*(?:total|gross|共|合计|总计)?\s*(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})(?=$|[^A-Za-z])`, "gi"),
-    new RegExp(String.raw`(?:合计|总计|一共|共)\s*[:：]?\s*(?:总?重(?:重量)?|毛重)?\s*(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})(?=$|[^A-Za-z])`, "gi"),
+    new RegExp(String.raw`(?:总|合计|总计|一共|共)\s*[:：]?\s*(?:总?重(?:重量)?|毛重)?\s*(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})(?=$|[^A-Za-z])`, "gi"),
     new RegExp(String.raw`(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})\s*(?:total|gross|合计|总重)`, "gi"),
   ];
   for (const pattern of patterns) {
@@ -378,6 +389,7 @@ function parseCargoLineItems(
   startId: number,
   config: QuoteWorkbenchConfig,
   allowNumericTable = false,
+  dimensionUnitHint?: string,
 ): ParsedCargoItem[] {
   const normalized = normalizeLabeledDimensions(normalizeCargoText(line));
   const decimal = `(${NUMBER_TOKEN_SOURCE})`;
@@ -396,6 +408,7 @@ function parseCargoLineItems(
         matches[index + 1]?.index ?? null,
         startId + index,
         config,
+        dimensionUnitHint,
       ))
       .filter((item): item is ParsedCargoItem => item !== null);
     if (items.length) {
@@ -403,9 +416,30 @@ function parseCargoLineItems(
     }
   }
 
-  const single = parseSpaceSeparatedCargoLine(normalized, startId, config) ??
-    (allowNumericTable ? parseNumericTableCargoLine(normalized, startId) : null);
+  const single = parseSpaceSeparatedCargoLine(normalized, startId, config, dimensionUnitHint) ??
+    (allowNumericTable ? parseNumericTableCargoLine(normalized, startId, dimensionUnitHint) : null);
   return single ? [single] : [];
+}
+
+function findDimensionUnitHint(line: string, config: QuoteWorkbenchConfig): string | undefined {
+  const normalized = normalizeLabeledDimensions(normalizeCargoText(line));
+  const decimal = `(${NUMBER_TOKEN_SOURCE})`;
+  const separators = config.parser.dimension_separators.map(escapeRegex).join("|");
+  const pattern = new RegExp(
+    `${decimal}\\s*(${DIMENSION_UNIT_SOURCE})?\\s*(?:${separators})\\s*` +
+      `${decimal}\\s*(${DIMENSION_UNIT_SOURCE})?\\s*(?:${separators})\\s*` +
+      `${decimal}\\s*(${DIMENSION_UNIT_SOURCE})?`,
+    "i",
+  );
+  const match = normalized.match(pattern);
+  if (!match) {
+    return undefined;
+  }
+  return match[6] || match[4] || match[2] || inferDimensionUnit([
+    parseFlexibleNumber(match[1]),
+    parseFlexibleNumber(match[3]),
+    parseFlexibleNumber(match[5]),
+  ]);
 }
 
 function parseDimensionMatch(
@@ -414,6 +448,7 @@ function parseDimensionMatch(
   nextDimensionStart: number | null,
   id: number,
   config: QuoteWorkbenchConfig,
+  dimensionUnitHint?: string,
 ): ParsedCargoItem | null {
   if (dimensionMatch.index === undefined) {
     return null;
@@ -426,9 +461,9 @@ function parseDimensionMatch(
   const localEnd = nextDimensionStart ?? line.length;
   const localWeight = findItemWeight(line.slice(dimensionEnd, localEnd), dimensionEnd, weightRegex);
   const prefixWeight = localWeight ?? findItemWeight(line.slice(Math.max(0, dimensionStart - 48), dimensionStart), Math.max(0, dimensionStart - 48), weightRegex);
-  const weightEnd = prefixWeight?.end ?? dimensionEnd;
+  const weightEnd = Math.max(dimensionEnd, prefixWeight?.end ?? dimensionEnd);
   const quantity = findQuantity(line, dimensionStart, weightEnd);
-  const dimensionFallbackUnit = dimensionMatch[6] || dimensionMatch[4] || dimensionMatch[2] ||
+  const dimensionFallbackUnit = dimensionMatch[6] || dimensionMatch[4] || dimensionMatch[2] || dimensionUnitHint ||
     inferDimensionUnit([parseFlexibleNumber(dimensionMatch[1]), parseFlexibleNumber(dimensionMatch[3]), parseFlexibleNumber(dimensionMatch[5])]) ||
     "cm";
   return toCargoItem(
@@ -464,7 +499,11 @@ function hasDimensionWeightTable(rawInput: string): boolean {
     /长[\s\S]{0,20}宽[\s\S]{0,20}高[\s\S]{0,40}(?:围长|重量)/i.test(normalized);
 }
 
-function parseNumericTableCargoLine(line: string, id: number): ParsedCargoItem | null {
+function parseNumericTableCargoLine(
+  line: string,
+  id: number,
+  dimensionUnitHint?: string,
+): ParsedCargoItem | null {
   if (/(?:电话|phone|tel|邮编|postal|zip|地址|address|国家|country|城市|city|州省|province)/i.test(line)) {
     return null;
   }
@@ -472,7 +511,7 @@ function parseNumericTableCargoLine(line: string, id: number): ParsedCargoItem |
   if (numbers.length < 4) {
     return null;
   }
-  const unit = inferDimensionUnit(numbers.slice(0, 3));
+  const unit = dimensionUnitHint || inferDimensionUnit(numbers.slice(0, 3));
   const lengthCm = toCm(numbers[0], unit);
   const widthCm = toCm(numbers[1], unit);
   const heightCm = toCm(numbers[2], unit);
@@ -483,7 +522,12 @@ function parseNumericTableCargoLine(line: string, id: number): ParsedCargoItem |
   return toCargoItem(id, lengthCm, widthCm, heightCm, weightKg, 1);
 }
 
-function parseSpaceSeparatedCargoLine(line: string, id: number, config: QuoteWorkbenchConfig): ParsedCargoItem | null {
+function parseSpaceSeparatedCargoLine(
+  line: string,
+  id: number,
+  config: QuoteWorkbenchConfig,
+  dimensionUnitHint?: string,
+): ParsedCargoItem | null {
   if (!config.parser.allow_space_dimension_separator) {
     return null;
   }
@@ -502,9 +546,9 @@ function parseSpaceSeparatedCargoLine(line: string, id: number, config: QuoteWor
   const end = start + match[0].length;
   return toCargoItem(
     id,
-    toCm(parseFlexibleNumber(match[1]), match[4] || inferDimensionUnit([parseFlexibleNumber(match[1]), parseFlexibleNumber(match[2]), parseFlexibleNumber(match[3])]) || "cm"),
-    toCm(parseFlexibleNumber(match[2]), match[4] || inferDimensionUnit([parseFlexibleNumber(match[1]), parseFlexibleNumber(match[2]), parseFlexibleNumber(match[3])]) || "cm"),
-    toCm(parseFlexibleNumber(match[3]), match[4] || inferDimensionUnit([parseFlexibleNumber(match[1]), parseFlexibleNumber(match[2]), parseFlexibleNumber(match[3])]) || "cm"),
+    toCm(parseFlexibleNumber(match[1]), match[4] || dimensionUnitHint || inferDimensionUnit([parseFlexibleNumber(match[1]), parseFlexibleNumber(match[2]), parseFlexibleNumber(match[3])]) || "cm"),
+    toCm(parseFlexibleNumber(match[2]), match[4] || dimensionUnitHint || inferDimensionUnit([parseFlexibleNumber(match[1]), parseFlexibleNumber(match[2]), parseFlexibleNumber(match[3])]) || "cm"),
+    toCm(parseFlexibleNumber(match[3]), match[4] || dimensionUnitHint || inferDimensionUnit([parseFlexibleNumber(match[1]), parseFlexibleNumber(match[2]), parseFlexibleNumber(match[3])]) || "cm"),
     toKg(parseFlexibleNumber(match[5]), match[6]),
     findQuantity(line, start, end),
   );
@@ -535,7 +579,7 @@ function findQuantity(line: string, dimensionStart: number, itemEnd: number): nu
   if (prefixMatch) {
     return Math.max(1, parseFlexibleNumber(prefixMatch[1]));
   }
-  const suffixTokenFirst = suffix.match(new RegExp(`(?:x|×|qty|quantity|数量|件数)\\s*[:：=#-]?\\s*${number}\\b`, "i"));
+  const suffixTokenFirst = suffix.match(new RegExp(`(?:\\*|x|×|qty|quantity|数量|件数)\\s*[:：=#-]?\\s*${number}\\b`, "i"));
   if (suffixTokenFirst) {
     return Math.max(1, parseFlexibleNumber(suffixTokenFirst[1]));
   }
@@ -662,23 +706,32 @@ function normalizeLabeledDimensions(value: string): string {
 
 function toCm(value: number, unit: string | undefined): number {
   const normalized = (unit || "cm").toLowerCase().replace(/[.\s]/g, "");
+  let converted = value;
   if (["mm", "mms", "millimeter", "millimeters", "millimetre", "millimetres", "毫米"].includes(normalized)) {
-    return value / 10;
+    converted = value / 10;
+  } else if (["m", "meter", "meters", "metre", "metres", "米"].includes(normalized)) {
+    converted = value * 100;
+  } else if (["in", "inch", "inches", "\"", "英寸"].includes(normalized)) {
+    converted = value * 2.54;
+  } else if (["ft", "foot", "feet", "英尺"].includes(normalized)) {
+    converted = value * 30.48;
   }
-  if (["m", "meter", "meters", "metre", "metres", "米"].includes(normalized)) {
-    return value * 100;
-  }
-  if (["in", "inch", "inches", "\"", "英寸"].includes(normalized)) {
-    return value * 2.54;
-  }
-  if (["ft", "foot", "feet", "英尺"].includes(normalized)) {
-    return value * 30.48;
-  }
-  return value;
+  return Math.round((converted + Number.EPSILON) * 10_000) / 10_000;
 }
 
 function inferDimensionUnit(values: number[]): string | undefined {
-  return values.some((value) => Number.isFinite(value) && value > 500) ? "mm" : undefined;
+  const dimensions = values.filter((value) => Number.isFinite(value) && value > 0);
+  if (dimensions.some((value) => value > 500)) {
+    return "mm";
+  }
+  if (
+    dimensions.length === 3 &&
+    Math.max(...dimensions) <= 10 &&
+    dimensions.filter((value) => value < 1).length >= 2
+  ) {
+    return "m";
+  }
+  return undefined;
 }
 
 function normalizeCargoText(value: string): string {

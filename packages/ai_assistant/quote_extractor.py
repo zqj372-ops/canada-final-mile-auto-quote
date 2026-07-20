@@ -906,11 +906,26 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
     cargo_items: list[ExtractedCargoItem] = []
     parsed_lines = 0
     allow_numeric_table = _has_dimension_weight_table(customer_message)
+    dimension_unit_hint: str | None = None
 
     for line in customer_message.splitlines():
-        items = _parse_measurement_line(line, allow_numeric_table=allow_numeric_table)
+        items = _parse_measurement_line(
+            line,
+            allow_numeric_table=allow_numeric_table,
+            dimension_unit_hint=dimension_unit_hint,
+        )
         if not items:
+            if line.strip():
+                dimension_unit_hint = None
             continue
+        dimension_unit_hint = next(
+            (
+                item["_dimension_unit"]
+                for item in reversed(items)
+                if item.get("_dimension_unit")
+            ),
+            dimension_unit_hint,
+        )
         parsed_lines += 1
         for item in items:
             quantity = item["quantity"]
@@ -932,6 +947,12 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
                     height_cm=_quantize(height_cm, "0.1"),
                     weight_kg=_quantize(weight_kg, "0.01") if weight_kg > 0 else None,
                     cbm=_quantize(item_cbm, "0.001"),
+                    total_weight_kg=(
+                        _quantize(weight_kg * quantity, "0.1")
+                        if weight_kg > 0
+                        else None
+                    ),
+                    total_cbm=_quantize(item_cbm * quantity, "0.001"),
                     source_span=line.strip()[:240] or None,
                 )
             )
@@ -1060,7 +1081,12 @@ def _align_single_parsed_cargo_item_with_explicit_totals(
     return [item.model_copy(update=updates)]
 
 
-def _parse_measurement_line(line: str, *, allow_numeric_table: bool = False) -> list[dict[str, Any]]:
+def _parse_measurement_line(
+    line: str,
+    *,
+    allow_numeric_table: bool = False,
+    dimension_unit_hint: str | None = None,
+) -> list[dict[str, Any]]:
     normalized = _normalize_labeled_dimensions(_normalize_text(line))
     items: list[dict[str, Any]] = []
     dimension_pattern = re.compile(
@@ -1074,7 +1100,12 @@ def _parse_measurement_line(line: str, *, allow_numeric_table: bool = False) -> 
     matches = list(dimension_pattern.finditer(normalized))
     for index, match in enumerate(matches):
         next_dimension_start = matches[index + 1].start() if index + 1 < len(matches) else None
-        item = _item_from_dimension_match(normalized, match, next_dimension_start=next_dimension_start)
+        item = _item_from_dimension_match(
+            normalized,
+            match,
+            next_dimension_start=next_dimension_start,
+            dimension_unit_hint=dimension_unit_hint,
+        )
         if item:
             items.append(item)
 
@@ -1090,9 +1121,16 @@ def _parse_measurement_line(line: str, *, allow_numeric_table: bool = False) -> 
     )
     match = space_pattern.search(normalized)
     if not match:
-        return _parse_numeric_table_measurement_line(normalized) if allow_numeric_table else []
+        return (
+            _parse_numeric_table_measurement_line(
+                normalized,
+                dimension_unit_hint=dimension_unit_hint,
+            )
+            if allow_numeric_table
+            else []
+        )
     unit = _resolve_dimension_unit(
-        match.group("dimension_unit"),
+        match.group("dimension_unit") or dimension_unit_hint,
         match.group("length"),
         match.group("width"),
         match.group("height"),
@@ -1104,6 +1142,7 @@ def _parse_measurement_line(line: str, *, allow_numeric_table: bool = False) -> 
             "width_cm": _to_cm(match.group("width"), unit),
             "height_cm": _to_cm(match.group("height"), unit),
             "weight_kg": _to_kg(match.group("weight"), match.group("weight_unit")),
+            "_dimension_unit": unit,
         }
     ]
 
@@ -1201,7 +1240,11 @@ def _has_dimension_weight_table(customer_message: str) -> bool:
     )
 
 
-def _parse_numeric_table_measurement_line(line: str) -> list[dict[str, Any]]:
+def _parse_numeric_table_measurement_line(
+    line: str,
+    *,
+    dimension_unit_hint: str | None = None,
+) -> list[dict[str, Any]]:
     if re.search(r"(?:电话|phone|tel|邮编|postal|zip|地址|address|国家|country|城市|city|州省|province)", line, re.IGNORECASE):
         return []
 
@@ -1212,7 +1255,7 @@ def _parse_numeric_table_measurement_line(line: str) -> list[dict[str, Any]]:
     if len(numbers) < 4:
         return []
 
-    unit = _resolve_dimension_unit(None, numbers[0], numbers[1], numbers[2])
+    unit = _resolve_dimension_unit(dimension_unit_hint, numbers[0], numbers[1], numbers[2])
     length_cm = _to_cm(str(numbers[0]), unit)
     width_cm = _to_cm(str(numbers[1]), unit)
     height_cm = _to_cm(str(numbers[2]), unit)
@@ -1227,6 +1270,7 @@ def _parse_numeric_table_measurement_line(line: str) -> list[dict[str, Any]]:
             "width_cm": width_cm,
             "height_cm": height_cm,
             "weight_kg": weight_kg,
+            "_dimension_unit": unit,
         }
     ]
 
@@ -1236,12 +1280,14 @@ def _item_from_dimension_match(
     match: re.Match[str],
     *,
     next_dimension_start: int | None = None,
+    dimension_unit_hint: str | None = None,
 ) -> dict[str, Any] | None:
     weight = _find_item_weight(line, match.start(), match.end(), next_dimension_start)
-    item_end = weight["end"] if weight else match.end()
+    item_end = max(match.end(), weight["end"]) if weight else match.end()
     quantity = Decimal(_find_quantity(line, match.start(), item_end))
+    explicit_unit = match.group("height_unit") or match.group("width_unit") or match.group("length_unit")
     fallback_unit = _resolve_dimension_unit(
-        match.group("height_unit") or match.group("width_unit") or match.group("length_unit"),
+        explicit_unit or dimension_unit_hint,
         match.group("length"),
         match.group("width"),
         match.group("height"),
@@ -1252,6 +1298,7 @@ def _item_from_dimension_match(
         "width_cm": _to_cm(match.group("width"), match.group("width_unit") or fallback_unit),
         "height_cm": _to_cm(match.group("height"), match.group("height_unit") or fallback_unit),
         "weight_kg": weight["weight_kg"] if weight else Decimal("0"),
+        "_dimension_unit": explicit_unit or fallback_unit,
     }
 
 
@@ -1326,7 +1373,7 @@ def _find_quantity(line: str, dimension_start: int, item_end: int) -> int:
     if prefix_match:
         return max(1, int(_decimal_from_token(prefix_match.group("qty"))))
     suffix_match = re.search(
-        rf"(?:x|×|qty|quantity|数量|件数)\s*[:：=#-]?\s*(?P<qty>{NUMBER_TOKEN_PATTERN})\b",
+        rf"(?:\*|x|×|qty|quantity|数量|件数)\s*[:：=#-]?\s*(?P<qty>{NUMBER_TOKEN_PATTERN})\b",
         suffix,
         re.IGNORECASE,
     )
@@ -1355,6 +1402,12 @@ def _resolve_dimension_unit(unit: str | None, *values: object) -> str | None:
     dimensions = [_decimal_from_token(str(value)) for value in values if value is not None]
     if dimensions and max(dimensions) > Decimal("500"):
         return "mm"
+    if (
+        len(dimensions) == 3
+        and max(dimensions) <= Decimal("10")
+        and sum(value < Decimal("1") for value in dimensions) >= 2
+    ):
+        return "m"
     return None
 
 
@@ -1421,7 +1474,8 @@ def _find_authoritative_weight(customer_message: str) -> Decimal | None:
     normalized = _normalize_text(customer_message)
     patterns = [
         rf"{TOTAL_WEIGHT_LABEL_PATTERN}\s*[:：=#-]?\s*({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
-        rf"(?:合计|总计|一共)\s*[:：]?\s*(?:总?重(?:量)?|毛重)?\s*({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+        rf"{TOTAL_WEIGHT_LABEL_PATTERN}[^\n\r]{{0,32}}?({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+        rf"(?:总|合计|总计|一共)\s*[:：]?\s*(?:总?重(?:量)?|毛重)?\s*({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
         rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})\s*(?:total|gross|合计|总重)",
     ]
     values = {
@@ -1436,9 +1490,10 @@ def _find_explicit_weight(customer_message: str) -> Decimal | None:
     normalized = _normalize_text(customer_message)
     patterns = [
         rf"{TOTAL_WEIGHT_LABEL_PATTERN}\s*[:：=#-]?\s*({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+        rf"{TOTAL_WEIGHT_LABEL_PATTERN}[^\n\r]{{0,32}}?({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
         rf"(?:weight|wt|重量|毛重)\s*[:：=]\s*(?:total|gross|共|合计|总计)?\s*"
         rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
-        rf"(?:合计|总计|一共|共)\s*[:：]?\s*(?:总?重(?:量)?|毛重)?\s*"
+        rf"(?:总|合计|总计|一共|共)\s*[:：]?\s*(?:总?重(?:量)?|毛重)?\s*"
         rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
         rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})\s*(?:total|gross|合计|总重)",
     ]
@@ -1496,11 +1551,15 @@ def _find_any_weight(customer_message: str) -> Decimal | None:
 
 def _find_authoritative_piece_count(customer_message: str) -> int | None:
     normalized = _normalize_text(customer_message)
+    horizontal_space = r"[^\S\r\n]*"
     patterns = [
-        rf"{PIECE_COUNT_LABEL_PATTERN}\s*[:：=#-]?\s*(?:共|合计|总计)?\s*"
-        rf"({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}?",
-        rf"(?:一共|共|合计|总计)\s*({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}",
-        rf"({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}\s*(?:total|合计|总计)",
+        rf"{PIECE_COUNT_LABEL_PATTERN}{horizontal_space}[:：=#-]?{horizontal_space}"
+        rf"(?:共|合计|总计)?{horizontal_space}({NUMBER_TOKEN_PATTERN})"
+        rf"{horizontal_space}{PIECE_UNIT_PATTERN}?",
+        rf"(?:一共|共|合计|总计){horizontal_space}({NUMBER_TOKEN_PATTERN})"
+        rf"{horizontal_space}{PIECE_UNIT_PATTERN}",
+        rf"({NUMBER_TOKEN_PATTERN}){horizontal_space}{PIECE_UNIT_PATTERN}{horizontal_space}"
+        rf"(?:total|合计|总计)",
     ]
     values = {
         int(_decimal_from_token(match.group(1)))
@@ -1512,14 +1571,16 @@ def _find_authoritative_piece_count(customer_message: str) -> int | None:
 
 def _find_explicit_piece_count(customer_message: str) -> int | None:
     normalized = _normalize_text(customer_message)
+    horizontal_space = r"[^\S\r\n]*"
     patterns = [
-        rf"{PIECE_COUNT_LABEL_PATTERN}\s*[:：=#-]?\s*(?:共|合计|总计)?\s*"
-        rf"({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}?",
+        rf"{PIECE_COUNT_LABEL_PATTERN}{horizontal_space}[:：=#-]?{horizontal_space}"
+        rf"(?:共|合计|总计)?{horizontal_space}({NUMBER_TOKEN_PATTERN})"
+        rf"{horizontal_space}{PIECE_UNIT_PATTERN}?",
         rf"(?:pieces?|packages?|pkgs?|ctns?|cartons?|boxes|件数|总件数|共|一共|合计|总计)"
-        rf"[^\d\n\r]{{0,8}}({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}",
-        rf"({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}\s*(?:total|合计|共)?",
+        rf"[^\d\n\r]{{0,8}}({NUMBER_TOKEN_PATTERN}){horizontal_space}{PIECE_UNIT_PATTERN}",
+        rf"({NUMBER_TOKEN_PATTERN}){horizontal_space}{PIECE_UNIT_PATTERN}{horizontal_space}(?:total|合计|共)?",
         rf"(?:ctns?|cartons?|pkgs?|packages?|pcs?|pieces?|skids?|skds?|pallets?|plts?)"
-        rf"\s*[:：=#-]?\s*({NUMBER_TOKEN_PATTERN})\b",
+        rf"{horizontal_space}[:：=#-]?{horizontal_space}({NUMBER_TOKEN_PATTERN})\b",
     ]
     for pattern in patterns:
         match = re.search(pattern, normalized, re.IGNORECASE)
@@ -1531,7 +1592,7 @@ def _find_explicit_piece_count(customer_message: str) -> int | None:
 def _find_explicit_pallet_count(customer_message: str) -> int | None:
     normalized = _normalize_text(customer_message)
     match = re.search(
-        rf"({NUMBER_TOKEN_PATTERN})\s*(?:托盘|托|pallets?\b|skids?\b|skds?\b|plts?\b)",
+        rf"({NUMBER_TOKEN_PATTERN})[^\S\r\n]*(?:托盘|托|pallets?\b|skids?\b|skds?\b|plts?\b)",
         normalized,
         re.IGNORECASE,
     )
