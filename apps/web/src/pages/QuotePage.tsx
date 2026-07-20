@@ -1414,13 +1414,18 @@ function mergeParsedWithAIExtraction(
   const province = config.provinces.find((item) => item.code.toLowerCase() === String(provinceCode ?? "").toLowerCase());
   const aiCargoItems = normalizeAICargoItems(extraction);
   const cargoItems = aiCargoItems.length ? aiCargoItems : parsed.cargo_items;
-  const maxItem = cargoItems.reduce<ParsedCargoItem | null>(
-    (current, item) => (!current || item.cbm > current.cbm ? item : current),
+  const dimensionedItems = cargoItems.filter(hasCargoDimensions);
+  const maxItem = dimensionedItems.reduce<ParsedCargoItem | null>(
+    (current, item) => (!current || parsedCargoVolume(item) > parsedCargoVolume(current) ? item : current),
     null,
   );
-  const longestSide = cargoItems.length
-    ? Math.max(...cargoItems.flatMap((item) => [item.length_cm, item.width_cm, item.height_cm]))
+  const dimensions = dimensionedItems.flatMap((item) => [item.length_cm, item.width_cm, item.height_cm]) as number[];
+  const longestSide = dimensions.length
+    ? Math.max(...dimensions)
     : toNumber(extraction.longest_side_cm) ?? parsed.longest_side_cm;
+  const weights = cargoItems
+    .map((item) => item.weight_kg)
+    .filter((value): value is number => value !== null && value > 0);
 
   return {
     ...parsed,
@@ -1430,8 +1435,9 @@ function mergeParsedWithAIExtraction(
     density_kg_per_cbm: density,
     cargo_items: cargoItems,
     longest_side_cm: longestSide,
+    heaviest_piece_kg: weights.length ? Math.max(...weights) : parsed.heaviest_piece_kg,
     max_dimensions_cm: maxItem
-      ? [maxItem.length_cm, maxItem.width_cm, maxItem.height_cm]
+      ? [maxItem.length_cm!, maxItem.width_cm!, maxItem.height_cm!]
       : parsed.max_dimensions_cm,
     address: {
       address_line: extraction.address_line || parsed.address.address_line,
@@ -1457,22 +1463,49 @@ function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoIt
       const length = toNumber(item.length_cm);
       const width = toNumber(item.width_cm);
       const height = toNumber(item.height_cm);
-      if (!length || !width || !height) {
+      const hasDimensions = Boolean(length && width && height);
+      const quantity = Math.max(1, Number(item.quantity) || 1);
+      const totalWeight = toNumber(item.total_weight_kg);
+      const totalCbm = toNumber(item.total_cbm);
+      const weight = toNumber(item.weight_kg) ?? (totalWeight === null ? null : totalWeight / quantity);
+      const cbm = toNumber(item.cbm) ??
+        (totalCbm !== null
+          ? totalCbm / quantity
+          : hasDimensions
+            ? (length! * width! * height!) / 1_000_000
+            : null);
+      if (!hasDimensions && weight === null && cbm === null && totalWeight === null && totalCbm === null) {
         return null;
       }
-      const quantity = Math.max(1, Number(item.quantity) || 1);
-      const cbm = toNumber(item.cbm) ?? (length * width * height) / 1_000_000;
       return {
         id: index + 1,
         quantity,
         length_cm: length,
         width_cm: width,
         height_cm: height,
-        weight_kg: toNumber(item.weight_kg),
+        weight_kg: weight,
         cbm,
+        total_weight_kg: totalWeight ?? (weight === null ? null : weight * quantity),
+        total_cbm: totalCbm ?? (cbm === null ? null : cbm * quantity),
+        source_span: item.source_span,
       };
     })
     .filter((item): item is ParsedCargoItem => item !== null);
+}
+
+function hasCargoDimensions(
+  item: ParsedCargoItem,
+): item is ParsedCargoItem & { length_cm: number; width_cm: number; height_cm: number } {
+  return item.length_cm !== null && item.width_cm !== null && item.height_cm !== null;
+}
+
+function parsedCargoVolume(item: ParsedCargoItem): number {
+  if (item.cbm !== null) {
+    return item.cbm;
+  }
+  return hasCargoDimensions(item)
+    ? (item.length_cm * item.width_cm * item.height_cm) / 1_000_000
+    : 0;
 }
 
 function applyAIExtractionToControls(

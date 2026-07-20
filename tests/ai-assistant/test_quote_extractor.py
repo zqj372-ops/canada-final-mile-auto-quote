@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import pytest
+
 from packages.ai_assistant.model_client import AIResponse
 from packages.ai_assistant.quote_extractor import (
     AIExtractedQuoteDraft,
@@ -38,6 +40,139 @@ class RepairingDualAIClient(FakeDualAIClient):
             return AIResponse(content=self.address)
         self.cargo_calls += 1
         return AIResponse(content="not json" if self.cargo_calls == 1 else self.cargo)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "NO. OF PACKAGES: 18 / TOTAL GROSS WT: 1,234.5 KGS / VOLUME: 12.75 CBM",
+            {"piece_count": 18, "weight_kg": Decimal("1234.5"), "cbm": Decimal("12.750")},
+        ),
+        (
+            "CTNS: 20 | G/W: 1,100 KG | C.B.M.: 3.84",
+            {"piece_count": 20, "weight_kg": Decimal("1100.0"), "cbm": Decimal("3.840")},
+        ),
+        (
+            "20箱，单箱毛重55公斤，共计3.84方",
+            {"piece_count": 20, "weight_kg": Decimal("1100.0"), "cbm": Decimal("3.840")},
+        ),
+        (
+            "20 cartons @ 55 kg each; total volume 3.84 m3",
+            {"piece_count": 20, "weight_kg": Decimal("1100.0"), "cbm": Decimal("3.840")},
+        ),
+        (
+            "2 skids / gross weight 900 lbs / volume 120 cu ft",
+            {
+                "piece_count": 2,
+                "weight_kg": Decimal("408.2"),
+                "cbm": Decimal("3.398"),
+                "packaging_type": "pallet",
+            },
+        ),
+        (
+            "10 crates, G.W. 2.5 MT, MEAS 18.2 CBM",
+            {
+                "piece_count": 10,
+                "weight_kg": Decimal("2500.0"),
+                "cbm": Decimal("18.200"),
+                "packaging_type": "wooden_crate",
+            },
+        ),
+        (
+            "QTY 12 PKGS; GW 1250,5 KG; VOL 8,75 CBM",
+            {"piece_count": 12, "weight_kg": Decimal("1250.5"), "cbm": Decimal("8.750")},
+        ),
+        (
+            "QTY: 2 PLTS; L/W/H: 120/80/150 CM; G.W.: 1,000 KG",
+            {
+                "piece_count": 2,
+                "weight_kg": Decimal("1000.0"),
+                "cbm": Decimal("2.880"),
+                "dimensions": (Decimal("120.0"), Decimal("80.0"), Decimal("150.0")),
+            },
+        ),
+        (
+            "2 @ 48 x 40 x 60 in, total weight 900 lbs",
+            {
+                "piece_count": 2,
+                "weight_kg": Decimal("408.2"),
+                "cbm": Decimal("3.776"),
+                "dimensions": (Decimal("121.9"), Decimal("101.6"), Decimal("152.4")),
+            },
+        ),
+        (
+            "48x40x60IN / 2 PLTS / GW 900LBS",
+            {
+                "piece_count": 2,
+                "weight_kg": Decimal("408.2"),
+                "cbm": Decimal("3.776"),
+            },
+        ),
+        (
+            "2 PCS 1200 x 800 x 1500 MMS, gross wt 1000 KGS",
+            {
+                "piece_count": 2,
+                "weight_kg": Decimal("1000.0"),
+                "cbm": Decimal("2.880"),
+                "dimensions": (Decimal("120.0"), Decimal("80.0"), Decimal("150.0")),
+            },
+        ),
+        (
+            "W:80cm H:150cm L:120cm, QTY 2, total weight 1000kg",
+            {
+                "piece_count": 2,
+                "weight_kg": Decimal("1000.0"),
+                "cbm": Decimal("2.880"),
+                "dimensions": (Decimal("120.0"), Decimal("80.0"), Decimal("150.0")),
+            },
+        ),
+        (
+            "3 CASES\nDIMENSIONS EACH: 40\"L x 48\"W x 60\"H\nWEIGHT EACH: 200 LBS\nTOTAL CUBE: 120 CFT",
+            {"piece_count": 3, "weight_kg": Decimal("272.2"), "cbm": Decimal("3.398")},
+        ),
+        (
+            "12 bundles; 980 kilograms gross; 6.2 cubic metres",
+            {"piece_count": 12, "weight_kg": Decimal("980.0"), "cbm": Decimal("6.200")},
+        ),
+        (
+            "PKG COUNT = 6; TOTAL WT = 0.8 T; CUBE = 4.5 M^3",
+            {"piece_count": 6, "weight_kg": Decimal("800.0"), "cbm": Decimal("4.500")},
+        ),
+        (
+            "8 ctns, ttl wt 640 kgs, ttl vol 5.6 cbm",
+            {"piece_count": 8, "weight_kg": Decimal("640.0"), "cbm": Decimal("5.600")},
+        ),
+    ],
+    ids=[
+        "no-of-packages",
+        "freight-abbreviations",
+        "chinese-per-carton-weight",
+        "english-each-weight",
+        "imperial-aggregate",
+        "metric-ton",
+        "decimal-comma",
+        "lwh-slash",
+        "at-prefix-imperial-dimensions",
+        "quantity-between-dimensions-and-weight",
+        "plural-mm",
+        "unordered-lwh-labels",
+        "multiline-each-weight-and-cube",
+        "natural-unit-names",
+        "compact-field-labels",
+        "ttl-labels",
+    ],
+)
+def test_cargo_inquiry_format_corpus(raw: str, expected: dict[str, object]) -> None:
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    for field in ("piece_count", "weight_kg", "cbm", "packaging_type"):
+        if field in expected:
+            assert getattr(draft, field) == expected[field]
+    if "dimensions" in expected:
+        assert draft.cargo_items
+        item = draft.cargo_items[0]
+        assert (item.length_cm, item.width_cm, item.height_cm) == expected["dimensions"]
 
 
 def test_deterministic_extraction_normalizes_mixed_units() -> None:
@@ -130,6 +265,78 @@ def test_deterministic_extraction_reads_aggregate_cbm_weight_cartons() -> None:
     assert draft.requires_liftgate is False
     assert draft.requires_pallet_jack is False
     assert draft.requires_appointment is False
+
+
+def test_deterministic_extraction_preserves_aggregate_only_cargo_as_a_summary_item() -> None:
+    raw = """
+    QTY: 700 CTNS / G.W.: 2,814 KGS / MEAS: 35 CBM
+    Delivery: 100 Industrial Road, Toronto, ON M1B 1A1
+    """
+
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    assert draft.piece_count == 700
+    assert draft.cbm == Decimal("35.000")
+    assert draft.weight_kg == Decimal("2814.0")
+    assert draft.packaging_type == "carton"
+    assert draft.longest_side_cm is None
+    assert len(draft.cargo_items) == 1
+    summary = draft.cargo_items[0]
+    assert summary.quantity == 700
+    assert summary.length_cm is None
+    assert summary.width_cm is None
+    assert summary.height_cm is None
+    assert summary.weight_kg == Decimal("4.02")
+    assert summary.cbm == Decimal("0.050000")
+    assert summary.total_weight_kg == Decimal("2814.0")
+    assert summary.total_cbm == Decimal("35")
+    assert summary.source_span == "QTY: 700 CTNS / G.W.: 2,814 KGS / MEAS: 35 CBM"
+
+
+def test_deterministic_extraction_reads_labeled_dimensions_and_package_aliases() -> None:
+    raw = """
+    QTY=2 PKGS; DIM: L:1,700 W:1,400 H:870 mm; Gross Wt: 800 KG
+    285177 Frontier Road, Calgary, AB T1X 0A0
+    """
+
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    assert draft.piece_count == 2
+    assert draft.cbm == Decimal("4.141")
+    assert draft.weight_kg == Decimal("800.0")
+    assert draft.longest_side_cm == Decimal("170.0")
+    assert len(draft.cargo_items) == 1
+    item = draft.cargo_items[0]
+    assert item.quantity == 2
+    assert item.length_cm == Decimal("170.0")
+    assert item.width_cm == Decimal("140.0")
+    assert item.height_cm == Decimal("87.0")
+    assert item.weight_kg == Decimal("400.00")
+
+
+def test_deterministic_extraction_does_not_treat_labeled_dimensions_as_total_cbm() -> None:
+    raw = "数量: 1件; 体积: 1700*1400*870 mm; 重量: 800 KG"
+
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    assert draft.piece_count == 1
+    assert draft.cbm == Decimal("2.071")
+    assert draft.weight_kg == Decimal("800.0")
+    assert draft.cargo_items[0].length_cm == Decimal("170.0")
+
+
+def test_deterministic_extraction_reads_quantity_between_dimensions_and_weight() -> None:
+    raw = "DIM: １，７００ ｘ １，４００ ｘ ８７０ ｍｍ / 2 PLTS / G.W. 800 KG"
+
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    assert draft.piece_count == 2
+    assert draft.explicit_pallet_count == 2
+    assert draft.packaging_type == "pallet"
+    assert draft.cbm == Decimal("4.141")
+    assert draft.weight_kg == Decimal("800.0")
+    assert draft.cargo_items[0].quantity == 2
+    assert draft.cargo_items[0].weight_kg == Decimal("400.00")
 
 
 def test_deterministic_extraction_reads_carton_specs_with_trailing_quantities() -> None:
@@ -584,6 +791,16 @@ def test_extract_quote_draft_with_agents_repairs_invalid_json_once() -> None:
     assert draft.piece_count == 15
     assert draft.weight_kg == Decimal("352.5")
     assert draft.postal_code == "V6Y 0C8"
+    assert len(draft.cargo_items) == 1
+    summary = draft.cargo_items[0]
+    assert summary.quantity == 15
+    assert summary.length_cm is None
+    assert summary.width_cm is None
+    assert summary.height_cm is None
+    assert summary.weight_kg == Decimal("23.50")
+    assert summary.cbm == Decimal("0.145333")
+    assert summary.total_weight_kg == Decimal("352.5")
+    assert summary.total_cbm == Decimal("2.18")
 
 
 def test_extract_quote_draft_with_agents_prefers_explicit_and_confirmed_fields() -> None:

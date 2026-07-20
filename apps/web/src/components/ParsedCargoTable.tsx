@@ -30,7 +30,15 @@ export default function ParsedCargoTable({
         />
         <Metric
           label="最大单件"
-          value={isAwaitingAI ? "待 AI 解析" : parsed.max_dimensions_cm ? `${parsed.max_dimensions_cm.join(" × ")} cm` : "待确认"}
+          value={
+            isAwaitingAI
+              ? "待 AI 解析"
+              : parsed.max_dimensions_cm
+                ? `${parsed.max_dimensions_cm.join(" × ")} cm`
+                : parsed.piece_count || parsed.total_cbm || parsed.total_weight_kg
+                  ? "原文未提供尺寸"
+                  : "待确认"
+          }
         />
       </div>
 
@@ -50,22 +58,32 @@ export default function ParsedCargoTable({
           <tbody className="divide-y divide-slate-200 text-slate-700">
             {parsed.cargo_items.length ? (
               parsed.cargo_items.map((item) => (
-                <tr key={item.id}>
-                  <td className="px-3 py-2 tabular-nums">{item.id}</td>
+                <tr key={item.id} title={item.source_span ?? undefined}>
+                  <td className="px-3 py-2 tabular-nums">{hasDimensions(item) ? item.id : "汇总"}</td>
                   <td className="px-3 py-2 tabular-nums">{item.quantity} 件</td>
-                  <td className="px-3 py-2 tabular-nums">{item.length_cm} cm</td>
-                  <td className="px-3 py-2 tabular-nums">{item.width_cm} cm</td>
-                  <td className="px-3 py-2 tabular-nums">{item.height_cm} cm</td>
+                  <td className="px-3 py-2 tabular-nums">{formatDimension(item.length_cm)}</td>
+                  <td className="px-3 py-2 tabular-nums">{formatDimension(item.width_cm)}</td>
+                  <td className="px-3 py-2 tabular-nums">{formatDimension(item.height_cm)}</td>
                   <td className="px-3 py-2 tabular-nums">
-                    {item.weight_kg !== null ? `${item.weight_kg.toFixed(1)} KG` : "待确认"}
+                    {item.weight_kg !== null
+                      ? `${hasDimensions(item) ? "" : "约 "}${item.weight_kg.toFixed(2)} KG`
+                      : "未提供"}
                   </td>
-                  <td className="px-3 py-2 tabular-nums">{item.cbm.toFixed(3)} CBM</td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {item.cbm !== null
+                      ? `${hasDimensions(item) ? "" : "约 "}${item.cbm.toFixed(3)} CBM`
+                      : "未提供"}
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                  <td className="px-3 py-5 text-center text-slate-500" colSpan={7}>
-                  {isAwaitingAI ? "点击开始智能报价后，由后台大模型解析并回填货物信息" : "待识别货物尺寸和重量"}
+                <td className="px-3 py-5 text-center text-slate-500" colSpan={7}>
+                  {isAwaitingAI
+                    ? "点击开始智能报价后，由后台大模型解析并回填货物信息"
+                    : parsed.piece_count || parsed.total_cbm || parsed.total_weight_kg
+                      ? "已识别汇总数据，但原文没有可拆分的尺寸明细"
+                      : "未能识别货物数据，请检查原始询价格式"}
                 </td>
               </tr>
             )}
@@ -74,6 +92,14 @@ export default function ParsedCargoTable({
       </div>
     </section>
   );
+}
+
+function hasDimensions(item: ParsedQuoteInput["cargo_items"][number]): boolean {
+  return item.length_cm !== null && item.width_cm !== null && item.height_cm !== null;
+}
+
+function formatDimension(value: number | null): string {
+  return value === null ? "未提供" : `${value} cm`;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

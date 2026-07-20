@@ -3,11 +3,14 @@ import type { ProvinceAlias, QuoteWorkbenchConfig } from "../api/client";
 export interface ParsedCargoItem {
   id: number;
   quantity: number;
-  length_cm: number;
-  width_cm: number;
-  height_cm: number;
+  length_cm: number | null;
+  width_cm: number | null;
+  height_cm: number | null;
   weight_kg: number | null;
-  cbm: number;
+  cbm: number | null;
+  total_weight_kg: number | null;
+  total_cbm: number | null;
+  source_span: string | null;
 }
 
 export interface ParsedAddress {
@@ -34,6 +37,21 @@ export interface ParsedQuoteInput {
   confidence: number;
 }
 
+interface ParsedAggregateTotals {
+  piece_count: number | null;
+  cbm: number | null;
+  weight_kg: number | null;
+}
+
+const NUMBER_TOKEN_SOURCE = String.raw`(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?)`;
+const PIECE_UNIT_SOURCE = String.raw`(?:pcs?|pieces?|units?|ctns?|cartons?|boxes|pkgs?|packages?|cases?|bags?|sacks?|rolls?|drums?|crates?|skids?|skds?|bundles?|sets?|pallets?|plts?|件|箱|包|袋|卷|桶|架|捆|套|台|托盘|托)`;
+const DIMENSION_UNIT_SOURCE = String.raw`(?:millimet(?:er|re)s?|mms?|centimet(?:er|re)s?|cms?|met(?:er|re)s?|mm|cm|m|毫米|厘米|米|inches|inch|in|"|feet|foot|ft|英尺|英寸)`;
+const WEIGHT_UNIT_SOURCE = String.raw`(?:metric\s*(?:tons?|tonnes?)|tonnes?|kilograms?|kgs?|kg|公斤|千克|pounds?|lbs?|lb|磅|grams?|g|克|m\.?t\.?|t)`;
+const VOLUME_UNIT_SOURCE = String.raw`(?:c\.?b\.?m\.?|m(?:\^?3|³)|cubic\s*met(?:er|re)s?|cu\.?\s*ft|cuft|cft|ft(?:\^?3|³)|cubic\s*(?:feet|foot)|cu\.?\s*in|cuin|cin|in(?:\^?3|³)|cubic\s*inches?|立方米?|方)`;
+const PIECE_COUNT_LABEL_SOURCE = String.raw`(?:qty|quantity|(?:no\.?|number|#)\s*of\s*${PIECE_UNIT_SOURCE}|pkg\s*count|package\s*count|piece_count|数量|箱数|件数|总件数|总箱数)`;
+const TOTAL_WEIGHT_LABEL_SOURCE = String.raw`(?:total\s*(?:gross\s*)?(?:weight|wt)|ttl\s*(?:weight|wt)|gross\s*(?:weight|wt)|g(?:\.|/)?\s*w(?:t)?\.?|t\.?\s*w\.?|总重量|总重|重量合计|总毛重)`;
+const VOLUME_LABEL_SOURCE = String.raw`(?:total\s*(?:volume|vol\.?|cube|cbm)|ttl\s*(?:volume|vol\.?|cube|cbm)|volume|vol\.?|meas(?:urement)?\.?|cube|c\.?b\.?m\.?|cuft|cft|总体积|总方数|方数|体积)`;
+
 export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig): ParsedQuoteInput {
   const lines = rawInput
     .split(/\r?\n/)
@@ -52,12 +70,15 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
     }
   }
 
-  const aggregate = parseAggregateTotals(rawInput);
-  if (cargoItems.length === 1 && aggregate.piece_count && aggregate.piece_count > cargoItems[0].quantity) {
-    cargoItems[0] = { ...cargoItems[0], quantity: aggregate.piece_count };
+  const aggregate = parseAggregateTotals(rawInput, cargoItems.length);
+  if (cargoItems.length === 1 && aggregate.piece_count && aggregate.piece_count >= cargoItems[0].quantity) {
+    cargoItems[0] = reconcileSingleCargoItemWithTotals(cargoItems[0], aggregate);
+  }
+  if (!cargoItems.length && aggregate.piece_count && (aggregate.cbm || aggregate.weight_kg)) {
+    cargoItems.push(buildAggregateCargoItem(aggregate, rawInput));
   }
   const address = parseAddress(addressLines, config);
-  const cargoCbm = round3(cargoItems.reduce((sum, item) => sum + item.cbm * item.quantity, 0));
+  const cargoCbm = round3(cargoItems.reduce((sum, item) => sum + (item.cbm ?? 0) * item.quantity, 0));
   const cargoWeight = round1(cargoItems.reduce((sum, item) => sum + (item.weight_kg ?? 0) * item.quantity, 0));
   const cargoPieceCount = cargoItems.reduce((sum, item) => sum + item.quantity, 0);
   const totalCbm = aggregate.cbm || cargoCbm || 0;
@@ -67,12 +88,14 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
       ? aggregate.piece_count
       : cargoPieceCount || aggregate.piece_count || 0;
   const density = totalCbm > 0 ? round1(totalWeight / totalCbm) : null;
-  const maxItem = cargoItems.reduce<ParsedCargoItem | null>(
-    (current, item) => (!current || item.cbm > current.cbm ? item : current),
+  const dimensionedItems = cargoItems.filter(hasCompleteDimensions);
+  const maxItem = dimensionedItems.reduce<ParsedCargoItem | null>(
+    (current, item) => (!current || cargoItemVolume(item) > cargoItemVolume(current) ? item : current),
     null,
   );
-  const longestSide = cargoItems.length
-    ? Math.max(...cargoItems.flatMap((item) => [item.length_cm, item.width_cm, item.height_cm]))
+  const knownDimensions = dimensionedItems.flatMap((item) => [item.length_cm, item.width_cm, item.height_cm]) as number[];
+  const longestSide = knownDimensions.length
+    ? Math.max(...knownDimensions)
     : null;
   const knownWeights = cargoItems
     .map((item) => item.weight_kg)
@@ -101,7 +124,7 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
     total_weight_kg: totalWeight,
     density_kg_per_cbm: density,
     max_dimensions_cm: maxItem
-      ? [maxItem.length_cm, maxItem.width_cm, maxItem.height_cm]
+      ? [maxItem.length_cm!, maxItem.width_cm!, maxItem.height_cm!]
       : null,
     longest_side_cm: longestSide,
     heaviest_piece_kg: heaviestPiece,
@@ -112,51 +135,220 @@ export function parseQuoteInput(rawInput: string, config: QuoteWorkbenchConfig):
   };
 }
 
-function parseAggregateTotals(rawInput: string): {
-  piece_count: number | null;
-  cbm: number | null;
-  weight_kg: number | null;
-} {
-  const pieceCount = findExplicitPieceCount(rawInput);
-  const cbmMatch = rawInput.match(/(\d+(?:\.\d+)?)\s*(?:cbm|m3|m³|方|立方)/i);
-  const explicitWeightMatch =
-    rawInput.match(/(?:合计|总计|总重量|总重|重量合计|一共|共)[^\n\r]{0,32}?(\d+(?:\.\d+)?)\s*(kg|kgs|公斤|千克|lb|lbs|pounds?|磅)/i) ??
-    rawInput.match(/(\d+(?:\.\d+)?)\s*(kg|kgs|公斤|千克|lb|lbs|pounds?|磅)\s*(?:total|合计|总重)/i);
+function parseAggregateTotals(rawInput: string, cargoItemCount: number): ParsedAggregateTotals {
+  const normalized = normalizeCargoText(rawInput);
+  const pieceCount = findExplicitPieceCount(normalized);
+  const labeledCbmMatch = findLastMatch(
+    normalized,
+    new RegExp(
+      String.raw`(?<![A-Za-z0-9.])(${VOLUME_LABEL_SOURCE})\s*[:：=]?\s*(${NUMBER_TOKEN_SOURCE})(?![\d,.])\s*(${VOLUME_UNIT_SOURCE})?(?!\s*(?:\*|x|×|by\b))`,
+      "gi",
+    ),
+  );
+  const cbmMatch = labeledCbmMatch ?? findLastMatch(
+    normalized,
+    new RegExp(String.raw`(${NUMBER_TOKEN_SOURCE})\s*(${VOLUME_UNIT_SOURCE})(?=$|[^A-Za-z])`, "gi"),
+  );
+  const cbm = cbmMatch
+    ? toCbm(
+        parseFlexibleNumber(cbmMatch[labeledCbmMatch ? 2 : 1]),
+        cbmMatch[labeledCbmMatch ? 3 : 2] || (labeledCbmMatch ? cbmMatch[1] : "cbm"),
+      )
+    : null;
+  let weightKg = findExplicitAggregateWeight(normalized);
+  if (weightKg === null && pieceCount) {
+    const perPieceWeight = findPerPieceWeight(normalized);
+    if (perPieceWeight !== null && cargoItemCount <= 1) {
+      weightKg = perPieceWeight * pieceCount;
+    }
+  }
   const weightMatches = Array.from(
-    rawInput.matchAll(/(\d+(?:\.\d+)?)\s*(kg|kgs|公斤|千克|lb|lbs|pounds?|磅)/gi),
+    normalized.matchAll(new RegExp(String.raw`(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})(?=$|[^A-Za-z])`, "gi")),
   );
   const weightMatch = weightMatches.length ? weightMatches[weightMatches.length - 1] : undefined;
-  const hasDimensionSpecs = /\d+(?:\.\d+)?\s*(?:mm|cm|厘米|m|米|inches|inch|in|"|ft|feet|英尺|英寸)?\s*(?:\*|x|X|×|by)\s*\d+(?:\.\d+)?/i.test(rawInput);
+  const hasDimensionSpecs = new RegExp(
+    String.raw`${NUMBER_TOKEN_SOURCE}\s*(?:${DIMENSION_UNIT_SOURCE})?\s*(?:\*|x|X|×|by)\s*${NUMBER_TOKEN_SOURCE}`,
+    "i",
+  ).test(normalized);
   const fallbackAggregateWeight = !hasDimensionSpecs && pieceCount && cbmMatch ? weightMatch : undefined;
-  const selectedWeight = explicitWeightMatch ?? fallbackAggregateWeight;
+  if (weightKg === null && fallbackAggregateWeight) {
+    weightKg = toKg(parseFlexibleNumber(fallbackAggregateWeight[1]), fallbackAggregateWeight[2]);
+  }
   return {
     piece_count: pieceCount,
-    cbm: cbmMatch ? round3(Number(cbmMatch[1])) : null,
-    weight_kg: selectedWeight ? round1(toKg(Number(selectedWeight[1]), selectedWeight[2])) : null,
+    cbm: cbm === null ? null : round3(cbm),
+    weight_kg: weightKg === null ? null : round1(weightKg),
   };
 }
 
 function findExplicitPieceCount(rawInput: string): number | null {
+  const normalized = normalizeCargoText(rawInput);
   const patterns = [
-    /(?:数量|箱数|件数|总件数|总箱数)\s*[:：]?\s*(?:共|合计|总计)?\s*(\d{1,5})\s*(?:箱|件|pcs?|pieces?|ctns?|cartons?|boxes)/i,
-    /(?:一共|共|合计|总计|总件数|件数)[^\d\n\r]{0,8}(\d{1,5})\s*(?:箱|件|pcs?|pieces?|ctns?|cartons?|boxes)/i,
-    /(\d{1,5})\s*(?:箱|件|pcs?|pieces?|ctns?|cartons?|boxes)/i,
+    new RegExp(String.raw`${PIECE_COUNT_LABEL_SOURCE}\s*[:：=#-]?\s*(?:共|合计|总计)?\s*(${NUMBER_TOKEN_SOURCE})\s*${PIECE_UNIT_SOURCE}?`, "i"),
+    new RegExp(String.raw`(?:一共|共|合计|总计|总件数|件数)[^\d\n\r]{0,8}(${NUMBER_TOKEN_SOURCE})\s*${PIECE_UNIT_SOURCE}`, "i"),
+    new RegExp(String.raw`(${NUMBER_TOKEN_SOURCE})\s*${PIECE_UNIT_SOURCE}`, "i"),
+    new RegExp(String.raw`(?:ctns?|cartons?|pkgs?|packages?|pcs?|pieces?|skids?|skds?|pallets?|plts?)\s*[:：=#-]?\s*(${NUMBER_TOKEN_SOURCE})\b`, "i"),
   ];
   for (const pattern of patterns) {
-    const match = rawInput.match(pattern);
+    const match = normalized.match(pattern);
     if (match) {
-      return Number(match[1]);
+      return parseFlexibleNumber(match[1]);
     }
   }
   return null;
 }
 
+function findExplicitAggregateWeight(value: string): number | null {
+  const patterns = [
+    new RegExp(String.raw`${TOTAL_WEIGHT_LABEL_SOURCE}\s*[:：=#-]?\s*(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})(?=$|[^A-Za-z])`, "gi"),
+    new RegExp(String.raw`(?:weight|wt|重量|毛重)\s*[:：=]\s*(?:total|gross|共|合计|总计)?\s*(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})(?=$|[^A-Za-z])`, "gi"),
+    new RegExp(String.raw`(?:合计|总计|一共|共)\s*[:：]?\s*(?:总?重(?:重量)?|毛重)?\s*(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})(?=$|[^A-Za-z])`, "gi"),
+    new RegExp(String.raw`(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})\s*(?:total|gross|合计|总重)`, "gi"),
+  ];
+  for (const pattern of patterns) {
+    for (const match of value.matchAll(pattern)) {
+      const start = match.index ?? 0;
+      if (!isPerPieceWeightContext(value, start, start + match[0].length)) {
+        return toKg(parseFlexibleNumber(match[1]), match[2]);
+      }
+    }
+  }
+  return null;
+}
+
+function findPerPieceWeight(value: string): number | null {
+  const itemName = String.raw`(?:${PIECE_UNIT_SOURCE}|pc|ctn|pkg|plt)`;
+  const patterns = [
+    new RegExp(String.raw`(?:单|每)(?:件|箱|包|袋|卷|桶|托|托盘)(?:毛重|重量|重)?\s*[:：=]?\s*(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})(?=$|[^A-Za-z])`, "i"),
+    new RegExp(String.raw`(?:weight\s*)?(?:each|per\s*${itemName})\s*[:：=]?\s*(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})(?=$|[^A-Za-z])`, "i"),
+    new RegExp(String.raw`(${NUMBER_TOKEN_SOURCE})\s*(${WEIGHT_UNIT_SOURCE})\s*(?:each|ea\.?|per\s*${itemName}|/\s*(?:ea\.?|${itemName})|每(?:件|箱|包|袋|卷|桶|托|托盘))`, "i"),
+  ];
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match) {
+      return toKg(parseFlexibleNumber(match[1]), match[2]);
+    }
+  }
+  return null;
+}
+
+function isPerPieceWeightContext(value: string, start: number, end: number): boolean {
+  const context = value.slice(Math.max(0, start - 24), Math.min(value.length, end + 24));
+  return /(?:\beach\b|\bea\.?\b|\bper\s*(?:piece|carton|box|package|case|bag|skid|pallet)\b|\/\s*(?:ea\.?|pc|ctn|pkg|plt)\b|单(?:件|箱|包|袋|卷|桶|托)|每(?:件|箱|包|袋|卷|桶|托))/i.test(context);
+}
+
+function reconcileSingleCargoItemWithTotals(
+  item: ParsedCargoItem,
+  aggregate: ParsedAggregateTotals,
+): ParsedCargoItem {
+  const quantity = aggregate.piece_count ?? item.quantity;
+  let weightKg = item.weight_kg;
+  if (aggregate.weight_kg && quantity > 0) {
+    const expectedTotal = weightKg === null ? null : weightKg * quantity;
+    const tolerance = Math.max(1, aggregate.weight_kg * 0.05);
+    if (expectedTotal === null || Math.abs(expectedTotal - aggregate.weight_kg) > tolerance) {
+      weightKg = aggregate.weight_kg / quantity;
+    }
+  }
+  return {
+    ...item,
+    quantity,
+    weight_kg: weightKg,
+    total_weight_kg: aggregate.weight_kg ?? (weightKg === null ? null : weightKg * quantity),
+    total_cbm: aggregate.cbm ?? (item.cbm === null ? null : item.cbm * quantity),
+  };
+}
+
+function buildAggregateCargoItem(aggregate: ParsedAggregateTotals, rawInput: string): ParsedCargoItem {
+  const quantity = aggregate.piece_count ?? 1;
+  return {
+    id: 1,
+    quantity,
+    length_cm: null,
+    width_cm: null,
+    height_cm: null,
+    weight_kg: aggregate.weight_kg ? aggregate.weight_kg / quantity : null,
+    cbm: aggregate.cbm ? aggregate.cbm / quantity : null,
+    total_weight_kg: aggregate.weight_kg,
+    total_cbm: aggregate.cbm,
+    source_span: findAggregateSourceLine(rawInput),
+  };
+}
+
 function toKg(value: number, unit: string): number {
-  const normalized = unit.toLowerCase();
+  const normalized = unit.toLowerCase().replace(/[.\s]/g, "");
   if (["lb", "lbs", "pound", "pounds", "磅"].includes(normalized)) {
     return value * 0.45359237;
   }
+  if (["g", "gram", "grams", "克"].includes(normalized)) {
+    return value / 1000;
+  }
+  if (["mt", "t", "tonne", "tonnes", "metricton", "metrictons", "metrictonne", "metrictonnes"].includes(normalized)) {
+    return value * 1000;
+  }
   return value;
+}
+
+function toCbm(value: number, unit: string): number {
+  const normalized = unit.toLowerCase().replace(/[.\s^]/g, "");
+  if (["cuft", "cft", "ft3", "cubicfoot", "cubicfeet"].includes(normalized)) {
+    return value * 0.028316846592;
+  }
+  if (["cuin", "cin", "in3", "cubicinch", "cubicinches"].includes(normalized)) {
+    return value * 0.000016387064;
+  }
+  return value;
+}
+
+function parseFlexibleNumber(value: string): number {
+  let normalized = value.trim().replace(/\s/g, "");
+  if (normalized.includes(",")) {
+    const decimalDigits = normalized.slice(normalized.lastIndexOf(",") + 1).length;
+    normalized = normalized.includes(".") || decimalDigits === 3
+      ? normalized.replace(/,/g, "")
+      : normalized.replace(/,/g, ".");
+  }
+  return Number(normalized);
+}
+
+function findLastMatch(value: string, pattern: RegExp): RegExpMatchArray | null {
+  const matches = Array.from(value.matchAll(pattern));
+  return matches.length ? matches[matches.length - 1] : null;
+}
+
+function findAggregateSourceLine(rawInput: string): string | null {
+  const candidates = rawInput
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^[a-z_][a-z0-9_]*\s*=/i.test(line))
+    .map((line) => ({
+      line,
+      score: [
+        /(?:qty|quantity|pcs?|pieces?|ctns?|cartons?|pkgs?|packages?|件|箱|包|托)/i,
+        /(?:cbm|m3|m³|volume|vol\.?|meas(?:urement)?|总体积|体积|方|立方)/i,
+        /(?:kgs?|kg|lbs?|pounds?|gross\s*(?:weight|wt)|g\.?\s*w\.?|总重|重量|毛重)/i,
+      ].filter((pattern) => pattern.test(line)).length,
+    }))
+    .filter((candidate) => candidate.score > 0);
+  candidates.sort((left, right) => right.score - left.score);
+  return candidates[0]?.line.slice(0, 240) ?? null;
+}
+
+function hasCompleteDimensions(
+  item: ParsedCargoItem,
+): item is ParsedCargoItem & { length_cm: number; width_cm: number; height_cm: number } {
+  return [item.length_cm, item.width_cm, item.height_cm].every(
+    (value) => value !== null && Number.isFinite(value) && value > 0,
+  );
+}
+
+function cargoItemVolume(item: ParsedCargoItem): number {
+  if (item.cbm !== null) {
+    return item.cbm;
+  }
+  return hasCompleteDimensions(item)
+    ? (item.length_cm * item.width_cm * item.height_cm) / 1_000_000
+    : 0;
 }
 
 function toCargoItem(
@@ -175,6 +367,9 @@ function toCargoItem(
     height_cm: heightCm,
     weight_kg: weightKg,
     cbm: (lengthCm * widthCm * heightCm) / 1_000_000,
+    total_weight_kg: weightKg === null ? null : weightKg * quantity,
+    total_cbm: ((lengthCm * widthCm * heightCm) / 1_000_000) * quantity,
+    source_span: null,
   };
 }
 
@@ -184,10 +379,10 @@ function parseCargoLineItems(
   config: QuoteWorkbenchConfig,
   allowNumericTable = false,
 ): ParsedCargoItem[] {
-  const normalized = normalizeCargoText(line);
-  const decimal = "(\\d+(?:\\.\\d+)?)";
+  const normalized = normalizeLabeledDimensions(normalizeCargoText(line));
+  const decimal = `(${NUMBER_TOKEN_SOURCE})`;
   const separators = config.parser.dimension_separators.map(escapeRegex).join("|");
-  const dimensionUnits = "mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸";
+  const dimensionUnits = DIMENSION_UNIT_SOURCE;
   const dimensionRegex = new RegExp(
     `${decimal}\\s*(${dimensionUnits})?\\s*(?:${separators})\\s*${decimal}\\s*(${dimensionUnits})?\\s*(?:${separators})\\s*${decimal}\\s*(${dimensionUnits})?`,
     "gi",
@@ -223,8 +418,8 @@ function parseDimensionMatch(
   if (dimensionMatch.index === undefined) {
     return null;
   }
-  const decimal = "(\\d+(?:\\.\\d+)?)";
-  const units = config.parser.weight_units.map(escapeRegex).join("|");
+  const decimal = `(${NUMBER_TOKEN_SOURCE})`;
+  const units = buildWeightUnitPattern(config);
   const weightRegex = new RegExp(`${decimal}\\s*(${units})`, "i");
   const dimensionStart = dimensionMatch.index;
   const dimensionEnd = dimensionStart + dimensionMatch[0].length;
@@ -234,14 +429,14 @@ function parseDimensionMatch(
   const weightEnd = prefixWeight?.end ?? dimensionEnd;
   const quantity = findQuantity(line, dimensionStart, weightEnd);
   const dimensionFallbackUnit = dimensionMatch[6] || dimensionMatch[4] || dimensionMatch[2] ||
-    inferDimensionUnit([Number(dimensionMatch[1]), Number(dimensionMatch[3]), Number(dimensionMatch[5])]) ||
+    inferDimensionUnit([parseFlexibleNumber(dimensionMatch[1]), parseFlexibleNumber(dimensionMatch[3]), parseFlexibleNumber(dimensionMatch[5])]) ||
     "cm";
   return toCargoItem(
     id,
-    toCm(Number(dimensionMatch[1]), dimensionMatch[2] || dimensionFallbackUnit),
-    toCm(Number(dimensionMatch[3]), dimensionMatch[4] || dimensionFallbackUnit),
-    toCm(Number(dimensionMatch[5]), dimensionMatch[6] || dimensionFallbackUnit),
-    prefixWeight ? toKg(Number(prefixWeight.match[1]), prefixWeight.match[2]) : null,
+    toCm(parseFlexibleNumber(dimensionMatch[1]), dimensionMatch[2] || dimensionFallbackUnit),
+    toCm(parseFlexibleNumber(dimensionMatch[3]), dimensionMatch[4] || dimensionFallbackUnit),
+    toCm(parseFlexibleNumber(dimensionMatch[5]), dimensionMatch[6] || dimensionFallbackUnit),
+    prefixWeight ? toKg(parseFlexibleNumber(prefixWeight.match[1]), prefixWeight.match[2]) : null,
     quantity,
   );
 }
@@ -292,9 +487,9 @@ function parseSpaceSeparatedCargoLine(line: string, id: number, config: QuoteWor
   if (!config.parser.allow_space_dimension_separator) {
     return null;
   }
-  const decimal = "(\\d+(?:\\.\\d+)?)";
-  const units = config.parser.weight_units.map(escapeRegex).join("|");
-  const dimensionUnits = "mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸";
+  const decimal = `(${NUMBER_TOKEN_SOURCE})`;
+  const units = buildWeightUnitPattern(config);
+  const dimensionUnits = DIMENSION_UNIT_SOURCE;
   const pattern = new RegExp(
     `(?:^|[^\\d.])${decimal}\\s+${decimal}\\s+${decimal}(?:\\s*(${dimensionUnits}))?\\s+${decimal}\\s*(${units})`,
     "i",
@@ -307,45 +502,176 @@ function parseSpaceSeparatedCargoLine(line: string, id: number, config: QuoteWor
   const end = start + match[0].length;
   return toCargoItem(
     id,
-    toCm(Number(match[1]), match[4] || inferDimensionUnit([Number(match[1]), Number(match[2]), Number(match[3])]) || "cm"),
-    toCm(Number(match[2]), match[4] || inferDimensionUnit([Number(match[1]), Number(match[2]), Number(match[3])]) || "cm"),
-    toCm(Number(match[3]), match[4] || inferDimensionUnit([Number(match[1]), Number(match[2]), Number(match[3])]) || "cm"),
-    toKg(Number(match[5]), match[6]),
+    toCm(parseFlexibleNumber(match[1]), match[4] || inferDimensionUnit([parseFlexibleNumber(match[1]), parseFlexibleNumber(match[2]), parseFlexibleNumber(match[3])]) || "cm"),
+    toCm(parseFlexibleNumber(match[2]), match[4] || inferDimensionUnit([parseFlexibleNumber(match[1]), parseFlexibleNumber(match[2]), parseFlexibleNumber(match[3])]) || "cm"),
+    toCm(parseFlexibleNumber(match[3]), match[4] || inferDimensionUnit([parseFlexibleNumber(match[1]), parseFlexibleNumber(match[2]), parseFlexibleNumber(match[3])]) || "cm"),
+    toKg(parseFlexibleNumber(match[5]), match[6]),
     findQuantity(line, start, end),
   );
 }
 
 function findQuantity(line: string, dimensionStart: number, itemEnd: number): number {
-  const prefix = line.slice(Math.max(0, dimensionStart - 32), dimensionStart);
+  const prefix = line.slice(Math.max(0, dimensionStart - 48), dimensionStart);
   const suffix = line.slice(itemEnd, itemEnd + 48);
-  const quantityUnit = "(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托|pallets?)";
-  const suffixNumberFirst = suffix.match(new RegExp(`(\\d{1,5})\\s*${quantityUnit}`, "i"));
+  const number = `(${NUMBER_TOKEN_SOURCE})`;
+  const quantityUnit = PIECE_UNIT_SOURCE;
+  const prefixLabeled = prefix.match(new RegExp(`(?:qty|quantity|数量|件数)\\s*[:：=#-]?\\s*${number}\\s*${quantityUnit}?[^\\d]*$`, "i"));
+  if (prefixLabeled) {
+    return Math.max(1, parseFlexibleNumber(prefixLabeled[1]));
+  }
+  const prefixBare = prefix.match(new RegExp(`${number}\\s*(?:@|x|×)\\s*$`, "i"));
+  if (prefixBare) {
+    return Math.max(1, parseFlexibleNumber(prefixBare[1]));
+  }
+  const localNumberFirst = line.slice(dimensionStart, itemEnd).match(new RegExp(`${number}\\s*${quantityUnit}`, "i"));
+  if (localNumberFirst) {
+    return Math.max(1, parseFlexibleNumber(localNumberFirst[1]));
+  }
+  const suffixNumberFirst = suffix.match(new RegExp(`${number}\\s*${quantityUnit}`, "i"));
   if (suffixNumberFirst) {
-    return Math.max(1, Number(suffixNumberFirst[1]));
+    return Math.max(1, parseFlexibleNumber(suffixNumberFirst[1]));
   }
-  const prefixMatch = prefix.match(new RegExp(`(\\d{1,5})\\s*${quantityUnit}\\s*$`, "i"));
+  const prefixMatch = prefix.match(new RegExp(`${number}\\s*${quantityUnit}\\s*$`, "i"));
   if (prefixMatch) {
-    return Math.max(1, Number(prefixMatch[1]));
+    return Math.max(1, parseFlexibleNumber(prefixMatch[1]));
   }
-  const suffixTokenFirst = suffix.match(/(?:x|×|qty|quantity|数量|件数)\s*(\d{1,5})\b/i);
+  const suffixTokenFirst = suffix.match(new RegExp(`(?:x|×|qty|quantity|数量|件数)\\s*[:：=#-]?\\s*${number}\\b`, "i"));
   if (suffixTokenFirst) {
-    return Math.max(1, Number(suffixTokenFirst[1]));
+    return Math.max(1, parseFlexibleNumber(suffixTokenFirst[1]));
   }
   return 1;
 }
 
+function buildWeightUnitPattern(config: QuoteWorkbenchConfig): string {
+  const units = new Set([
+    ...config.parser.weight_units,
+    "kg",
+    "kgs",
+    "kilogram",
+    "kilograms",
+    "公斤",
+    "千克",
+    "lb",
+    "lbs",
+    "pound",
+    "pounds",
+    "磅",
+    "g",
+    "gram",
+    "grams",
+    "克",
+    "mt",
+    "m.t.",
+    "t",
+    "tonne",
+    "tonnes",
+    "metric ton",
+    "metric tons",
+  ]);
+  return Array.from(units)
+    .sort((left, right) => right.length - left.length)
+    .map(escapeRegex)
+    .join("|");
+}
+
+function normalizeLabeledDimensions(value: string): string {
+  const number = `(${NUMBER_TOKEN_SOURCE})`;
+  const unit = `(${DIMENSION_UNIT_SOURCE})?`;
+  const gap = String.raw`[\s,，;；/|*x×-]*`;
+  const lwhPattern = new RegExp(
+    String.raw`\bL\s*/\s*W\s*/\s*H\s*[:：=]?\s*${number}\s*(?:/|\*|x|×)\s*` +
+      String.raw`${number}\s*(?:/|\*|x|×)\s*${number}\s*${unit}`,
+    "gi",
+  );
+  const prefixPattern = new RegExp(
+    String.raw`(?:\bL(?:ength)?|长)\s*[:：=]?\s*${number}\s*${unit}${gap}` +
+      String.raw`(?:\bW(?:idth)?|宽)\s*[:：=]?\s*${number}\s*${unit}${gap}` +
+      String.raw`(?:\bH(?:eight)?|高)\s*[:：=]?\s*${number}\s*${unit}\s*${unit}`,
+    "gi",
+  );
+  const suffixPattern = new RegExp(
+    String.raw`${number}\s*${unit}\s*[（(]?\s*(?:L|长)\s*[）)]?\s*(?:\*|x|×)\s*` +
+      String.raw`${number}\s*${unit}\s*[（(]?\s*(?:W|宽)\s*[）)]?\s*(?:\*|x|×)\s*` +
+      String.raw`${number}\s*${unit}\s*[（(]?\s*(?:H|高)\s*[）)]?\s*${unit}`,
+    "gi",
+  );
+  const replace = (
+    _match: string,
+    length: string,
+    lengthUnit: string | undefined,
+    width: string,
+    widthUnit: string | undefined,
+    height: string,
+    heightUnit: string | undefined,
+    overallUnit: string | undefined,
+  ) => {
+    const fallbackUnit = overallUnit ?? "";
+    return [
+      `${parseFlexibleNumber(length)}${lengthUnit ?? fallbackUnit}`,
+      `${parseFlexibleNumber(width)}${widthUnit ?? fallbackUnit}`,
+      `${parseFlexibleNumber(height)}${heightUnit ?? fallbackUnit}`,
+    ].join("x");
+  };
+  const replaceLwh = (
+    _match: string,
+    length: string,
+    width: string,
+    height: string,
+    overallUnit: string | undefined,
+  ) => [length, width, height]
+    .map((item) => `${parseFlexibleNumber(item)}${overallUnit ?? ""}`)
+    .join("x");
+
+  let normalized = value
+    .replace(lwhPattern, replaceLwh)
+    .replace(prefixPattern, replace)
+    .replace(suffixPattern, replace);
+  const labeledValuePattern = new RegExp(
+    String.raw`(\b(?:L(?:ength)?|W(?:idth)?|H(?:eight)?)\b|长|宽|高)\s*[:：=]?\s*${number}\s*${unit}`,
+    "gi",
+  );
+  const matches = Array.from(normalized.matchAll(labeledValuePattern));
+  const dimensions = new Map<"length" | "width" | "height", RegExpMatchArray>();
+  for (const match of matches) {
+    const label = match[1].toLowerCase();
+    const name = label.startsWith("l") || label === "长"
+      ? "length"
+      : label.startsWith("w") || label === "宽"
+        ? "width"
+        : "height";
+    if (!dimensions.has(name)) {
+      dimensions.set(name, match);
+    }
+  }
+  if (dimensions.size !== 3) {
+    return normalized;
+  }
+  const fallbackUnit = [...matches].reverse().find((match) => match[3])?.[3] ?? "";
+  const replacement = (["length", "width", "height"] as const)
+    .map((name) => {
+      const match = dimensions.get(name)!;
+      return `${parseFlexibleNumber(match[2])}${match[3] ?? fallbackUnit}`;
+    })
+    .join("x");
+  const selectedMatches = Array.from(dimensions.values());
+  const start = Math.min(...selectedMatches.map((match) => match.index ?? 0));
+  const end = Math.max(...selectedMatches.map((match) => (match.index ?? 0) + match[0].length));
+  normalized = `${normalized.slice(0, start)}${replacement}${normalized.slice(end)}`;
+  return normalized;
+}
+
 function toCm(value: number, unit: string | undefined): number {
-  const normalized = (unit || "cm").toLowerCase();
-  if (normalized === "mm") {
+  const normalized = (unit || "cm").toLowerCase().replace(/[.\s]/g, "");
+  if (["mm", "mms", "millimeter", "millimeters", "millimetre", "millimetres", "毫米"].includes(normalized)) {
     return value / 10;
   }
-  if (["m", "米"].includes(normalized)) {
+  if (["m", "meter", "meters", "metre", "metres", "米"].includes(normalized)) {
     return value * 100;
   }
   if (["in", "inch", "inches", "\"", "英寸"].includes(normalized)) {
     return value * 2.54;
   }
-  if (["ft", "feet", "英尺"].includes(normalized)) {
+  if (["ft", "foot", "feet", "英尺"].includes(normalized)) {
     return value * 30.48;
   }
   return value;
@@ -357,6 +683,7 @@ function inferDimensionUnit(values: number[]): string | undefined {
 
 function normalizeCargoText(value: string): string {
   return value
+    .normalize("NFKC")
     .replace(/＊/g, "*")
     .replace(/Ｘ/g, "x")
     .replace(/公斤/g, "kg")
@@ -761,8 +1088,8 @@ function buildRiskHints({
   if (heaviestPiece !== null && heaviestPiece >= config.risks.heavy_single_piece_kg) {
     risks.push("存在较重单件，请确认卸货设备、dock 或尾板需求。");
   }
-  if (!cargoItems.length) {
-    risks.push("客户提供的是汇总体积/重量，最大单件尺寸待确认。");
+  if (!cargoItems.some(hasCompleteDimensions)) {
+    risks.push("已识别汇总件数、体积和重量，但原文未提供单件尺寸。");
   }
   risks.push("请确认是否有叉车 / dock / 尾板需求。");
   risks.push("请确认派送地址是否商业地址；如为住宅，可能产生住宅、尾板、预约等附加费。");

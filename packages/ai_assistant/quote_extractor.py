@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 import json
 import re
+import unicodedata
 from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -122,6 +123,37 @@ ALLOWED_ADDRESS_TYPES = {"commercial", "residential", "private", "rural_resident
 POSTAL_CODE_PATTERN = re.compile(r"[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d")
 SUSPICIOUS_MODEL_PIECE_COUNT = 1000
 SUSPICIOUS_PIECES_PER_CBM = Decimal("500")
+NUMBER_TOKEN_PATTERN = r"(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?)"
+PIECE_UNIT_PATTERN = (
+    r"(?:pcs?|pieces?|units?|ctns?|cartons?|boxes|pkgs?|packages?|cases?|bags?|sacks?|"
+    r"rolls?|drums?|crates?|skids?|skds?|bundles?|sets?|pallets?|plts?|件|箱|包|袋|卷|桶|架|捆|套|台|托盘|托)"
+)
+DIMENSION_UNIT_PATTERN = (
+    r"(?:millimet(?:er|re)s?|mms?|centimet(?:er|re)s?|cms?|met(?:er|re)s?|mm|cm|m|"
+    r"毫米|厘米|米|inches|inch|in|\"|feet|foot|ft|英尺|英寸)"
+)
+WEIGHT_UNIT_PATTERN = (
+    r"(?:metric\s*(?:tons?|tonnes?)|tonnes?|kilograms?|kgs?|kg|公斤|千克|"
+    r"pounds?|lbs?|lb|磅|grams?|g|克|m\.?t\.?|t)"
+)
+VOLUME_UNIT_PATTERN = (
+    r"(?:c\.?b\.?m\.?|m(?:\^?3|³)|cubic\s*met(?:er|re)s?|cu\.?\s*ft|cuft|cft|"
+    r"ft(?:\^?3|³)|cubic\s*(?:feet|foot)|cu\.?\s*in|cuin|cin|in(?:\^?3|³)|"
+    r"cubic\s*inches?|立方米?|方)"
+)
+PIECE_COUNT_LABEL_PATTERN = (
+    rf"(?:qty|quantity|(?:no\.?|number|#)\s*of\s*{PIECE_UNIT_PATTERN}|"
+    r"pkg\s*count|package\s*count|piece_count|数量|箱数|件数|总件数|总箱数)"
+)
+TOTAL_WEIGHT_LABEL_PATTERN = (
+    r"(?:total\s*(?:gross\s*)?(?:weight|wt)|ttl\s*(?:weight|wt)|gross\s*(?:weight|wt)|"
+    r"g(?:\.|/)?\s*w(?:t)?\.?|t\.?\s*w\.?|总重量|总重|重量合计|总毛重)"
+)
+VOLUME_LABEL_PATTERN = (
+    r"(?:total\s*(?:volume|vol\.?|cube|cbm)|ttl\s*(?:volume|vol\.?|cube|cbm)|"
+    r"volume|vol\.?|meas(?:urement)?\.?|cube|c\.?b\.?m\.?|cuft|cft|"
+    r"总体积|总方数|方数|体积)"
+)
 PROVINCE_ALIASES = {
     "alberta": "AB",
     "ab": "AB",
@@ -469,6 +501,8 @@ def _normalize_cargo_item(item: ExtractedCargoItem) -> ExtractedCargoItem:
     cbm = item.cbm
     if cbm is None and item.length_cm is not None and item.width_cm is not None and item.height_cm is not None:
         cbm = _quantize(item.length_cm * item.width_cm * item.height_cm / Decimal("1000000"), "0.001")
+    if cbm is None and item.total_cbm is not None and item.quantity:
+        cbm = _quantize(item.total_cbm / Decimal(item.quantity), "0.000001")
 
     weight_kg = item.weight_kg
     if weight_kg is None and item.total_weight_kg is not None and item.quantity:
@@ -902,17 +936,22 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
                 )
             )
 
-    explicit_cbm = _find_explicit_decimal(customer_message, r"(?:cbm|m3|m³|方|立方)")
+    explicit_cbm = _find_explicit_cbm(customer_message)
     explicit_piece_count = _find_explicit_piece_count(customer_message)
     explicit_weight = _find_explicit_weight(customer_message)
-    if explicit_weight is None and explicit_piece_count is not None and explicit_cbm is not None:
-        explicit_weight = _find_any_weight(customer_message)
+    per_piece_weight = _find_per_piece_weight(customer_message)
+    if explicit_weight is None and explicit_piece_count is not None:
+        if per_piece_weight is not None and len(cargo_items) <= 1:
+            explicit_weight = per_piece_weight * Decimal(explicit_piece_count)
+        elif explicit_cbm is not None:
+            explicit_weight = _find_any_weight(customer_message)
 
     if explicit_cbm is not None:
         total_cbm = explicit_cbm
     if explicit_weight is not None:
         total_weight_kg = explicit_weight
     if explicit_piece_count is not None and explicit_piece_count >= piece_count:
+        parsed_piece_count = piece_count
         cargo_items = _align_single_parsed_cargo_item_with_explicit_totals(
             cargo_items,
             explicit_piece_count=explicit_piece_count,
@@ -920,6 +959,22 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
             explicit_cbm=explicit_cbm,
         )
         piece_count = explicit_piece_count
+        if (
+            explicit_cbm is None
+            and parsed_piece_count > 0
+            and explicit_piece_count > parsed_piece_count
+            and len(cargo_items) == 1
+        ):
+            total_cbm = total_cbm / Decimal(parsed_piece_count) * Decimal(explicit_piece_count)
+    if not cargo_items and piece_count > 0 and (total_cbm > 0 or total_weight_kg > 0):
+        cargo_items = [
+            _build_aggregate_cargo_item(
+                customer_message,
+                piece_count=piece_count,
+                total_cbm=total_cbm if total_cbm > 0 else None,
+                total_weight_kg=total_weight_kg if total_weight_kg > 0 else None,
+            )
+        ]
 
     return {
         "piece_count": piece_count,
@@ -933,6 +988,51 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
             else None
         ),
     }
+
+
+def _build_aggregate_cargo_item(
+    customer_message: str,
+    *,
+    piece_count: int,
+    total_cbm: Decimal | None,
+    total_weight_kg: Decimal | None,
+) -> ExtractedCargoItem:
+    quantity = Decimal(piece_count)
+    return ExtractedCargoItem(
+        quantity=piece_count,
+        weight_kg=(
+            _quantize(total_weight_kg / quantity, "0.01")
+            if total_weight_kg is not None
+            else None
+        ),
+        cbm=(
+            _quantize(total_cbm / quantity, "0.000001")
+            if total_cbm is not None
+            else None
+        ),
+        total_weight_kg=total_weight_kg,
+        total_cbm=total_cbm,
+        source_span=_find_aggregate_source_span(customer_message),
+    )
+
+
+def _find_aggregate_source_span(customer_message: str) -> str | None:
+    candidates: list[tuple[int, str]] = []
+    for line in customer_message.splitlines():
+        cleaned = line.strip()
+        if not cleaned or re.match(r"[a-zA-Z_][a-zA-Z0-9_]*\s*=", cleaned):
+            continue
+        score = sum(
+            bool(re.search(pattern, cleaned, re.IGNORECASE))
+            for pattern in (
+                PIECE_UNIT_PATTERN,
+                r"(?:cbm|m3|m³|volume|vol\.?|meas(?:urement)?|总体积|体积|方|立方)",
+                r"(?:kgs?|kg|lbs?|pounds?|gross\s*(?:weight|wt)|g\.?\s*w\.?|总重|重量|毛重)",
+            )
+        )
+        if score:
+            candidates.append((score, cleaned[:240]))
+    return max(candidates, key=lambda item: item[0])[1] if candidates else None
 
 
 def _align_single_parsed_cargo_item_with_explicit_totals(
@@ -961,14 +1061,14 @@ def _align_single_parsed_cargo_item_with_explicit_totals(
 
 
 def _parse_measurement_line(line: str, *, allow_numeric_table: bool = False) -> list[dict[str, Any]]:
-    normalized = _normalize_text(line)
+    normalized = _normalize_labeled_dimensions(_normalize_text(line))
     items: list[dict[str, Any]] = []
     dimension_pattern = re.compile(
-        r"(?P<length>\d+(?:\.\d+)?)\s*(?P<length_unit>mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸)?\s*"
+        rf"(?P<length>{NUMBER_TOKEN_PATTERN})\s*(?P<length_unit>{DIMENSION_UNIT_PATTERN})?\s*"
         r"(?:\*|x|×|by)\s*"
-        r"(?P<width>\d+(?:\.\d+)?)\s*(?P<width_unit>mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸)?\s*"
+        rf"(?P<width>{NUMBER_TOKEN_PATTERN})\s*(?P<width_unit>{DIMENSION_UNIT_PATTERN})?\s*"
         r"(?:\*|x|×|by)\s*"
-        r"(?P<height>\d+(?:\.\d+)?)\s*(?P<height_unit>mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸)?",
+        rf"(?P<height>{NUMBER_TOKEN_PATTERN})\s*(?P<height_unit>{DIMENSION_UNIT_PATTERN})?",
         re.IGNORECASE,
     )
     matches = list(dimension_pattern.finditer(normalized))
@@ -982,10 +1082,10 @@ def _parse_measurement_line(line: str, *, allow_numeric_table: bool = False) -> 
         return items
 
     space_pattern = re.compile(
-        r"(?<![\d.])(?P<length>\d+(?:\.\d+)?)\s+"
-        r"(?P<width>\d+(?:\.\d+)?)\s+"
-        r"(?P<height>\d+(?:\.\d+)?)(?:\s*(?P<dimension_unit>mm|cm|厘米|m|米|inches|inch|in|\"|ft|feet|英尺|英寸))?\s+"
-        r"(?P<weight>\d+(?:\.\d+)?)\s*(?P<weight_unit>kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)(?=$|[^A-Za-z])",
+        rf"(?<![\d.])(?P<length>{NUMBER_TOKEN_PATTERN})\s+"
+        rf"(?P<width>{NUMBER_TOKEN_PATTERN})\s+"
+        rf"(?P<height>{NUMBER_TOKEN_PATTERN})(?:\s*(?P<dimension_unit>{DIMENSION_UNIT_PATTERN}))?\s+"
+        rf"(?P<weight>{NUMBER_TOKEN_PATTERN})\s*(?P<weight_unit>{WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
         re.IGNORECASE,
     )
     match = space_pattern.search(normalized)
@@ -1006,6 +1106,86 @@ def _parse_measurement_line(line: str, *, allow_numeric_table: bool = False) -> 
             "weight_kg": _to_kg(match.group("weight"), match.group("weight_unit")),
         }
     ]
+
+
+def _normalize_labeled_dimensions(value: str) -> str:
+    number = NUMBER_TOKEN_PATTERN
+    unit = DIMENSION_UNIT_PATTERN
+    gap = r"[\s,，;；/|*x×-]*"
+
+    lwh_pattern = re.compile(
+        rf"\bL\s*/\s*W\s*/\s*H\s*[:：=]?\s*"
+        rf"(?P<length>{number})\s*(?:/|\*|x|×)\s*"
+        rf"(?P<width>{number})\s*(?:/|\*|x|×)\s*"
+        rf"(?P<height>{number})\s*(?P<overall_unit>{unit})?",
+        re.IGNORECASE,
+    )
+
+    prefix_pattern = re.compile(
+        rf"(?:\bL(?:ength)?|长)\s*[:：=]?\s*(?P<length>{number})\s*(?P<length_unit>{unit})?{gap}"
+        rf"(?:\bW(?:idth)?|宽)\s*[:：=]?\s*(?P<width>{number})\s*(?P<width_unit>{unit})?{gap}"
+        rf"(?:\bH(?:eight)?|高)\s*[:：=]?\s*(?P<height>{number})\s*(?P<height_unit>{unit})?"
+        rf"\s*(?P<overall_unit>{unit})?",
+        re.IGNORECASE,
+    )
+    suffix_pattern = re.compile(
+        rf"(?P<length>{number})\s*(?P<length_unit>{unit})?\s*[（(]?\s*(?:L|长)\s*[）)]?\s*(?:\*|x|×)\s*"
+        rf"(?P<width>{number})\s*(?P<width_unit>{unit})?\s*[（(]?\s*(?:W|宽)\s*[）)]?\s*(?:\*|x|×)\s*"
+        rf"(?P<height>{number})\s*(?P<height_unit>{unit})?\s*[（(]?\s*(?:H|高)\s*[）)]?"
+        rf"\s*(?P<overall_unit>{unit})?",
+        re.IGNORECASE,
+    )
+
+    def replace(match: re.Match[str]) -> str:
+        overall_unit = match.group("overall_unit") or ""
+        dimensions = []
+        for name in ("length", "width", "height"):
+            number_value = str(_decimal_from_token(match.group(name)))
+            number_unit = match.group(f"{name}_unit") or overall_unit
+            dimensions.append(f"{number_value}{number_unit}")
+        return "x".join(dimensions)
+
+    def replace_lwh(match: re.Match[str]) -> str:
+        overall_unit = match.group("overall_unit") or ""
+        return "x".join(
+            f"{_decimal_from_token(match.group(name))}{overall_unit}"
+            for name in ("length", "width", "height")
+        )
+
+    normalized = lwh_pattern.sub(replace_lwh, value)
+    normalized = prefix_pattern.sub(replace, normalized)
+    normalized = suffix_pattern.sub(replace, normalized)
+
+    labeled_value_pattern = re.compile(
+        rf"(?P<label>\b(?:L(?:ength)?|W(?:idth)?|H(?:eight)?)\b|长|宽|高)"
+        rf"\s*[:：=]?\s*(?P<value>{number})\s*(?P<unit>{unit})?",
+        re.IGNORECASE,
+    )
+    labeled_matches = list(labeled_value_pattern.finditer(normalized))
+    labeled_dimensions: dict[str, re.Match[str]] = {}
+    for match in labeled_matches:
+        label = match.group("label").lower()
+        name = "length" if label.startswith("l") or label == "长" else "width" if label.startswith("w") or label == "宽" else "height"
+        labeled_dimensions.setdefault(name, match)
+    if set(labeled_dimensions) != {"length", "width", "height"}:
+        return normalized
+
+    fallback_unit = next(
+        (
+            match.group("unit")
+            for match in reversed(labeled_matches)
+            if match.group("unit")
+        ),
+        "",
+    )
+    replacement = "x".join(
+        f"{_decimal_from_token(labeled_dimensions[name].group('value'))}"
+        f"{labeled_dimensions[name].group('unit') or fallback_unit}"
+        for name in ("length", "width", "height")
+    )
+    start = min(match.start() for match in labeled_dimensions.values())
+    end = max(match.end() for match in labeled_dimensions.values())
+    return f"{normalized[:start]}{replacement}{normalized[end:]}"
 
 
 def _has_dimension_weight_table(customer_message: str) -> bool:
@@ -1092,7 +1272,7 @@ def _find_item_weight(
 
 def _find_weight_in_segment(segment: str, *, offset: int) -> dict[str, Any] | None:
     weight_pattern = re.compile(
-        r"(?P<weight>\d+(?:\.\d+)?)\s*(?P<unit>kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)(?=$|[^A-Za-z])",
+        rf"(?P<weight>{NUMBER_TOKEN_PATTERN})\s*(?P<unit>{WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
         re.IGNORECASE,
     )
     match = weight_pattern.search(segment)
@@ -1108,42 +1288,63 @@ def _find_weight_in_segment(segment: str, *, offset: int) -> dict[str, Any] | No
 
 
 def _find_quantity(line: str, dimension_start: int, item_end: int) -> int:
-    prefix = line[max(0, dimension_start - 24) : dimension_start]
+    prefix = line[max(0, dimension_start - 48) : dimension_start]
     suffix = line[item_end : item_end + 32]
+    prefix_labeled_match = re.search(
+        rf"(?:qty|quantity|数量|件数)\s*[:：=#-]?\s*(?P<qty>{NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}?[^\d]*$",
+        prefix,
+        re.IGNORECASE,
+    )
+    if prefix_labeled_match:
+        return max(1, int(_decimal_from_token(prefix_labeled_match.group("qty"))))
+    prefix_bare_quantity_match = re.search(
+        rf"(?P<qty>{NUMBER_TOKEN_PATTERN})\s*(?:@|x|×)\s*$",
+        prefix,
+        re.IGNORECASE,
+    )
+    if prefix_bare_quantity_match:
+        return max(1, int(_decimal_from_token(prefix_bare_quantity_match.group("qty"))))
+    local_quantity_match = re.search(
+        rf"(?P<qty>{NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}",
+        line[dimension_start:item_end],
+        re.IGNORECASE,
+    )
+    if local_quantity_match:
+        return max(1, int(_decimal_from_token(local_quantity_match.group("qty"))))
     suffix_quantity_match = re.search(
-        r"(?P<qty>\d{1,5})\s*(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托盘|托|pallets?)",
+        rf"(?P<qty>{NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}",
         suffix,
         re.IGNORECASE,
     )
     if suffix_quantity_match:
-        return max(1, int(suffix_quantity_match.group("qty")))
+        return max(1, int(_decimal_from_token(suffix_quantity_match.group("qty"))))
     prefix_match = re.search(
-        r"(?P<qty>\d{1,5})\s*(?:pcs?|pieces?|ctns?|cartons?|boxes|箱|件|托盘|托|pallets?)\s*$",
+        rf"(?P<qty>{NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}\s*$",
         prefix,
         re.IGNORECASE,
     )
     if prefix_match:
-        return max(1, int(prefix_match.group("qty")))
+        return max(1, int(_decimal_from_token(prefix_match.group("qty"))))
     suffix_match = re.search(
-        r"(?:x|×|qty|quantity|数量|件数)\s*(?P<qty>\d{1,5})\b",
+        rf"(?:x|×|qty|quantity|数量|件数)\s*[:：=#-]?\s*(?P<qty>{NUMBER_TOKEN_PATTERN})\b",
         suffix,
         re.IGNORECASE,
     )
     if suffix_match:
-        return max(1, int(suffix_match.group("qty")))
+        return max(1, int(_decimal_from_token(suffix_match.group("qty"))))
     return 1
 
 
 def _to_cm(value: str, unit: str | None) -> Decimal:
-    number = Decimal(value)
-    normalized = (unit or "cm").strip().lower()
-    if normalized in {"mm"}:
+    number = _decimal_from_token(value)
+    normalized = re.sub(r"[.\s]", "", (unit or "cm").strip().lower())
+    if normalized in {"mm", "mms", "millimeter", "millimeters", "millimetre", "millimetres", "毫米"}:
         return number / Decimal("10")
-    if normalized in {"m", "米"}:
+    if normalized in {"m", "meter", "meters", "metre", "metres", "米"}:
         return number * Decimal("100")
     if normalized in {"in", "inch", "inches", '"', "英寸"}:
         return number * Decimal("2.54")
-    if normalized in {"ft", "feet", "英尺"}:
+    if normalized in {"ft", "foot", "feet", "英尺"}:
         return number * Decimal("30.48")
     return number
 
@@ -1151,59 +1352,139 @@ def _to_cm(value: str, unit: str | None) -> Decimal:
 def _resolve_dimension_unit(unit: str | None, *values: object) -> str | None:
     if unit:
         return unit
-    dimensions = [Decimal(str(value)) for value in values if value is not None]
+    dimensions = [_decimal_from_token(str(value)) for value in values if value is not None]
     if dimensions and max(dimensions) > Decimal("500"):
         return "mm"
     return None
 
 
 def _to_kg(value: str, unit: str | None) -> Decimal:
-    number = Decimal(value)
-    normalized = (unit or "kg").strip().lower()
+    number = _decimal_from_token(value)
+    normalized = re.sub(r"[.\s]", "", (unit or "kg").strip().lower())
     if normalized in {"lb", "lbs", "pound", "pounds", "磅"}:
         return number * Decimal("0.45359237")
     if normalized in {"g", "gram", "grams", "克"}:
         return number / Decimal("1000")
+    if normalized in {"mt", "t", "tonne", "tonnes", "metricton", "metrictons", "metrictonne", "metrictonnes"}:
+        return number * Decimal("1000")
     return number
 
 
-def _find_explicit_decimal(customer_message: str, unit_pattern: str) -> Decimal | None:
-    match = re.search(rf"(\d+(?:\.\d+)?)\s*{unit_pattern}\b", customer_message, re.IGNORECASE)
-    return Decimal(match.group(1)) if match else None
+def _decimal_from_token(value: str) -> Decimal:
+    normalized = value.strip().replace(" ", "")
+    if "," in normalized:
+        if "." in normalized or len(normalized.rsplit(",", 1)[1]) == 3:
+            normalized = normalized.replace(",", "")
+        else:
+            normalized = normalized.replace(",", ".")
+    return Decimal(normalized)
+
+
+def _to_cbm(value: str, unit: str | None) -> Decimal:
+    number = _decimal_from_token(value)
+    normalized = re.sub(r"[.\s^]", "", (unit or "cbm").strip().lower())
+    if normalized in {"cuft", "cft", "ft3", "cubicfoot", "cubicfeet"}:
+        return number * Decimal("0.028316846592")
+    if normalized in {"cuin", "cin", "in3", "cubicinch", "cubicinches"}:
+        return number * Decimal("0.000016387064")
+    if normalized in {"l", "liter", "liters", "litre", "litres"}:
+        return number / Decimal("1000")
+    return number
+
+
+def _find_explicit_cbm(customer_message: str) -> Decimal | None:
+    normalized = _normalize_text(customer_message)
+    labeled_matches = list(
+        re.finditer(
+            rf"(?<![A-Za-z0-9.])(?P<label>{VOLUME_LABEL_PATTERN})\s*[:：=]?\s*"
+            rf"(?P<value>{NUMBER_TOKEN_PATTERN})(?![\d,.])\s*"
+            rf"(?P<unit>{VOLUME_UNIT_PATTERN})?(?!\s*(?:\*|x|×|by\b))",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
+    if labeled_matches:
+        match = labeled_matches[-1]
+        return _to_cbm(match.group("value"), match.group("unit") or match.group("label"))
+
+    matches = list(
+        re.finditer(
+            rf"(?P<value>{NUMBER_TOKEN_PATTERN})\s*(?P<unit>{VOLUME_UNIT_PATTERN})(?=$|[^A-Za-z])",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
+    return _to_cbm(matches[-1].group("value"), matches[-1].group("unit")) if matches else None
 
 
 def _find_authoritative_weight(customer_message: str) -> Decimal | None:
+    normalized = _normalize_text(customer_message)
     patterns = [
-        r"(?:total\s*weight|总重量|总重|重量合计)\D{0,16}(\d+(?:\.\d+)?)\s*(kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)\b",
-        r"(?:合计|总计|一共)\D{0,16}(\d+(?:\.\d+)?)\s*(kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)\b",
-        r"(\d+(?:\.\d+)?)\s*(kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)\s*(?:total|合计|总重)",
+        rf"{TOTAL_WEIGHT_LABEL_PATTERN}\s*[:：=#-]?\s*({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+        rf"(?:合计|总计|一共)\s*[:：]?\s*(?:总?重(?:量)?|毛重)?\s*({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+        rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})\s*(?:total|gross|合计|总重)",
     ]
     values = {
         _to_kg(match.group(1), match.group(2))
         for pattern in patterns
-        for match in re.finditer(pattern, customer_message, re.IGNORECASE)
+        for match in re.finditer(pattern, normalized, re.IGNORECASE)
     }
     return next(iter(values)) if len(values) == 1 else None
 
 
 def _find_explicit_weight(customer_message: str) -> Decimal | None:
+    normalized = _normalize_text(customer_message)
     patterns = [
-        r"(?:total\s*weight|总重量|总重|重量合计)\D{0,12}(\d+(?:\.\d+)?)\s*(kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)\b",
-        r"(?:合计|总计|一共|共)[^\n\r]{0,32}?(\d+(?:\.\d+)?)\s*(kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)\b",
-        r"(\d+(?:\.\d+)?)\s*(kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)\s*(?:total|合计|总重)",
+        rf"{TOTAL_WEIGHT_LABEL_PATTERN}\s*[:：=#-]?\s*({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+        rf"(?:weight|wt|重量|毛重)\s*[:：=]\s*(?:total|gross|共|合计|总计)?\s*"
+        rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+        rf"(?:合计|总计|一共|共)\s*[:：]?\s*(?:总?重(?:量)?|毛重)?\s*"
+        rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+        rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})\s*(?:total|gross|合计|总重)",
     ]
     for pattern in patterns:
-        match = re.search(pattern, customer_message, re.IGNORECASE)
+        for match in re.finditer(pattern, normalized, re.IGNORECASE):
+            if not _is_per_piece_weight_context(normalized, match.start(), match.end()):
+                return _to_kg(match.group(1), match.group(2))
+    return None
+
+
+def _find_per_piece_weight(customer_message: str) -> Decimal | None:
+    normalized = _normalize_text(customer_message)
+    item_name = rf"(?:{PIECE_UNIT_PATTERN}|pc|ctn|pkg|plt)"
+    patterns = [
+        rf"(?:单|每)(?:件|箱|包|袋|卷|桶|托|托盘)(?:毛重|重量|重)?\s*[:：=]?\s*"
+        rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+        rf"(?:weight\s*)?(?:each|per\s*{item_name})\s*[:：=]?\s*"
+        rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+        rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})\s*"
+        rf"(?:each|ea\.?|per\s*{item_name}|/\s*(?:ea\.?|{item_name})|每(?:件|箱|包|袋|卷|桶|托|托盘))",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, normalized, re.IGNORECASE)
         if match:
             return _to_kg(match.group(1), match.group(2))
     return None
 
 
+def _is_per_piece_weight_context(value: str, start: int, end: int) -> bool:
+    context = value[max(0, start - 24) : min(len(value), end + 24)]
+    return bool(
+        re.search(
+            r"(?:\beach\b|\bea\.?\b|\bper\s*(?:piece|carton|box|package|case|bag|skid|pallet)\b|"
+            r"/\s*(?:ea\.?|pc|ctn|pkg|plt)\b|单(?:件|箱|包|袋|卷|桶|托)|每(?:件|箱|包|袋|卷|桶|托))",
+            context,
+            re.IGNORECASE,
+        )
+    )
+
+
 def _find_any_weight(customer_message: str) -> Decimal | None:
+    normalized = _normalize_text(customer_message)
     matches = list(
         re.finditer(
-            r"(\d+(?:\.\d+)?)\s*(kgs?|kg|公斤|千克|lbs?|pounds?|磅|g|grams?|克)\b",
-            customer_message,
+            rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+            normalized,
             re.IGNORECASE,
         )
     )
@@ -1214,36 +1495,47 @@ def _find_any_weight(customer_message: str) -> Decimal | None:
 
 
 def _find_authoritative_piece_count(customer_message: str) -> int | None:
-    unit = r"(?:pcs?|pieces?|件|箱|托盘|托|ctns?|cartons?|boxes|pallets?)"
+    normalized = _normalize_text(customer_message)
     patterns = [
-        rf"(?:数量|箱数|件数|总件数|总箱数)\s*[:：]?\s*(?:共|合计|总计)?\s*(\d{{1,5}})\s*{unit}",
-        rf"(?:一共|共|合计|总计)\s*(\d{{1,5}})\s*{unit}",
-        rf"(\d{{1,5}})\s*{unit}\s*(?:total|合计|总计)",
+        rf"{PIECE_COUNT_LABEL_PATTERN}\s*[:：=#-]?\s*(?:共|合计|总计)?\s*"
+        rf"({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}?",
+        rf"(?:一共|共|合计|总计)\s*({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}",
+        rf"({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}\s*(?:total|合计|总计)",
     ]
     values = {
-        int(match.group(1))
+        int(_decimal_from_token(match.group(1)))
         for pattern in patterns
-        for match in re.finditer(pattern, customer_message, re.IGNORECASE)
+        for match in re.finditer(pattern, normalized, re.IGNORECASE)
     }
     return next(iter(values)) if len(values) == 1 else None
 
 
 def _find_explicit_piece_count(customer_message: str) -> int | None:
+    normalized = _normalize_text(customer_message)
     patterns = [
-        r"(?:数量|箱数|件数|总件数|总箱数)\s*[:：]?\s*(?:共|合计|总计)?\s*(\d{1,4})\s*(?:pcs?|pieces?|件|箱|ctns?|cartons?|boxes)",
-        r"(?:piece_count|pieces?|件数|总件数|共|一共|合计|总计)[^\d\n\r]{0,8}(\d{1,4})\s*(?:pcs?|pieces?|件|箱|ctns?|cartons?|boxes)",
-        r"(\d{1,4})\s*(?:pcs?|pieces?|件|箱|ctns?)\s*(?:total|合计|共)?",
+        rf"{PIECE_COUNT_LABEL_PATTERN}\s*[:：=#-]?\s*(?:共|合计|总计)?\s*"
+        rf"({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}?",
+        rf"(?:pieces?|packages?|pkgs?|ctns?|cartons?|boxes|件数|总件数|共|一共|合计|总计)"
+        rf"[^\d\n\r]{{0,8}}({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}",
+        rf"({NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}\s*(?:total|合计|共)?",
+        rf"(?:ctns?|cartons?|pkgs?|packages?|pcs?|pieces?|skids?|skds?|pallets?|plts?)"
+        rf"\s*[:：=#-]?\s*({NUMBER_TOKEN_PATTERN})\b",
     ]
     for pattern in patterns:
-        match = re.search(pattern, customer_message, re.IGNORECASE)
+        match = re.search(pattern, normalized, re.IGNORECASE)
         if match:
-            return max(1, int(match.group(1)))
+            return max(1, int(_decimal_from_token(match.group(1))))
     return _find_explicit_pallet_count(customer_message)
 
 
 def _find_explicit_pallet_count(customer_message: str) -> int | None:
-    match = re.search(r"(\d{1,4})\s*(?:托盘|托|pallets?\b)", customer_message, re.IGNORECASE)
-    return max(1, int(match.group(1))) if match else None
+    normalized = _normalize_text(customer_message)
+    match = re.search(
+        rf"({NUMBER_TOKEN_PATTERN})\s*(?:托盘|托|pallets?\b|skids?\b|skds?\b|plts?\b)",
+        normalized,
+        re.IGNORECASE,
+    )
+    return max(1, int(_decimal_from_token(match.group(1)))) if match else None
 
 
 def _find_postal_code(customer_message: str) -> str | None:
@@ -1488,7 +1780,7 @@ def _infer_packaging_type(customer_message: str) -> str | None:
     lowered = customer_message.lower()
     if re.search(r"木箱|wooden\s*crate|crate", lowered):
         return "wooden_crate"
-    if re.search(r"托盘|pallet", lowered):
+    if re.search(r"托盘|pallet|skid|\bplts?\b", lowered):
         return "pallet"
     if re.search(r"编织袋|woven\s*bag", lowered):
         return "woven_bag"
@@ -1501,7 +1793,8 @@ def _infer_packaging_type(customer_message: str) -> str | None:
 
 def _normalize_text(value: str) -> str:
     return (
-        value.replace("＊", "*")
+        unicodedata.normalize("NFKC", value)
+        .replace("＊", "*")
         .replace("Ｘ", "x")
         .replace("×", "×")
         .replace("磅", " lb")
