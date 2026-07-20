@@ -389,6 +389,7 @@ export interface LocalAddressValidation {
     | "missing_postal_code"
     | "invalid_postal_code"
     | "postal_not_found"
+    | "postal_fsa_suggested"
     | "postal_verified"
     | "verified"
     | "corrected_by_postal_lookup";
@@ -410,6 +411,7 @@ export interface LocalAddressValidation {
   latitude: number | null;
   longitude: number | null;
   source: string | null;
+  fsa_city_counts: Record<string, number>;
   risk_tags: string[];
   note_zh: string;
 }

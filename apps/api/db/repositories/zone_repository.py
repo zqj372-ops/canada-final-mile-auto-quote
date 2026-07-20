@@ -1,4 +1,6 @@
-from sqlalchemy import or_, select
+from collections import Counter
+
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.db.models import CityAlias, PostalCodeCityLookup, PostalZoneOverride, ZoneLookupRule, ZonePriceMatrix
@@ -35,6 +37,22 @@ class ZoneRepository:
             longitude=record.longitude,
             source=record.source,
         )
+
+    def get_fsa_city_counts(self, postal_prefix: str) -> dict[str, int]:
+        fsa = extract_fsa(postal_prefix)
+        if fsa is None:
+            return {}
+        rows = self.session.execute(
+            select(PostalCodeCityLookup.preferred_city, func.count())
+            .where(PostalCodeCityLookup.fsa == fsa)
+            .group_by(PostalCodeCityLookup.preferred_city)
+        ).all()
+        counts: Counter[str] = Counter()
+        for city, count in rows:
+            normalized_city = normalize_city(city)
+            if normalized_city:
+                counts[normalized_city] += int(count)
+        return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
     def get_postal_zone_override(self, postal_code: str) -> PostalZoneOverrideRecord | None:
         normalized = normalize_postal_code(postal_code)

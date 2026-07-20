@@ -133,7 +133,7 @@ function LocalValidationSummary({
     : "border-amber-200 bg-amber-50 text-amber-700";
   const statusLabel = formatValidationStatus(validation.status);
   const canonical = [
-    validation.preferred_city,
+    validation.preferred_city || validation.input_city,
     validation.province,
     validation.postal_code,
   ].filter(Boolean).join(", ");
@@ -168,6 +168,7 @@ function formatValidationStatus(status: LocalAddressValidation["status"]): strin
     missing_postal_code: "缺少邮编",
     invalid_postal_code: "邮编格式错误",
     postal_not_found: "本地库未命中",
+    postal_fsa_suggested: "FSA 城市建议",
     postal_verified: "邮编已命中",
     verified: "城市省份一致",
     corrected_by_postal_lookup: "已按邮编库建议纠正",

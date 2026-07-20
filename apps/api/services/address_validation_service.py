@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -15,10 +16,14 @@ AddressValidationStatus = Literal[
     "missing_postal_code",
     "invalid_postal_code",
     "postal_not_found",
+    "postal_fsa_suggested",
     "postal_verified",
     "verified",
     "corrected_by_postal_lookup",
 ]
+
+FSA_CONSENSUS_MIN_RECORDS = 20
+logger = logging.getLogger(__name__)
 
 
 class LocalAddressValidation(BaseModel):
@@ -44,6 +49,7 @@ class LocalAddressValidation(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     source: str | None = None
+    fsa_city_counts: dict[str, int] = Field(default_factory=dict)
     risk_tags: list[str] = Field(default_factory=list)
     note_zh: str
 
@@ -91,6 +97,57 @@ def build_local_address_validation(
     province_from_postal = get_province_from_postal_code(normalized_postal)
 
     if record is None:
+        fsa_city_counts = repository.get_fsa_city_counts(postal_prefix)
+        fsa_record_count = sum(fsa_city_counts.values())
+        logger.warning(
+            "Full postal code is missing from the local lookup.",
+            extra={
+                "postal_code": normalized_postal,
+                "postal_prefix": postal_prefix,
+                "input_city": normalized_city,
+                "input_province": normalized_province,
+                "fsa_record_count": fsa_record_count,
+                "fsa_city_count": len(fsa_city_counts),
+            },
+        )
+        if len(fsa_city_counts) == 1 and fsa_record_count >= FSA_CONSENSUS_MIN_RECORDS:
+            suggested_city = next(iter(fsa_city_counts))
+            canonical_input_city = repository.resolve_city_alias(normalized_city, province_from_postal)
+            city_consistent = None if not normalized_city else canonical_input_city == suggested_city
+            province_consistent = None if not normalized_province else normalized_province == province_from_postal
+            confidence = 70 if city_consistent is not False and province_consistent is not False else 55
+            return LocalAddressValidation(
+                status="postal_fsa_suggested",
+                matched=False,
+                confidence=confidence,
+                address_line=cleaned_address,
+                postal_code=normalized_postal,
+                postal_prefix=postal_prefix,
+                input_city=normalized_city,
+                input_province=normalized_province,
+                preferred_city=suggested_city,
+                province=province_from_postal,
+                city_consistent=city_consistent,
+                province_consistent=province_consistent,
+                source="local_postal_fsa_consensus",
+                fsa_city_counts=fsa_city_counts,
+                risk_tags=["postal_lookup_not_found", "fsa_city_consensus"],
+                note_zh=(
+                    f"本地完整邮编库尚未收录 {normalized_postal}，但 {postal_prefix} 现有 "
+                    f"{fsa_record_count} 条记录全部对应 {suggested_city}, {province_from_postal or '未知省份'}。"
+                    "该城市仅作为地址补全建议，不覆盖 Zone 或价格规则。"
+                ),
+            )
+
+        candidate_detail = ""
+        risk_tags = ["postal_lookup_not_found"]
+        if fsa_city_counts:
+            candidates = "、".join(f"{city}（{count} 条）" for city, count in list(fsa_city_counts.items())[:5])
+            candidate_detail = (
+                f"邮编前缀 {postal_prefix} 的现有记录分属 {candidates}，"
+                "不能仅按邮编前缀推断城市。"
+            )
+            risk_tags.append("fsa_multiple_cities")
         return LocalAddressValidation(
             status="postal_not_found",
             matched=False,
@@ -101,9 +158,11 @@ def build_local_address_validation(
             input_city=normalized_city,
             input_province=normalized_province,
             province=province_from_postal,
-            risk_tags=["postal_lookup_not_found"],
+            fsa_city_counts=fsa_city_counts,
+            risk_tags=risk_tags,
             note_zh=(
                 f"本地邮编库未找到 {normalized_postal} 的城市记录。"
+                f"{candidate_detail}"
                 "地图仅供人工目视确认，系统不能用地图结果覆盖价格规则。"
             ),
         )

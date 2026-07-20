@@ -105,6 +105,76 @@ def test_maps_local_verify_recognizes_v3x0l7_as_surrey() -> None:
     assert "本地邮编库命中 V3X 0L7 -> Surrey, BC" in body["note_zh"]
 
 
+def test_maps_local_verify_recognizes_v3j0a7_as_burnaby() -> None:
+    client = build_client()
+
+    response = client.get(
+        "/maps/local-verify",
+        params={
+            "postal_code": "V3J 0A7",
+            "city": "Burnaby",
+            "province": "BC",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["matched"] is True
+    assert body["status"] == "verified"
+    assert body["confidence"] == 95
+    assert body["preferred_city"] == "Burnaby"
+    assert body["province"] == "BC"
+    assert body["city_consistent"] is True
+    assert body["province_consistent"] is True
+    assert body["risk_tags"] == ["local_postal_verified"]
+
+
+def test_maps_local_verify_suggests_city_for_unanimous_fsa_only() -> None:
+    client = build_client()
+
+    response = client.get(
+        "/maps/local-verify",
+        params={
+            "postal_code": "V9Z 0C3",
+            "province": "BC",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["matched"] is False
+    assert body["status"] == "postal_fsa_suggested"
+    assert body["confidence"] == 70
+    assert body["preferred_city"] == "Sooke"
+    assert body["source"] == "local_postal_fsa_consensus"
+    assert body["fsa_city_counts"] == {"Sooke": 20}
+    assert body["risk_tags"] == ["postal_lookup_not_found", "fsa_city_consensus"]
+    assert "20 条记录全部对应 Sooke, BC" in body["note_zh"]
+    assert "不覆盖 Zone 或价格规则" in body["note_zh"]
+
+
+def test_maps_local_verify_does_not_guess_for_multi_city_fsa() -> None:
+    client = build_client()
+
+    response = client.get(
+        "/maps/local-verify",
+        params={
+            "postal_code": "V8Y 0C3",
+            "province": "BC",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["matched"] is False
+    assert body["status"] == "postal_not_found"
+    assert body["confidence"] == 25
+    assert body["preferred_city"] is None
+    assert body["fsa_city_counts"] == {"Saanich": 10, "Victoria": 10}
+    assert body["risk_tags"] == ["postal_lookup_not_found", "fsa_multiple_cities"]
+    assert "不能仅按邮编前缀推断城市" in body["note_zh"]
+
+
 def build_client() -> TestClient:
     engine = create_engine(
         "sqlite+pysqlite://",
@@ -135,6 +205,49 @@ def build_client() -> TestClient:
                 source="manual_postal_correction_20260720",
             )
         )
+        session.add(
+            PostalCodeCityLookup(
+                postal_code="V3J 0A7",
+                preferred_city="Burnaby",
+                province="BC",
+                fsa="V3J",
+                official_city="Burnaby",
+                source="manual_postal_correction_20260720",
+            )
+        )
+        for letter in "AB":
+            for digit in range(10):
+                session.add(
+                    PostalCodeCityLookup(
+                        postal_code=f"V9Z 0{letter}{digit}",
+                        preferred_city="Sooke",
+                        province="BC",
+                        fsa="V9Z",
+                        official_city="Sooke",
+                        source="test_fsa_consensus",
+                    )
+                )
+        for digit in range(10):
+            session.add(
+                PostalCodeCityLookup(
+                    postal_code=f"V8Y 0A{digit}",
+                    preferred_city="Victoria",
+                    province="BC",
+                    fsa="V8Y",
+                    official_city="Victoria",
+                    source="test_fsa_multiple_cities",
+                )
+            )
+            session.add(
+                PostalCodeCityLookup(
+                    postal_code=f"V8Y 0B{digit}",
+                    preferred_city="Saanich",
+                    province="BC",
+                    fsa="V8Y",
+                    official_city="Saanich",
+                    source="test_fsa_multiple_cities",
+                )
+            )
         session.commit()
 
     def override_get_db() -> Generator[Session]:
