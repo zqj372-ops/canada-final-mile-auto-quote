@@ -239,6 +239,177 @@ def test_zone_quote_uses_zone_fuel_percent_override() -> None:
     assert body["total_price_usd"] == "104.50"
 
 
+def test_zone_8_price_is_disabled_by_default_even_when_matrix_has_a_price() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "V8V 1A1", "preferred_city": "Victoria", "province": "BC"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "V8V",
+                "city": "VICTORIA",
+                "province": "BC",
+                "origin": "calgary",
+                "zone": 8,
+                "match_level": "test",
+                "note": "",
+            },
+        ],
+        prices=[
+            {
+                "origin": "calgary",
+                "zone": 8,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("380.00"),
+                "source": "test",
+                "last_updated": "2026-07-20",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="100 Victoria Street",
+            postal_code="V8V 1A1",
+            city="Victoria",
+            province="BC",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "zone_price_disabled"
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 8
+    assert body["base_price_usd"] is None
+    assert body["fuel_usd"] is None
+    assert body["total_price_usd"] is None
+    assert body["manual_review_required"] is True
+    assert "zone_price_disabled" in body["risk_tags"]
+
+
+def test_zone_8_price_can_be_explicitly_enabled() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "V8V 1A1", "preferred_city": "Victoria", "province": "BC"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "V8V",
+                "city": "VICTORIA",
+                "province": "BC",
+                "origin": "calgary",
+                "zone": 8,
+                "match_level": "test",
+                "note": "",
+            },
+        ],
+        prices=[
+            {
+                "origin": "calgary",
+                "zone": 8,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("380.00"),
+                "source": "test",
+                "last_updated": "2026-07-20",
+            },
+        ],
+        quote_rule_configs=[
+            {
+                "key": "zone_price_enabled_by_zone",
+                "value": '{"calgary|8":true}',
+                "description": None,
+            }
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="100 Victoria Street",
+            postal_code="V8V 1A1",
+            city="Victoria",
+            province="BC",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "zone_matrix"
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 8
+    assert body["base_price_usd"] == "380.00"
+    assert body["total_price_usd"] == "513.00"
+    assert body["manual_review_required"] is False
+
+
+def test_zone_1_price_can_be_explicitly_disabled() -> None:
+    client = build_client(
+        quote_rule_configs=[
+            {
+                "key": "zone_price_enabled_by_zone",
+                "value": '{"calgary|1":false}',
+                "description": None,
+            }
+        ]
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="123 Calgary Trail",
+            postal_code="T1X 0A0",
+            city="Calgary",
+            province="AB",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "zone_price_disabled"
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 1
+    assert body["total_price_usd"] is None
+    assert "zone_price_disabled" in body["risk_tags"]
+
+
+def test_global_zone_price_switch_disables_an_enabled_low_zone() -> None:
+    client = build_client(
+        quote_rule_configs=[
+            {
+                "key": "zone_price_enabled",
+                "value": "false",
+                "description": None,
+            }
+        ]
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="123 Calgary Trail",
+            postal_code="T1X 0A0",
+            city="Calgary",
+            province="AB",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "zone_price_disabled"
+    assert body["zone"] == 1
+    assert body["total_price_usd"] is None
+    assert "zone_price_disabled" in body["risk_tags"]
+
+
 def test_invalid_postal_code_returns_one_focused_validation_error() -> None:
     client = build_client()
 
@@ -1097,6 +1268,13 @@ def test_ab_city_fallback_prefers_expected_origin_anchor_over_stale_toronto() ->
                 "last_updated": "2026-06-03",
             },
         ],
+        quote_rule_configs=[
+            {
+                "key": "zone_price_enabled_by_zone",
+                "value": '{"calgary|11":true}',
+                "description": None,
+            }
+        ],
     )
 
     response = client.post(
@@ -1481,6 +1659,13 @@ def test_edmonton_t6r_uses_calgary_zone9_correction() -> None:
                 "source": "test",
                 "last_updated": "2026-06-03",
             },
+        ],
+        quote_rule_configs=[
+            {
+                "key": "zone_price_enabled_by_zone",
+                "value": '{"calgary|9":true}',
+                "description": None,
+            }
         ],
     )
 

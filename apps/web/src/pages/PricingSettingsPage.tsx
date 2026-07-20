@@ -38,7 +38,10 @@ type NewPriceDraft = {
 };
 
 type PricingSettingsSection = "fees" | "new-price" | "matrix";
-type PricingFieldKey = Exclude<keyof ZonePricingConfig, "fuel_percent_by_zone">;
+type PricingFieldKey = Exclude<
+  keyof ZonePricingConfig,
+  "fuel_percent_by_zone" | "zone_price_enabled" | "max_auto_quote_zone" | "zone_price_enabled_by_zone"
+>;
 
 const pricingFields: Array<{
   key: PricingFieldKey;
@@ -59,6 +62,7 @@ const pricingFields: Array<{
 export default function PricingSettingsPage() {
   const [pricingConfig, setPricingConfig] = useState<ZonePricingConfig | null>(null);
   const [savedFuelPercentByZone, setSavedFuelPercentByZone] = useState<Record<string, MoneyValue>>({});
+  const [savedZonePriceEnabledByZone, setSavedZonePriceEnabledByZone] = useState<Record<string, boolean>>({});
   const [matrix, setMatrix] = useState<ZonePriceMatrixListResponse | null>(null);
   const [filters, setFilters] = useState<MatrixFilters>({ origin: "", zone: "", billing_pallets: "" });
   const [draftCells, setDraftCells] = useState<Record<string, string>>({});
@@ -107,7 +111,21 @@ export default function PricingSettingsPage() {
       (key) => formatInputValue(current[key]) !== formatInputValue(savedFuelPercentByZone[key]),
     );
   }, [pricingConfig?.fuel_percent_by_zone, savedFuelPercentByZone]);
-  const changedCount = changedCells.length + changedFuelZones.length;
+  const changedZoneSwitches = useMemo(() => {
+    const current = pricingConfig?.zone_price_enabled_by_zone ?? {};
+    const keys = new Set([...Object.keys(current), ...Object.keys(savedZonePriceEnabledByZone)]);
+    return Array.from(keys).filter((key) => current[key] !== savedZonePriceEnabledByZone[key]);
+  }, [pricingConfig?.zone_price_enabled_by_zone, savedZonePriceEnabledByZone]);
+  const enabledZoneCount = useMemo(
+    () => matrixRows.filter((row) => isZonePriceEnabled(pricingConfig, row.origin, row.zone)).length,
+    [
+      matrixRows,
+      pricingConfig?.zone_price_enabled,
+      pricingConfig?.max_auto_quote_zone,
+      pricingConfig?.zone_price_enabled_by_zone,
+    ],
+  );
+  const changedCount = changedCells.length + changedFuelZones.length + changedZoneSwitches.length;
 
   async function loadAll() {
     setIsLoading(true);
@@ -120,6 +138,7 @@ export default function PricingSettingsPage() {
       ]);
       setPricingConfig(nextPricing);
       setSavedFuelPercentByZone({ ...nextPricing.fuel_percent_by_zone });
+      setSavedZonePriceEnabledByZone({ ...nextPricing.zone_price_enabled_by_zone });
       setMatrix(nextMatrix);
       setDraftCells(buildDraftCells(nextMatrix.records));
       setSelectedZoneKey("all");
@@ -157,7 +176,8 @@ export default function PricingSettingsPage() {
       const saved = await updateZonePricingConfig(normalizePricingPayload(pricingConfig));
       setPricingConfig(saved);
       setSavedFuelPercentByZone({ ...saved.fuel_percent_by_zone });
-      setNotice("燃油和附加费配置已保存，下一票报价会直接使用新配置。");
+      setSavedZonePriceEnabledByZone({ ...saved.zone_price_enabled_by_zone });
+      setNotice("分区开关、燃油和附加费配置已保存，下一票报价会直接使用新配置。");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "燃油和附加费配置保存失败");
     } finally {
@@ -193,11 +213,12 @@ export default function PricingSettingsPage() {
             last_updated: todayString(),
           });
         });
-      if (changedFuelZones.length && pricingConfig) {
+      if ((changedFuelZones.length || changedZoneSwitches.length) && pricingConfig) {
         requests.push(
           updateZonePricingConfig(normalizePricingPayload(pricingConfig)).then((saved) => {
             setPricingConfig(saved);
             setSavedFuelPercentByZone({ ...saved.fuel_percent_by_zone });
+            setSavedZonePriceEnabledByZone({ ...saved.zone_price_enabled_by_zone });
           }),
         );
       }
@@ -262,6 +283,26 @@ export default function PricingSettingsPage() {
     });
   }
 
+  function updateZonePriceEnabled(origin: string, zone: number, enabled: boolean) {
+    setPricingConfig((current) => {
+      if (!current) {
+        return current;
+      }
+      if (!current.zone_price_enabled) {
+        return current;
+      }
+      const key = zoneFuelKey(origin, zone);
+      const next = { ...(current.zone_price_enabled_by_zone ?? {}) };
+      const defaultEnabled = current.max_auto_quote_zone === null || zone <= current.max_auto_quote_zone;
+      if (enabled === defaultEnabled) {
+        delete next[key];
+      } else {
+        next[key] = enabled;
+      }
+      return { ...current, zone_price_enabled_by_zone: next };
+    });
+  }
+
   return (
     <div className="pricing-page-v2" data-active-section={activeSection}>
       <header className="pricing-page-header">
@@ -272,7 +313,7 @@ export default function PricingSettingsPage() {
             <strong>价格配置</strong>
           </div>
           <h1>价格配置</h1>
-          <p>维护 Zone 基础派送费、分区燃油比例和附加费。前台只读取报价结果，不在浏览器计算价格。</p>
+          <p>维护 Zone 基础派送费、分区开关、燃油比例和附加费。前台只读取报价结果，不在浏览器计算价格。</p>
         </div>
         <div className="pricing-page-actions">
           <button className="btn-secondary" type="button" onClick={loadAll} disabled={isLoading}>
@@ -401,8 +442,8 @@ export default function PricingSettingsPage() {
           <div className="pricing-command-bar">
             <div className="pricing-command-copy">
               <span className="pricing-eyebrow">Zone 管理</span>
-              <h2>价格矩阵与燃油比例</h2>
-              <p>先选始发仓或 Zone，再编辑对应燃油附加；基础派送费按托数读取。</p>
+              <h2>价格矩阵与分区状态</h2>
+              <p>先选始发仓或 Zone，再维护分区开关与燃油附加；关闭的分区会转人工报价。</p>
             </div>
             <div className="pricing-filter-row">
               <FilterSelect label="始发仓" value={filters.origin} options={matrix?.origins ?? []} onChange={(value) => setFilters((current) => ({ ...current, origin: value }))} />
@@ -420,7 +461,7 @@ export default function PricingSettingsPage() {
 
           <div className="pricing-summary-strip">
             <Metric icon="rows" label="当前显示" value={`${matrix?.records.length ?? 0} 条`} />
-            <Metric icon="check" label="总匹配" value={`${matrix?.total ?? 0} 条`} />
+            <Metric icon="check" label="可报价分区" value={`${enabledZoneCount} / ${matrixRows.length}`} />
             <Metric icon="warehouse" label="始发仓" value={(matrix?.origins ?? []).join(" / ") || "-"} />
             <Metric icon="pallet" label="托数列" value={`${matrix?.billing_pallets.length ?? 0} 列`} />
           </div>
@@ -441,10 +482,11 @@ export default function PricingSettingsPage() {
               <div className="pricing-zone-list">
                 {matrixRows.map((row) => {
                   const key = `${row.origin}|${row.zone}`;
+                  const enabled = isZonePriceEnabled(pricingConfig, row.origin, row.zone);
                   return (
-                    <button className={`pricing-zone-item ${selectedZoneKey === key ? "is-active" : ""}`} key={key} type="button" onClick={() => setSelectedZoneKey(key)}>
+                    <button className={`pricing-zone-item ${selectedZoneKey === key ? "is-active" : ""} ${enabled ? "" : "is-disabled"}`} key={key} type="button" onClick={() => setSelectedZoneKey(key)}>
                       <span className="pricing-zone-code">Z{String(row.zone).padStart(2, "0")}</span>
-                      <span><strong>{row.origin}</strong><small>{row.records.size} 个托数价格</small></span>
+                      <span><strong>{row.origin}</strong><small>{row.records.size} 个托数价格 · {enabled ? "启用" : "已关闭"}</small></span>
                       <PricingIcon name="chevron" />
                     </button>
                   );
@@ -457,20 +499,22 @@ export default function PricingSettingsPage() {
                 <div className="pricing-panel-heading compact">
                   <div>
                     <span className="pricing-eyebrow">可覆盖配置</span>
-                    <h3>燃油附加比例</h3>
-                    <p>每个始发仓 + Zone 独立保存；留空会回退到默认比例。</p>
+                    <h3>分区开关与燃油比例</h3>
+                    <p>全局上限决定默认状态，单区开关可以覆盖；全局总开关关闭时所有分区均转人工。</p>
                   </div>
                   <div className="pricing-save-state">
-                    <span className={changedFuelZones.length ? "is-dirty" : "is-saved"}>
-                      <PricingIcon name={changedFuelZones.length ? "alert" : "check"} />
-                      {changedFuelZones.length ? `${changedFuelZones.length} 项未保存` : "已同步"}
+                    <span className={changedFuelZones.length + changedZoneSwitches.length ? "is-dirty" : "is-saved"}>
+                      <PricingIcon name={changedFuelZones.length + changedZoneSwitches.length ? "alert" : "check"} />
+                      {changedFuelZones.length + changedZoneSwitches.length
+                        ? `${changedFuelZones.length + changedZoneSwitches.length} 项未保存`
+                        : "已同步"}
                     </span>
                     <button className="btn-secondary" type="button" onClick={() => setIsImportOpen(true)}>
                       <PricingIcon name="upload" />
                       表格导入
                     </button>
-                    <button className="btn-secondary" type="button" onClick={() => void savePricingChanges()} disabled={!pricingConfig || isSavingPricing || changedFuelZones.length === 0}>
-                      {isSavingPricing ? "保存中..." : "保存燃油比例"}
+                    <button className="btn-secondary" type="button" onClick={() => void savePricingChanges()} disabled={!pricingConfig || isSavingPricing || changedFuelZones.length + changedZoneSwitches.length === 0}>
+                      {isSavingPricing ? "保存中..." : "保存分区配置"}
                     </button>
                   </div>
                 </div>
@@ -487,9 +531,24 @@ export default function PricingSettingsPage() {
                           const fuelKey = zoneFuelKey(row.origin, row.zone);
                           const fuelValue = pricingConfig?.fuel_percent_by_zone?.[fuelKey];
                           const fuelChanged = formatInputValue(fuelValue) !== formatInputValue(savedFuelPercentByZone[fuelKey]);
+                          const zoneEnabled = isZonePriceEnabled(pricingConfig, row.origin, row.zone);
+                          const switchChanged = pricingConfig?.zone_price_enabled_by_zone?.[fuelKey] !== savedZonePriceEnabledByZone[fuelKey];
                           return (
-                            <label className={`pricing-fuel-cell ${fuelChanged ? "is-dirty" : ""}`} key={fuelKey}>
-                              <span>ZONE {row.zone}</span>
+                            <div className={`pricing-fuel-cell ${fuelChanged || switchChanged ? "is-dirty" : ""} ${zoneEnabled ? "" : "is-disabled"}`} key={fuelKey}>
+                              <div className="pricing-fuel-cell-head">
+                                <span>ZONE {row.zone}</span>
+                                <label className="pricing-zone-switch">
+                                  <input
+                                    type="checkbox"
+                                    checked={zoneEnabled}
+                                    onChange={(event) => updateZonePriceEnabled(row.origin, row.zone, event.target.checked)}
+                                    aria-label={`${row.origin} Zone ${row.zone} 价格${zoneEnabled ? "已启用" : "已关闭"}`}
+                                    disabled={!pricingConfig?.zone_price_enabled}
+                                  />
+                                  <span aria-hidden="true"><i /></span>
+                                  <strong>{!pricingConfig?.zone_price_enabled ? "全局关闭" : zoneEnabled ? "启用" : "已关闭"}</strong>
+                                </label>
+                              </div>
                               <div className="pricing-input-with-unit">
                                 <input
                                   type="number"
@@ -500,11 +559,12 @@ export default function PricingSettingsPage() {
                                   placeholder={formatInputValue(pricingConfig?.fuel_percent) || "0"}
                                   onChange={(event) => updateZoneFuelPercent(row.origin, row.zone, event.target.value)}
                                   aria-label={`${row.origin} Zone ${row.zone} 燃油附加比例`}
+                                  disabled={!zoneEnabled}
                                 />
                                 <span>%</span>
                               </div>
-                              <small>{fuelValue === undefined || fuelValue === null || fuelValue === "" ? `默认 ${formatInputValue(pricingConfig?.fuel_percent) || "0"}%` : "已覆盖"}</small>
-                            </label>
+                              <small>{zoneEnabled ? (fuelValue === undefined || fuelValue === null || fuelValue === "" ? `默认 ${formatInputValue(pricingConfig?.fuel_percent) || "0"}%` : "已覆盖") : "价格保留，不参与自动报价"}</small>
+                            </div>
                           );
                         })}
                       </div>
@@ -532,32 +592,39 @@ export default function PricingSettingsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {visibleMatrixRows.length ? visibleMatrixRows.map((row) => (
-                        <tr key={`${row.origin}-${row.zone}`}>
-                          <td className="pricing-sticky-col pricing-origin-col"><strong>{row.origin}</strong></td>
-                          <td className="pricing-sticky-col pricing-zone-col"><span className="pricing-zone-badge">ZONE {row.zone}</span></td>
-                          {(matrix?.billing_pallets ?? []).map((pallet) => {
-                            const key = cellKey(row.origin, row.zone, pallet);
-                            const record = row.records.get(pallet);
-                            const dirty = draftCells[key] !== undefined && draftCells[key] !== formatInputValue(record?.base_price_usd);
-                            return (
-                              <td key={key}>
-                                <input
-                                  className={dirty ? "is-dirty" : ""}
-                                  type="number"
-                                  min={0}
-                                  step="0.01"
-                                  inputMode="decimal"
-                                  value={draftCells[key] ?? ""}
-                                  placeholder="—"
-                                  onChange={(event) => setDraftCells((current) => ({ ...current, [key]: event.target.value }))}
-                                  aria-label={`${row.origin} Zone ${row.zone} ${pallet} 托基础派送费`}
-                                />
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      )) : (
+                      {visibleMatrixRows.length ? visibleMatrixRows.map((row) => {
+                        const zoneEnabled = isZonePriceEnabled(pricingConfig, row.origin, row.zone);
+                        return (
+                          <tr className={zoneEnabled ? "" : "is-disabled"} key={`${row.origin}-${row.zone}`}>
+                            <td className="pricing-sticky-col pricing-origin-col"><strong>{row.origin}</strong></td>
+                            <td className="pricing-sticky-col pricing-zone-col">
+                              <span className="pricing-zone-badge">ZONE {row.zone}</span>
+                              {!zoneEnabled && <small className="pricing-zone-disabled-badge">已关闭</small>}
+                            </td>
+                            {(matrix?.billing_pallets ?? []).map((pallet) => {
+                              const key = cellKey(row.origin, row.zone, pallet);
+                              const record = row.records.get(pallet);
+                              const dirty = draftCells[key] !== undefined && draftCells[key] !== formatInputValue(record?.base_price_usd);
+                              return (
+                                <td key={key}>
+                                  <input
+                                    className={dirty ? "is-dirty" : ""}
+                                    type="number"
+                                    min={0}
+                                    step="0.01"
+                                    inputMode="decimal"
+                                    value={draftCells[key] ?? ""}
+                                    placeholder="—"
+                                    onChange={(event) => setDraftCells((current) => ({ ...current, [key]: event.target.value }))}
+                                    aria-label={`${row.origin} Zone ${row.zone} ${pallet} 托基础派送费`}
+                                    disabled={!zoneEnabled}
+                                  />
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      }) : (
                         <tr><td className="pricing-table-empty" colSpan={(matrix?.billing_pallets.length ?? 0) + 2}>暂无匹配的分区价格。</td></tr>
                       )}
                     </tbody>
@@ -1090,6 +1157,21 @@ function zoneFuelKey(origin: string, zone: number): string {
   return `${origin.trim().toLowerCase()}|${zone}`;
 }
 
+function isZonePriceEnabled(
+  config: ZonePricingConfig | null,
+  origin: string,
+  zone: number,
+): boolean {
+  if (!config?.zone_price_enabled) {
+    return false;
+  }
+  const key = zoneFuelKey(origin, zone);
+  if (key in config.zone_price_enabled_by_zone) {
+    return config.zone_price_enabled_by_zone[key];
+  }
+  return config.max_auto_quote_zone === null || zone <= config.max_auto_quote_zone;
+}
+
 function parseCellKey(key: string): { origin: string; zone: number; billing_pallets: number } | null {
   const [origin, zoneValue, palletValue] = key.split("|");
   const zone = Number(zoneValue);
@@ -1111,6 +1193,11 @@ function normalizePricingPayload(config: ZonePricingConfig): ZonePricingConfig {
   return {
     fuel_percent: formatInputValue(config.fuel_percent) || "0",
     fuel_percent_by_zone: { ...config.fuel_percent_by_zone },
+    zone_price_enabled: Boolean(config.zone_price_enabled),
+    max_auto_quote_zone: config.max_auto_quote_zone === null
+      ? null
+      : Math.max(1, Number(config.max_auto_quote_zone) || 1),
+    zone_price_enabled_by_zone: { ...config.zone_price_enabled_by_zone },
     residential_fee_usd: formatInputValue(config.residential_fee_usd) || "0",
     liftgate_fee_usd: formatInputValue(config.liftgate_fee_usd) || "0",
     pallet_jack_fee_usd: formatInputValue(config.pallet_jack_fee_usd) || "0",

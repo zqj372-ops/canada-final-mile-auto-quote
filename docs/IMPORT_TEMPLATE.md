@@ -59,3 +59,8 @@ The preview endpoint reports new rows, overwritten rows, fuel changes, warnings,
 and row-level validation errors before any data is written. Confirmation applies
 price and fuel changes in one transaction. Duplicate price keys or conflicting
 fuel percentages for the same origin and Zone are rejected.
+
+Importing a matrix does not change zone price switches. New or previously
+unconfigured Zone 1–7 rows are enabled by default, while Zone 8 and above remain
+disabled until an administrator explicitly enables that `origin + zone` from
+the price-matrix page. Disabled rows keep their imported prices for later reuse.

@@ -715,6 +715,20 @@ export interface WorkbenchCopyTemplateConfig {
   remark: string;
 }
 
+export interface ZonePricingConfig {
+  fuel_percent: MoneyValue;
+  fuel_percent_by_zone: Record<string, MoneyValue>;
+  zone_price_enabled: boolean;
+  max_auto_quote_zone: number | null;
+  zone_price_enabled_by_zone: Record<string, boolean>;
+  residential_fee_usd: MoneyValue;
+  liftgate_fee_usd: MoneyValue;
+  pallet_jack_fee_usd: MoneyValue;
+  appointment_fee_usd: MoneyValue;
+  detention_half_hour_fee_usd: MoneyValue;
+  detention_free_minutes: number;
+}
+
 export interface QuoteWorkbenchConfig {
   title: string;
   subtitle: string;
@@ -736,17 +750,7 @@ export interface QuoteWorkbenchConfig {
   defaults: WorkbenchQuoteDefaults;
   risks: WorkbenchRiskConfig;
   copy_template: WorkbenchCopyTemplateConfig;
-}
-
-export interface ZonePricingConfig {
-  fuel_percent: MoneyValue;
-  fuel_percent_by_zone: Record<string, MoneyValue>;
-  residential_fee_usd: MoneyValue;
-  liftgate_fee_usd: MoneyValue;
-  pallet_jack_fee_usd: MoneyValue;
-  appointment_fee_usd: MoneyValue;
-  detention_half_hour_fee_usd: MoneyValue;
-  detention_free_minutes: number;
+  zone_pricing: ZonePricingConfig;
 }
 
 export interface ZonePriceMatrixRecord {

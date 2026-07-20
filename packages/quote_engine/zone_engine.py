@@ -184,6 +184,29 @@ class ZoneQuoteEngine:
                 zone_decision=zone_decision,
             )
 
+        if not self.pricing_config.zone_price_enabled_for(zone_decision.origin, zone_decision.zone):
+            return self._manual(
+                request,
+                f"分区价格已关闭：{zone_decision.origin} Zone {zone_decision.zone}。",
+                [*zone_decision.risk_tags, *pallet_result.risk_tags, "zone_price_disabled"],
+                preferred_city=preferred_city,
+                postal_prefix=postal_prefix,
+                city=city,
+                province=province,
+                origin=zone_decision.origin,
+                zone=zone_decision.zone,
+                billing_pallets=pallet_result.billing_pallets,
+                pallet_breakdown=pallet_result.components,
+                matched_by="zone_price_disabled",
+                candidate_count=zone_decision.candidate_count,
+                match_trace={
+                    **zone_decision.match_trace,
+                    "matched_by": "zone_price_disabled",
+                    "zone_price_enabled": False,
+                },
+                internal_note="该始发仓 + Zone 已在价格配置中关闭，保留矩阵数据但禁止自动放价。",
+            )
+
         price_record = self.provider.get_zone_price(
             zone_decision.origin,
             zone_decision.zone,

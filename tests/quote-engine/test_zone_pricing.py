@@ -54,6 +54,40 @@ def test_zone_fuel_percent_override_and_default() -> None:
     assert fallback.fuel_usd == Decimal("42.00")
 
 
+def test_zone_price_switch_defaults_and_explicit_overrides() -> None:
+    config = ZonePricingConfig(
+        zone_price_enabled_by_zone={
+            "calgary|1": False,
+            "calgary|8": True,
+        }
+    )
+
+    assert config.zone_price_enabled_for("calgary", 1) is False
+    assert config.zone_price_enabled_for("calgary", 7) is True
+    assert config.zone_price_enabled_for("calgary", 8) is True
+    assert config.zone_price_enabled_for("calgary", 9) is False
+    assert config.zone_price_enabled_for(None, 1) is False
+
+
+def test_zone_price_global_switch_and_default_cutoff_precedence() -> None:
+    globally_disabled = ZonePricingConfig(
+        zone_price_enabled=False,
+        zone_price_enabled_by_zone={"calgary|8": True},
+    )
+    custom_cutoff = ZonePricingConfig(
+        max_auto_quote_zone=5,
+        zone_price_enabled_by_zone={"calgary|8": True},
+    )
+    unlimited = ZonePricingConfig(max_auto_quote_zone=None)
+
+    assert globally_disabled.zone_price_enabled_for("calgary", 1) is False
+    assert globally_disabled.zone_price_enabled_for("calgary", 8) is False
+    assert custom_cutoff.zone_price_enabled_for("calgary", 5) is True
+    assert custom_cutoff.zone_price_enabled_for("calgary", 6) is False
+    assert custom_cutoff.zone_price_enabled_for("calgary", 8) is True
+    assert unlimited.zone_price_enabled_for("calgary", 99) is True
+
+
 def test_custom_residential_fee_is_applied() -> None:
     result = calculate_zone_price(
         base_price_usd=Decimal("120.00"),

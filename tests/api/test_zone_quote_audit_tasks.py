@@ -482,6 +482,52 @@ def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:
     assert "hermes_corrective_override" in body["risk_tags"]
 
 
+def test_zone_switch_blocks_learned_rule_from_reactivating_zone_8() -> None:
+    client = build_client(
+        learned_rows=[
+            {
+                "source_task_id": 108,
+                "quote_id": "manual-108",
+                "scope": "postal_prefix_city",
+                "postal_code": "L4K 2N2",
+                "postal_prefix": "L4K",
+                "city": "CONCORD",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 8,
+                "billing_pallets": 3,
+                "conditions_json": {
+                    "address_type": "commercial",
+                    "requires_liftgate": False,
+                    "requires_pallet_jack": False,
+                    "requires_appointment": True,
+                    "detention_minutes": 0,
+                },
+                "total_price_usd": Decimal("500.00"),
+                "base_price_usd": Decimal("500.00"),
+                "confidence": 90,
+                "status": "active",
+                "usage_count": 0,
+                "note": "Legacy approved price that must obey the current zone switch.",
+            }
+        ]
+    )
+
+    response = client.post("/quotes/zone-calculate", json=payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "zone_price_disabled"
+    assert body["match_trace"]["previous_source_type"] == "learned_manual_quote"
+    assert body["origin"] == "toronto"
+    assert body["zone"] == 8
+    assert body["base_price_usd"] is None
+    assert body["total_price_usd"] is None
+    assert body["manual_review_required"] is True
+    assert "zone_price_disabled" in body["risk_tags"]
+
+
 def test_exact_learned_rule_cannot_cross_origin_price_matrices() -> None:
     client = build_client(
         learned_rows=[

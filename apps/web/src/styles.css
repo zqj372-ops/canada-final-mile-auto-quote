@@ -4169,6 +4169,20 @@ body {
   color: var(--pricing-teal-dark);
 }
 
+.pricing-zone-item.is-disabled:not(.is-active) {
+  background: #fafbfc;
+  color: #8493a1;
+}
+
+.pricing-zone-item.is-disabled:not(.is-active) .pricing-zone-code {
+  background: #eef1f4;
+  color: #8795a2;
+}
+
+.pricing-zone-item.is-disabled small {
+  color: #9a7b55;
+}
+
 .pricing-zone-item > span:nth-child(2) {
   display: grid;
   min-width: 0;
@@ -4303,11 +4317,80 @@ body {
   padding: 0.55rem;
 }
 
-.pricing-fuel-cell > span {
+.pricing-fuel-cell-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.pricing-fuel-cell-head > span {
   color: #687e93;
   font-size: 0.64rem;
   font-weight: 850;
   letter-spacing: 0.05em;
+}
+
+.pricing-zone-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pricing-zone-switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pricing-zone-switch > span {
+  position: relative;
+  display: inline-flex;
+  width: 1.82rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  align-items: center;
+  border-radius: 999px;
+  background: #c6ced6;
+  padding: 0.12rem;
+  transition: background 150ms ease, box-shadow 150ms ease;
+}
+
+.pricing-zone-switch > span i {
+  width: 0.76rem;
+  height: 0.76rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(27, 47, 66, 0.2);
+  transition: transform 150ms ease;
+}
+
+.pricing-zone-switch input:checked + span {
+  background: var(--pricing-teal);
+}
+
+.pricing-zone-switch input:checked + span i {
+  transform: translateX(0.82rem);
+}
+
+.pricing-zone-switch input:focus-visible + span {
+  box-shadow: 0 0 0 3px rgba(15, 139, 131, 0.2);
+}
+
+.pricing-zone-switch strong {
+  color: #7f8e9c;
+  font-size: 0.59rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.pricing-zone-switch input:checked ~ strong {
+  color: #0b8279;
 }
 
 .pricing-fuel-cell .pricing-input-with-unit {
@@ -4318,6 +4401,21 @@ body {
 .pricing-price-table input.is-dirty {
   border-color: #f0bb55;
   background: #fff9eb;
+}
+
+.pricing-fuel-cell.is-disabled {
+  border-color: #dfe4e9;
+  background: #f6f8f9;
+}
+
+.pricing-fuel-cell.is-disabled .pricing-input-with-unit {
+  background: #eff2f4;
+}
+
+.pricing-fuel-cell.is-disabled .pricing-input-with-unit input,
+.pricing-fuel-cell.is-disabled .pricing-input-with-unit span,
+.pricing-fuel-cell.is-disabled > small {
+  color: #98a3ad;
 }
 
 .pricing-empty-state,
@@ -4367,6 +4465,11 @@ body {
   background: #f8fcfc;
 }
 
+.pricing-price-table tbody tr.is-disabled td,
+.pricing-price-table tbody tr.is-disabled:hover td {
+  background: #f5f7f8;
+}
+
 .pricing-price-table .pricing-sticky-col {
   position: sticky;
   z-index: 2;
@@ -4405,6 +4508,14 @@ body {
   font-weight: 850;
 }
 
+.pricing-zone-disabled-badge {
+  display: block;
+  margin-top: 0.22rem;
+  color: #98734d;
+  font-size: 0.58rem;
+  font-weight: 800;
+}
+
 .pricing-price-table td:not(.pricing-sticky-col) {
   padding: 0.28rem;
 }
@@ -4433,6 +4544,14 @@ body {
   border-color: var(--pricing-teal);
   background: #fff;
   box-shadow: 0 0 0 3px rgba(15, 139, 131, 0.13);
+}
+
+.pricing-price-table input:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: #9aa5af;
+  cursor: not-allowed;
+  opacity: 0.78;
 }
 
 .pricing-table-footer {

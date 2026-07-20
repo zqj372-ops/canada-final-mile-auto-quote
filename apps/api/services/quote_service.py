@@ -21,6 +21,7 @@ from apps.api.services.notification_service import (
 from apps.api.services.quote_logic_explainer import attach_zone_quote_logic
 from packages.quote_engine.engine import QuoteEngine
 from packages.quote_engine.models import QuoteCalculationRequest, QuoteResult, ShipmentInput
+from packages.quote_engine.zone_config import ZonePricingConfig
 from packages.quote_engine.zone_engine import ZoneQuoteEngine
 from packages.quote_engine.zone_lookup import (
     ORIGIN_BY_PROVINCE,
@@ -53,6 +54,7 @@ def calculate_zone_quote(
     result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
     result = apply_learned_quote_if_available(db, payload, result)
     result = enforce_origin_matrix_safety(payload, result)
+    result = enforce_zone_price_switch(pricing_config, result)
     result = attach_zone_quote_logic(payload, result)
     record_zone_quote_side_effects(
         db,
@@ -150,6 +152,42 @@ def enforce_origin_matrix_safety(
             },
             "sales_note": "需要人工复核始发仓和 Zone 后才能向客户发送报价。",
             "internal_note": "始发仓与 Zone 规则来源不一致，已阻止跨价格矩阵报价并转人工确认。",
+        }
+    )
+
+
+def enforce_zone_price_switch(
+    pricing_config: ZonePricingConfig,
+    result: ZoneQuoteResult,
+) -> ZoneQuoteResult:
+    if result.origin is None or result.zone is None:
+        return result
+    if pricing_config.zone_price_enabled_for(result.origin, result.zone):
+        return result
+
+    previous_matched_by = result.matched_by
+    previous_source_type = result.source_type.value
+    return result.model_copy(
+        update={
+            "source_type": ZoneQuoteSourceType.MANUAL_REQUIRED,
+            "confidence": 0,
+            "base_price_usd": None,
+            "fuel_usd": None,
+            "accessorials": {},
+            "total_price_usd": None,
+            "risk_tags": sorted(set([*result.risk_tags, "zone_price_disabled"])),
+            "manual_review_required": True,
+            "matched_rule": f"分区价格已关闭：{result.origin} Zone {result.zone}。",
+            "matched_by": "zone_price_disabled",
+            "match_trace": {
+                **result.match_trace,
+                "previous_matched_by": previous_matched_by,
+                "previous_source_type": previous_source_type,
+                "matched_by": "zone_price_disabled",
+                "zone_price_enabled": False,
+            },
+            "sales_note": "该分区价格已暂停自动报价，需要人工确认后才能向客户发送金额。",
+            "internal_note": "该始发仓 + Zone 已在价格配置中关闭，任何自动报价来源均不得绕过。",
         }
     )
 

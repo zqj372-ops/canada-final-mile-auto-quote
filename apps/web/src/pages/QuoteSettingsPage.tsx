@@ -9,11 +9,12 @@ import {
   type WorkbenchOption,
 } from "../api/client";
 
-type SettingsTab = "basic" | "options" | "risks" | "template" | "advanced";
+type SettingsTab = "basic" | "options" | "pricing" | "risks" | "template" | "advanced";
 
 const tabs: Array<{ id: SettingsTab; label: string }> = [
   { id: "basic", label: "基础文案" },
   { id: "options", label: "识别与默认值" },
+  { id: "pricing", label: "分区价格" },
   { id: "risks", label: "风险与标签" },
   { id: "template", label: "报价话术" },
   { id: "advanced", label: "高级 JSON" },
@@ -112,6 +113,15 @@ export default function QuoteSettingsPage() {
   ) {
     setConfig((current) =>
       current ? { ...current, defaults: { ...current.defaults, [key]: value } } : current,
+    );
+  }
+
+  function updateZonePricing<K extends keyof QuoteWorkbenchConfig["zone_pricing"]>(
+    key: K,
+    value: QuoteWorkbenchConfig["zone_pricing"][K],
+  ) {
+    setConfig((current) =>
+      current ? { ...current, zone_pricing: { ...current.zone_pricing, [key]: value } } : current,
     );
   }
 
@@ -294,6 +304,28 @@ export default function QuoteSettingsPage() {
               <StringListEditor label="尺寸分隔符" values={config.parser.dimension_separators} onChange={(values) => updateParser("dimension_separators", values)} compact />
               <StringListEditor label="重量单位" values={config.parser.weight_units} onChange={(values) => updateParser("weight_units", values)} compact />
               <StringListEditor label="国家别名" values={config.parser.country_aliases} onChange={(values) => updateParser("country_aliases", values)} compact />
+            </div>
+          </ConfigSection>
+        )}
+
+
+        {activeTab === "pricing" && (
+          <ConfigSection title="分区价格开关" description="总开关控制所有 Zone；默认上限为 7，价格矩阵页仍可显式开启或关闭单个始发仓 + Zone。">
+            <div className="grid gap-4 md:grid-cols-2">
+              <CheckboxField label="启用分区价格自动报价" checked={config.zone_pricing.zone_price_enabled} onChange={(checked) => updateZonePricing("zone_price_enabled", checked)} />
+              <NumberField
+                label="默认自动报价最高 Zone（填 7 表示 8 区及以上默认关闭）"
+                value={config.zone_pricing.max_auto_quote_zone ?? ""}
+                onChange={(value) => updateZonePricing("max_auto_quote_zone", value === "" ? null : toInteger(value, 1))}
+                min={1}
+              />
+              <NumberField label="燃油附加费 %" value={String(config.zone_pricing.fuel_percent)} onChange={(value) => updateZonePricing("fuel_percent", toNumber(value, 0))} min={0} step={0.01} />
+              <NumberField label="住宅附加费 USD" value={String(config.zone_pricing.residential_fee_usd)} onChange={(value) => updateZonePricing("residential_fee_usd", toNumber(value, 0))} min={0} step={0.01} />
+              <NumberField label="尾板费 USD" value={String(config.zone_pricing.liftgate_fee_usd)} onChange={(value) => updateZonePricing("liftgate_fee_usd", toNumber(value, 0))} min={0} step={0.01} />
+              <NumberField label="手叉车费 USD" value={String(config.zone_pricing.pallet_jack_fee_usd)} onChange={(value) => updateZonePricing("pallet_jack_fee_usd", toNumber(value, 0))} min={0} step={0.01} />
+              <NumberField label="预约费 USD" value={String(config.zone_pricing.appointment_fee_usd)} onChange={(value) => updateZonePricing("appointment_fee_usd", toNumber(value, 0))} min={0} step={0.01} />
+              <NumberField label="等待费 USD/半小时" value={String(config.zone_pricing.detention_half_hour_fee_usd)} onChange={(value) => updateZonePricing("detention_half_hour_fee_usd", toNumber(value, 0))} min={0} step={0.01} />
+              <NumberField label="免费等待分钟" value={config.zone_pricing.detention_free_minutes} onChange={(value) => updateZonePricing("detention_free_minutes", toInteger(value, 0))} min={0} />
             </div>
           </ConfigSection>
         )}

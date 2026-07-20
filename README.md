@@ -57,6 +57,8 @@ tests/                             MVP 单元测试
 - 标准化省份，例如 `Ontario -> ON`、`British Columbia -> BC`。
 - 按 Zone 查表链路报价：
   `postal_code override -> FSA single-zone -> FSA + city_alias/canonical_city -> city fallback -> zone_price_matrix`
+- 分区价格支持全局总开关、默认最高自动报价 Zone（默认 7），以及每个 `始发仓 + Zone` 的独立覆盖开关。
+  默认 Zone 1–7 开启、Zone 8 及以上关闭；关闭只暂停自动报价并转人工复核，原价格矩阵不会被删除，人工学习规则也不能绕过开关。
 - 按固定优先级匹配报价规则：
   `history_exact_address -> postal_code -> fsa -> city -> rate_card -> distance_fallback -> manual_required`
 - 输出 `source_type`、`confidence`、`matched_rule`、`cost_breakdown`、风险标签和人工审核状态。

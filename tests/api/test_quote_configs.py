@@ -131,6 +131,9 @@ def test_admin_can_manage_zone_pricing_config(monkeypatch: pytest.MonkeyPatch) -
         json={
             "fuel_percent": "18.5",
             "fuel_percent_by_zone": {"calgary|1": "12.5"},
+            "zone_price_enabled": False,
+            "max_auto_quote_zone": 6,
+            "zone_price_enabled_by_zone": {"calgary|1": False, "calgary|8": True},
             "residential_fee_usd": "55",
             "liftgate_fee_usd": "60",
             "pallet_jack_fee_usd": "50",
@@ -145,9 +148,18 @@ def test_admin_can_manage_zone_pricing_config(monkeypatch: pytest.MonkeyPatch) -
     assert read_response.status_code == 200
     assert read_response.json()["fuel_percent"] == "35"
     assert read_response.json()["fuel_percent_by_zone"] == {}
+    assert read_response.json()["zone_price_enabled"] is True
+    assert read_response.json()["max_auto_quote_zone"] == 7
+    assert read_response.json()["zone_price_enabled_by_zone"] == {}
     assert update_response.status_code == 200
     assert read_back.json()["fuel_percent"] == "18.5"
     assert read_back.json()["fuel_percent_by_zone"] == {"calgary|1": "12.5"}
+    assert read_back.json()["zone_price_enabled"] is False
+    assert read_back.json()["max_auto_quote_zone"] == 6
+    assert read_back.json()["zone_price_enabled_by_zone"] == {
+        "calgary|1": False,
+        "calgary|8": True,
+    }
     assert read_back.json()["detention_free_minutes"] == 20
 
 

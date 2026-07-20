@@ -94,6 +94,8 @@ def _manual_next_action(result_json: dict[str, Any]) -> str:
     suggested_zone = match_trace.get("suggested_zone")
     suggested_prefix = _text(match_trace.get("suggested_postal_prefix"))
     risk_tags = result_json.get("risk_tags") if isinstance(result_json.get("risk_tags"), list) else []
+    if "zone_price_disabled" in risk_tags and origin and zone is not None:
+        return f"{origin_label(origin) or origin} Zone {zone} 已暂停自动报价；请确认最新行情后在价格配置中重新开启。"
     if "zone_rule_province_mismatch" in risk_tags:
         invalid_examples = match_trace.get("invalid_rule_examples")
         example = invalid_examples[0] if isinstance(invalid_examples, list) and invalid_examples else {}

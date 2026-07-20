@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from packages.quote_engine.zone_config import ZonePricingConfig
+
 
 class WorkbenchOption(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -177,6 +179,7 @@ class QuoteWorkbenchConfig(BaseModel):
             "zone_not_found": "未命中邮编分区",
             "zone_rule_province_mismatch": "Zone 锚点的邮编省份不一致",
             "zone_price_not_found": "未命中 Zone 价格矩阵",
+            "zone_price_disabled": "分区价格已关闭",
             "city_zone_fallback": "按城市/省份匹配 Zone",
             "city_zone_prefix_family_fallback": "按同邮编族缩小城市 Zone",
             "city_zone_prefix_family_low_support": "同邮编族锚点证据不足",
@@ -204,6 +207,7 @@ class QuoteWorkbenchConfig(BaseModel):
     defaults: WorkbenchQuoteDefaults = Field(default_factory=WorkbenchQuoteDefaults)
     risks: WorkbenchRiskConfig = Field(default_factory=WorkbenchRiskConfig)
     copy_template: WorkbenchCopyTemplateConfig = Field(default_factory=WorkbenchCopyTemplateConfig)
+    zone_pricing: ZonePricingConfig = Field(default_factory=ZonePricingConfig)
 
 
 def _default_provinces() -> list[ProvinceAlias]:

@@ -157,6 +157,7 @@ class LLMAuxiliaryAdviceService:
                 if billing_pallets is not None
                 else None
             )
+            zone_price_enabled = self.pricing_config.zone_price_enabled_for(origin, rule.zone)
             zone_options.append(
                 {
                     "postal_prefix": rule.postal_prefix,
@@ -165,8 +166,13 @@ class LLMAuxiliaryAdviceService:
                     "origin": origin,
                     "zone": rule.zone,
                     "expected_origin_match": origin == expected_origin,
-                    "has_price_for_billing_pallets": price_record is not None,
-                    "base_price_usd": f"{price_record.base_price_usd:.2f}" if price_record else None,
+                    "zone_price_enabled": zone_price_enabled,
+                    "has_price_for_billing_pallets": price_record is not None and zone_price_enabled,
+                    "base_price_usd": (
+                        f"{price_record.base_price_usd:.2f}"
+                        if price_record is not None and zone_price_enabled
+                        else None
+                    ),
                 }
             )
 
@@ -240,6 +246,8 @@ class LLMAuxiliaryAdviceService:
     ) -> ZoneQuoteResult:
         if not decision.origin or decision.zone is None or original.billing_pallets is None:
             return original
+        if not self.pricing_config.zone_price_enabled_for(decision.origin, decision.zone):
+            return original
         if not _zone_option_supported(evidence, decision.origin, decision.zone):
             return original
         price_record = self.zone_repository.get_zone_price(decision.origin, decision.zone, original.billing_pallets)
@@ -296,6 +304,8 @@ class LLMAuxiliaryAdviceService:
         total_price = Decimal(str(task["resolved_price_usd"])).quantize(Decimal("0.01"))
         origin = normalize_origin(_string(task.get("origin"))) or original.origin
         zone = _int_value(task.get("zone")) or original.zone
+        if origin and zone is not None and not self.pricing_config.zone_price_enabled_for(origin, zone):
+            return original
         corrected = original.model_copy(
             update={
                 "source_type": ZoneQuoteSourceType.LLM_AUXILIARY_ADVICE,

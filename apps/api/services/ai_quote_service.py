@@ -27,6 +27,7 @@ from apps.api.services.quote_logic_explainer import attach_zone_quote_logic
 from apps.api.services.quote_service import (
     apply_learned_quote_if_available,
     enforce_origin_matrix_safety,
+    enforce_zone_price_switch,
     record_zone_quote_side_effects,
     try_notification,
 )
@@ -215,6 +216,7 @@ def calculate_ai_auto_quote(
     quote_result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(zone_request)
     quote_result = apply_learned_quote_if_available(db, zone_request, quote_result)
     quote_result = enforce_origin_matrix_safety(zone_request, quote_result)
+    quote_result = enforce_zone_price_switch(pricing_config, quote_result)
     quote_result = attach_zone_quote_logic(zone_request, quote_result)
     record_zone_quote_side_effects(
         db,
