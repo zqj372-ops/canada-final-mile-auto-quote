@@ -55,6 +55,13 @@ def test_postal_code_loader_normalizes_sample_records() -> None:
     assert rows[0]["postal_code"].count(" ") == 1
     assert rows[0]["province"] is not None
     assert rows[0]["fsa"] is not None
+    assert any(
+        row["postal_code"] == "V3X 0L7"
+        and row["preferred_city"] == "Surrey"
+        and row["province"] == "BC"
+        and row["fsa"] == "V3X"
+        for row in rows
+    )
 
 
 def test_city_alias_loader_reads_records(tmp_path: Path) -> None:

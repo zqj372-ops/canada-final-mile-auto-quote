@@ -80,6 +80,31 @@ def test_maps_local_verify_returns_manual_note_when_postal_missing_from_lookup()
     assert body["risk_tags"] == ["postal_lookup_not_found"]
 
 
+def test_maps_local_verify_recognizes_v3x0l7_as_surrey() -> None:
+    client = build_client()
+
+    response = client.get(
+        "/maps/local-verify",
+        params={
+            "postal_code": "V3X 0L7",
+            "city": "Surrey",
+            "province": "BC",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["matched"] is True
+    assert body["status"] == "verified"
+    assert body["confidence"] == 95
+    assert body["preferred_city"] == "Surrey"
+    assert body["province"] == "BC"
+    assert body["city_consistent"] is True
+    assert body["province_consistent"] is True
+    assert body["risk_tags"] == ["local_postal_verified"]
+    assert "本地邮编库命中 V3X 0L7 -> Surrey, BC" in body["note_zh"]
+
+
 def build_client() -> TestClient:
     engine = create_engine(
         "sqlite+pysqlite://",
@@ -98,6 +123,16 @@ def build_client() -> TestClient:
                 fsa="V4B",
                 official_city="White Rock",
                 source="test",
+            )
+        )
+        session.add(
+            PostalCodeCityLookup(
+                postal_code="V3X 0L7",
+                preferred_city="Surrey",
+                province="BC",
+                fsa="V3X",
+                official_city="Surrey",
+                source="manual_postal_correction_20260720",
             )
         )
         session.commit()
