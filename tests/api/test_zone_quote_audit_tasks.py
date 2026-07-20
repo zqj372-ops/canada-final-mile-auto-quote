@@ -105,8 +105,7 @@ def test_zone_calculate_success_writes_audit_log() -> None:
     assert audit.status_code == 200
     body = audit.json()
     assert body["quote_id"] == quote["quote_id"]
-    assert body["quote_id"].isdigit()
-    assert len(body["quote_id"]) == 31
+    assert len(body["quote_id"]) == 15
     assert body["source_type"] == "zone_matrix"
     assert body["postal_prefix"] == "L4K"
     assert body["total_price_usd"] == "212.00"

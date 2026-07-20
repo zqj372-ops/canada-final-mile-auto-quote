@@ -208,6 +208,55 @@ def test_l4k_concord_on_zone_quote_success() -> None:
     assert body["manual_review_required"] is False
 
 
+def test_city_postal_zone_conflict_explains_both_candidates() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "N0A 1M0", "preferred_city": "Ohsweken", "province": "ON"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "N0A",
+                "city": "HAGERSVILLE",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 5,
+                "match_level": "test",
+                "note": "",
+            },
+            {
+                "postal_prefix": "N0A",
+                "city": "OHSWEKEN",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 6,
+                "match_level": "test",
+                "note": "",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="1595 Sour Springs Rd",
+            postal_code="N0A 1M0",
+            city="Hagersville",
+            province="ON",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "split_record_conflict"
+    assert body["manual_review_required"] is True
+    assert body["matched_rule"] == (
+        "地址信息对应不同 Zone：输入城市 Hagersville → 多伦多 Zone 5；"
+        "邮编 N0A 1M0 对应城市 Ohsweken → 多伦多 Zone 6。请核对城市或邮编后再报价。"
+    )
+
+
 def test_zone_quote_uses_zone_fuel_percent_override() -> None:
     client = build_client(
         quote_rule_configs=[

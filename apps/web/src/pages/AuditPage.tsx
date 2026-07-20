@@ -141,7 +141,7 @@ export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
               className="field-input"
               value={quoteId}
               onChange={(event) => setQuoteId(event.target.value)}
-              placeholder="输入 8 位报价 ID，也可留空刷新最近列表"
+              placeholder="输入 15 位短报价 ID，也可留空刷新最近列表"
             />
           </label>
           <button className="btn-primary" type="submit" disabled={isLoading}>
@@ -253,7 +253,7 @@ export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
           <div>
             <h3 className="section-title">最近审计列表</h3>
             <p className="mt-1 text-sm text-slate-600">
-              新报价会使用 8 位数字报价 ID；旧 UUID 记录仍可查询。
+              新报价会使用 15 位短报价 ID；旧数字或 UUID 记录仍可查询。
             </p>
           </div>
           <button

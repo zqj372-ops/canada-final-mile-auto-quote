@@ -289,7 +289,14 @@ def lookup_zone(
             )
         return ZoneLookupDecision(
             manual_required=True,
-            matched_rule=f"邮编前缀 {prefix} + {input_city or preferred_city or '未知城市'} 匹配到多个 Zone 规则，需要人工确认。",
+            matched_rule=_describe_city_postal_zone_conflict(
+                prefix=prefix,
+                postal_code=normalized_postal_code,
+                input_city=input_city,
+                preferred_city=preferred_city,
+                rules=match_rules,
+                alias_map=alias_map,
+            ),
             risk_tags=("split_record_conflict",),
             matched_by="split_record_conflict",
             candidate_count=len(match_rules),
@@ -620,6 +627,50 @@ def _unique_groups(rules: Sequence[ZoneLookupRuleRecord]) -> set[tuple[int, str 
         overridden, _ = _apply_origin_overrides(rule)
         groups.add((overridden.zone, normalize_origin(overridden.origin), normalize_province(overridden.province) or ""))
     return groups
+
+
+def _describe_city_postal_zone_conflict(
+    *,
+    prefix: str,
+    postal_code: str | None,
+    input_city: str | None,
+    preferred_city: str | None,
+    rules: Sequence[ZoneLookupRuleRecord],
+    alias_map: Mapping[str, str],
+) -> str:
+    descriptions: list[str] = []
+    seen: set[tuple[str, tuple[tuple[str, int], ...]]] = set()
+
+    def append_city(label: str, city: str | None) -> None:
+        normalized = _normalize_city_for_lookup(city)
+        if not normalized:
+            return
+        canonical = alias_map.get(normalized, normalized)
+        city_rules = _filter_rules_by_canonical_city(rules, [canonical, normalized], alias_map)
+        groups = sorted(
+            {
+                (origin_label(overridden.origin), overridden.zone)
+                for rule in city_rules
+                for overridden, _ in [_apply_origin_overrides(rule)]
+            },
+            key=lambda item: (item[0], item[1]),
+        )
+        if not groups:
+            return
+        key = (canonical, tuple(groups))
+        if key in seen:
+            return
+        seen.add(key)
+        zones = " / ".join(f"{origin} Zone {zone}" for origin, zone in groups)
+        descriptions.append(f"{label} → {zones}")
+
+    append_city(f"输入城市 {input_city}", input_city)
+    postal_label = postal_code or prefix
+    append_city(f"邮编 {postal_label} 对应城市 {preferred_city}", preferred_city)
+
+    if descriptions:
+        return f"地址信息对应不同 Zone：{'；'.join(descriptions)}。请核对城市或邮编后再报价。"
+    return f"邮编前缀 {prefix} 匹配到多个 Zone 规则，需要人工确认。"
 
 
 def _single_group_decision(
