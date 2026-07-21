@@ -23,7 +23,7 @@ from packages.quote_engine.engine import QuoteEngine
 from packages.quote_engine.models import QuoteCalculationRequest, QuoteResult, ShipmentInput
 from packages.quote_engine.risk_tags import RURAL_FSA_SECONDARY_CONFIRMATION_TAG, rural_fsa_risk_tags
 from packages.quote_engine.zone_config import ZonePricingConfig
-from packages.quote_engine.zone_engine import ZoneQuoteEngine
+from packages.quote_engine.zone_engine import ZoneQuoteEngine, build_zone_price_disabled_reason
 from packages.quote_engine.zone_lookup import (
     ORIGIN_BY_PROVINCE,
     get_province_from_postal_code,
@@ -178,7 +178,13 @@ def enforce_zone_price_switch(
             "total_price_usd": None,
             "risk_tags": sorted(set([*result.risk_tags, "zone_price_disabled"])),
             "manual_review_required": True,
-            "matched_rule": f"分区价格已关闭：{result.origin} Zone {result.zone}。",
+            "matched_rule": build_zone_price_disabled_reason(
+                city=result.preferred_city or result.city,
+                province=result.province,
+                postal_code=result.postal_code,
+                origin=result.origin,
+                zone=result.zone,
+            ),
             "matched_by": "zone_price_disabled",
             "match_trace": {
                 **result.match_trace,

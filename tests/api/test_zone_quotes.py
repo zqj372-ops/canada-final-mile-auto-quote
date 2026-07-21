@@ -380,6 +380,59 @@ def test_zone_8_price_is_disabled_by_default_even_when_matrix_has_a_price() -> N
     assert "zone_price_disabled" in body["risk_tags"]
 
 
+def test_disabled_zone_price_reason_separates_destination_from_origin() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "T5T 4B2", "preferred_city": "Edmonton", "province": "AB"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "T5T",
+                "city": "EDMONTON",
+                "province": "AB",
+                "origin": "calgary",
+                "zone": 9,
+                "match_level": "test",
+                "note": "",
+            },
+        ],
+        prices=[
+            {
+                "origin": "calgary",
+                "zone": 9,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("460.00"),
+                "source": "test",
+                "last_updated": "2026-07-21",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="20627 93Ave NW",
+            postal_code="T5T 4B2",
+            city="Edmonton",
+            province="AB",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "zone_price_disabled"
+    assert body["city"] == "Edmonton"
+    assert body["province"] == "AB"
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 9
+    assert body["matched_rule"] == "分区价格已关闭：目的地 Edmonton, AB, T5T 4B2；始发仓 卡尔加里；Zone 9。"
+    logic_steps = body["match_trace"]["quote_logic"]["steps"]
+    assert any("目的地 Edmonton, AB, T5T 4B2 已命中 卡尔加里 始发仓 Zone 9" in step for step in logic_steps)
+    assert "zone_price_disabled" in body["risk_tags"]
+
+
 def test_zone_8_price_can_be_explicitly_enabled() -> None:
     client = build_client(
         postal_records=[

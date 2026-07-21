@@ -447,6 +447,10 @@ export interface ManualQuoteTaskUpdate {
 export interface QuoteAuditLog {
   id: number;
   quote_id: string;
+  actor_user_id: number | null;
+  actor_api_key_id: number | null;
+  actor_name: string | null;
+  actor_role: string | null;
   request_json: JsonValue;
   result_json: JsonValue;
   quote_logic?: JsonValue;

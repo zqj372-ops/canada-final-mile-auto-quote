@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from apps.api.db.models import HermesLearningCandidate, LearnedQuoteRule, ManualQuoteTask, QuoteAuditLog
+from apps.api.db.models import HermesLearningCandidate, LearnedQuoteRule, ManualQuoteTask, QuoteAuditLog, SalesQuoteRecord
 from apps.api.db.repositories.hermes_learning_candidate_repository import hermes_candidate_to_dict
 from apps.api.db.repositories.learned_quote_rule_repository import learned_quote_rule_to_dict
 from apps.api.db.repositories.quote_audit_repository import QuoteAuditRepository
@@ -19,7 +19,8 @@ def get_quote_audit(db: Session, quote_id: str) -> dict[str, object]:
     record = QuoteAuditRepository(db).get_by_quote_id(quote_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Quote audit log not found.")
-    return audit_to_dict(record)
+    sales_record = _latest_sales_records_by_quote_id(db, [record.quote_id]).get(record.quote_id)
+    return audit_to_dict(record, sales_record=sales_record)
 
 
 def list_quote_audits(
@@ -40,8 +41,9 @@ def list_quote_audits(
             | (QuoteAuditLog.city.ilike(like))
             | (QuoteAuditLog.province.ilike(like))
         )
-    records = db.scalars(statement.order_by(QuoteAuditLog.created_at.desc(), QuoteAuditLog.id.desc()).limit(safe_limit))
-    return [audit_to_dict(record) for record in records]
+    records = list(db.scalars(statement.order_by(QuoteAuditLog.created_at.desc(), QuoteAuditLog.id.desc()).limit(safe_limit)))
+    sales_records = _latest_sales_records_by_quote_id(db, [record.quote_id for record in records])
+    return [audit_to_dict(record, sales_record=sales_records.get(record.quote_id)) for record in records]
 
 
 def get_quote_error_summary(db: Session, *, limit: int = 20) -> dict[str, object]:
@@ -179,14 +181,14 @@ def get_quote_error_summary(db: Session, *, limit: int = 20) -> dict[str, object
         "learning_rule_usage_count": learning_rule_usage_count,
         "risk_tag_counts": _risk_counts(risk_counter),
         "recent_manual_tasks": [manual_task_to_dict(task) for task in recent_tasks],
-        "recent_audits": [audit_to_dict(audit) for audit in recent_audits],
-        "recent_manual_audits": [audit_to_dict(audit) for audit in recent_manual_audits],
+        "recent_audits": _audit_list_to_dicts(db, recent_audits),
+        "recent_manual_audits": _audit_list_to_dicts(db, recent_manual_audits),
         "recent_learning_rules": [learned_quote_rule_to_dict(rule) for rule in recent_learning_rules],
         "recent_learning_candidates": [hermes_candidate_to_dict(candidate) for candidate in recent_learning_candidates],
     }
 
 
-def audit_to_dict(record: QuoteAuditLog) -> dict[str, object]:
+def audit_to_dict(record: QuoteAuditLog, *, sales_record: SalesQuoteRecord | None = None) -> dict[str, object]:
     request_json = record.request_json or {}
     result_json = record.result_json or {}
     match_trace = result_json.get("match_trace") if isinstance(result_json, dict) else {}
@@ -199,6 +201,10 @@ def audit_to_dict(record: QuoteAuditLog) -> dict[str, object]:
     return {
         "id": record.id,
         "quote_id": record.quote_id,
+        "actor_user_id": sales_record.actor_user_id if sales_record else None,
+        "actor_api_key_id": sales_record.actor_api_key_id if sales_record else None,
+        "actor_name": sales_record.actor_name if sales_record else None,
+        "actor_role": sales_record.actor_role if sales_record else None,
         "request_json": request_json,
         "result_json": result_json,
         "quote_logic": quote_logic,
@@ -223,6 +229,27 @@ def _decimal_to_string(value: Decimal | None) -> str | None:
     if value is None:
         return None
     return f"{value:.2f}"
+
+
+def _audit_list_to_dicts(db: Session, records: list[QuoteAuditLog]) -> list[dict[str, object]]:
+    sales_records = _latest_sales_records_by_quote_id(db, [record.quote_id for record in records])
+    return [audit_to_dict(record, sales_record=sales_records.get(record.quote_id)) for record in records]
+
+
+def _latest_sales_records_by_quote_id(db: Session, quote_ids: list[str]) -> dict[str, SalesQuoteRecord]:
+    unique_quote_ids = list(dict.fromkeys(quote_id for quote_id in quote_ids if quote_id))
+    if not unique_quote_ids:
+        return {}
+    records = db.scalars(
+        select(SalesQuoteRecord)
+        .where(SalesQuoteRecord.quote_id.in_(unique_quote_ids))
+        .order_by(SalesQuoteRecord.created_at.desc(), SalesQuoteRecord.id.desc())
+    )
+    latest: dict[str, SalesQuoteRecord] = {}
+    for record in records:
+        if record.quote_id and record.quote_id not in latest:
+            latest[record.quote_id] = record
+    return latest
 
 
 def _risk_counts(counter: Counter[str]) -> list[dict[str, object]]:

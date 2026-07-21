@@ -9,6 +9,7 @@ import {
   setStoredAuthToken,
   type CurrentActor,
   type QuoteErrorSummary,
+  type QuoteAuditLog,
 } from "./api/client";
 const AIQuotePage = lazy(() => import("./pages/AIQuotePage"));
 const AISettingsPage = lazy(() => import("./pages/AISettingsPage"));
@@ -963,9 +964,10 @@ function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
           </div>
           {quoteHistoryRows.length ? (
             <div className="overflow-x-auto">
-              <div className="admin-data-table min-w-[920px]">
-                <div className="admin-table-head grid-cols-[1.2fr_1.1fr_1fr_0.8fr_1fr_0.8fr_1.1fr]">
+              <div className="admin-data-table min-w-[1060px]">
+                <div className="admin-table-head grid-cols-[1.2fr_1fr_1.1fr_1fr_0.8fr_1fr_0.8fr_1.1fr]">
                   <span>报价 ID</span>
+                  <span>询价人</span>
                   <span>目的地</span>
                   <span>来源地</span>
                   <span>区域</span>
@@ -976,11 +978,12 @@ function AdminHomePage({ navigate }: { navigate: (path: RoutePath) => void }) {
                 {quoteHistoryRows.slice(0, 10).map((audit) => (
                   <button
                     key={audit.id}
-                    className="admin-table-row grid-cols-[1.2fr_1.1fr_1fr_0.8fr_1fr_0.8fr_1.1fr]"
+                    className="admin-table-row grid-cols-[1.2fr_1fr_1.1fr_1fr_0.8fr_1fr_0.8fr_1.1fr]"
                     type="button"
                     onClick={() => navigate("/audit")}
                   >
                     <span className="font-mono font-semibold text-teal-700">{audit.quote_id}</span>
+                    <span>{formatAuditRequester(audit)}</span>
                     <span>{[audit.city, audit.province].filter(Boolean).join(", ") || "未返回"}</span>
                     <span>{audit.origin || audit.postal_prefix || audit.postal_code || "-"}</span>
                     <span>{audit.zone === null ? "-" : `Zone ${audit.zone}`}</span>
@@ -1219,6 +1222,17 @@ function formatMoneyValue(value: string | number | null): string {
   }
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? `USD ${numberValue.toFixed(2)}` : String(value);
+}
+
+function formatAuditRequester(audit: QuoteAuditLog): string {
+  const name = audit.actor_name?.trim();
+  if (name) {
+    return name;
+  }
+  if (audit.actor_api_key_id !== null && audit.actor_api_key_id !== undefined) {
+    return "API Key";
+  }
+  return "未记录";
 }
 
 function formatDateTime(value: string): string {

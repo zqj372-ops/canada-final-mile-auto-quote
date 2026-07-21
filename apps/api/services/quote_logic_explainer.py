@@ -35,7 +35,7 @@ def build_zone_quote_logic(request_json: dict[str, Any], result_json: dict[str, 
 
     if manual_required:
         headline = "系统未放价，需人工确认后才能发客户。"
-        next_action = _manual_next_action(result_json)
+        next_action = _manual_next_action(request_json, result_json)
         steps = [
             f"货物数据：{cargo}，系统估算计费托数 {billing_pallets or '待确认'} 托。",
             f"地址线索：{result_json.get('postal_prefix') or '-'} / {result_json.get('city') or '-'} / {result_json.get('province') or '-'}。",
@@ -85,7 +85,7 @@ def build_zone_quote_logic(request_json: dict[str, Any], result_json: dict[str, 
     }
 
 
-def _manual_next_action(result_json: dict[str, Any]) -> str:
+def _manual_next_action(request_json: dict[str, Any], result_json: dict[str, Any]) -> str:
     origin = _text(result_json.get("origin"))
     zone = result_json.get("zone")
     billing_pallets = result_json.get("billing_pallets")
@@ -95,7 +95,11 @@ def _manual_next_action(result_json: dict[str, Any]) -> str:
     suggested_prefix = _text(match_trace.get("suggested_postal_prefix"))
     risk_tags = result_json.get("risk_tags") if isinstance(result_json.get("risk_tags"), list) else []
     if "zone_price_disabled" in risk_tags and origin and zone is not None:
-        return f"{origin_label(origin) or origin} Zone {zone} 已暂停自动报价；请确认最新行情后在价格配置中重新开启。"
+        destination = _destination_text(request_json, result_json)
+        return (
+            f"目的地 {destination} 已命中 {origin_label(origin) or origin} 始发仓 Zone {zone}，"
+            "但该分区已暂停自动报价；请确认最新行情后再放价或在价格配置中重新开启。"
+        )
     if "zone_rule_province_mismatch" in risk_tags:
         invalid_examples = match_trace.get("invalid_rule_examples")
         example = invalid_examples[0] if isinstance(invalid_examples, list) and invalid_examples else {}
@@ -131,6 +135,15 @@ def _route_text(origin: str | None, zone: object) -> str:
     origin_text = origin_label(origin) or origin or "待确认始发仓"
     zone_text = f"Zone {zone}" if zone is not None else "Zone 待确认"
     return f"{origin_text} / {zone_text}"
+
+
+def _destination_text(request_json: dict[str, Any], result_json: dict[str, Any]) -> str:
+    parts = [
+        result_json.get("city") or request_json.get("city"),
+        result_json.get("province") or request_json.get("province"),
+        result_json.get("postal_code") or request_json.get("postal_code"),
+    ]
+    return ", ".join(str(part) for part in parts if part) or "待确认目的地"
 
 
 def _money_text(value: object) -> str | None:

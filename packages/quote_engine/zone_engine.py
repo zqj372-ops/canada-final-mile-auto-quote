@@ -188,7 +188,13 @@ class ZoneQuoteEngine:
         if not self.pricing_config.zone_price_enabled_for(zone_decision.origin, zone_decision.zone):
             return self._manual(
                 request,
-                f"分区价格已关闭：{zone_decision.origin} Zone {zone_decision.zone}。",
+                build_zone_price_disabled_reason(
+                    city=city,
+                    province=province,
+                    postal_code=request.postal_code,
+                    origin=zone_decision.origin,
+                    zone=zone_decision.zone,
+                ),
                 [*zone_decision.risk_tags, *pallet_result.risk_tags, "zone_price_disabled"],
                 preferred_city=preferred_city,
                 postal_prefix=postal_prefix,
@@ -356,6 +362,21 @@ def build_zone_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult) ->
             "- 下单引用单号，未引用加收50人民币/票服务费",
         ]
     )
+
+
+def build_zone_price_disabled_reason(
+    *,
+    city: str | None,
+    province: str | None,
+    postal_code: str | None,
+    origin: str | None,
+    zone: int | None,
+) -> str:
+    destination_parts = [city, province, postal_code]
+    destination = ", ".join(str(part) for part in destination_parts if part) or "目的地待确认"
+    origin_text = origin_label(origin) or origin or "始发仓待确认"
+    zone_text = f"Zone {zone}" if zone is not None else "Zone 待确认"
+    return f"分区价格已关闭：目的地 {destination}；始发仓 {origin_text}；{zone_text}。"
 
 
 def _destination_line(request: ZoneQuoteRequest, result: ZoneQuoteResult) -> str:
