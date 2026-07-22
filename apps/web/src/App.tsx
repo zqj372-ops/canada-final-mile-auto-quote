@@ -11,6 +11,8 @@ import {
   type QuoteErrorSummary,
   type QuoteAuditLog,
 } from "./api/client";
+import AccountMenu from "./components/AccountMenu";
+import LogoutConfirmationDialog from "./components/LogoutConfirmationDialog";
 const AIQuotePage = lazy(() => import("./pages/AIQuotePage"));
 const AISettingsPage = lazy(() => import("./pages/AISettingsPage"));
 const EmailSettingsPage = lazy(() => import("./pages/EmailSettingsPage"));
@@ -344,6 +346,7 @@ function AdminShell({
   onNavigate: (path: RoutePath) => void;
 }) {
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const [isLogoutConfirmationOpen, setIsLogoutConfirmationOpen] = useState(false);
   useEffect(() => {
     setIsMobileNavOpen(false);
   }, [currentPath]);
@@ -465,13 +468,12 @@ function AdminShell({
             <span className="admin-role-chip">
               {roleLabel(actor.role)}
             </span>
-            <span className="admin-user-pill">
-              <span className="admin-avatar admin-avatar-small">{actor.name.slice(0, 1).toUpperCase()}</span>
-              {actor.name}
-            </span>
-            <button className="admin-icon-button" type="button" onClick={onLogout} aria-label="退出登录">
-              <AdminIcon name="shield" />
-            </button>
+            <AccountMenu
+              actor={actor}
+              roleLabel={roleLabel(actor.role)}
+              variant="admin"
+              onRequestLogout={() => setIsLogoutConfirmationOpen(true)}
+            />
           </div>
         </header>
 
@@ -479,6 +481,14 @@ function AdminShell({
           {children}
         </main>
       </div>
+      <LogoutConfirmationDialog
+        isOpen={isLogoutConfirmationOpen}
+        onCancel={() => setIsLogoutConfirmationOpen(false)}
+        onConfirm={() => {
+          setIsLogoutConfirmationOpen(false);
+          onLogout();
+        }}
+      />
     </div>
   );
 }

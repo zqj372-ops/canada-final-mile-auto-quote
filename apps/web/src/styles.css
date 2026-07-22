@@ -3714,6 +3714,218 @@ body {
   display: none;
 }
 
+/* Account actions stay out of the high-frequency header controls. */
+.account-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.account-menu-trigger {
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.account-menu-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.2);
+}
+
+.sales-account-menu-trigger {
+  gap: 0.45rem;
+}
+
+.sales-account-menu-trigger:hover,
+.sales-account-menu-trigger[aria-expanded="true"] {
+  border-color: #5eead4;
+  background: #f0fdfa;
+  color: #0f766e;
+}
+
+.admin-account-menu-trigger {
+  max-width: 13rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 0.5rem;
+}
+
+.admin-account-menu-trigger:hover,
+.admin-account-menu-trigger[aria-expanded="true"] {
+  background: #f0fdfa;
+  color: #0f766e;
+}
+
+.account-menu-chevron {
+  width: 0.9rem;
+  height: 0.9rem;
+  flex: 0 0 auto;
+  color: #64748b;
+  transition: transform 150ms ease;
+}
+
+.account-menu-trigger[aria-expanded="true"] .account-menu-chevron {
+  transform: rotate(180deg);
+}
+
+.account-menu-popover {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  z-index: 80;
+  width: min(17rem, calc(100vw - 1.5rem));
+  border: 1px solid #dbe3ed;
+  border-radius: 0.625rem;
+  background: #ffffff;
+  padding: 0.5rem;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.16);
+}
+
+.account-menu-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.4rem 0.45rem 0.65rem;
+}
+
+.account-menu-summary-avatar {
+  display: inline-flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #0f766e;
+  color: #ffffff;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.account-menu-summary p {
+  color: #0f172a;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.account-menu-summary span:last-child {
+  display: block;
+  margin-top: 0.15rem;
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.account-menu-divider {
+  height: 1px;
+  margin: 0 0.2rem 0.5rem;
+  background: #e2e8f0;
+}
+
+.account-menu-logout {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 0.55rem;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.account-menu-logout svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+}
+
+.logout-confirmation-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.56);
+  backdrop-filter: blur(4px);
+}
+
+.logout-confirmation-dialog {
+  width: min(100%, 29rem);
+  border: 1px solid #fecdd3;
+  border-radius: 0.875rem;
+  background: #ffffff;
+  padding: clamp(1.15rem, 3vw, 1.5rem);
+  box-shadow: 0 26px 70px rgba(15, 23, 42, 0.32);
+}
+
+.logout-confirmation-icon {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border-radius: 999px;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.logout-confirmation-icon svg {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+.logout-confirmation-eyebrow {
+  margin-top: 1rem;
+  color: #be123c;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.logout-confirmation-dialog h2 {
+  margin-top: 0.35rem;
+  color: #0f172a;
+  font-size: 1.3rem;
+  font-weight: 900;
+}
+
+.logout-confirmation-dialog > p:last-of-type {
+  margin-top: 0.65rem;
+  color: #475569;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.logout-confirmation-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+}
+
+@media (max-width: 639px) {
+  .account-menu-popover {
+    width: min(17rem, calc(100vw - 1.5rem));
+  }
+
+  .logout-confirmation-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .logout-confirmation-dialog {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 1rem 1rem 0 0;
+    padding: 1.25rem 1rem calc(1.25rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .account-menu-trigger,
+  .account-menu-chevron {
+    transition: none;
+  }
+}
+
 @media (min-width: 1024px) {
   .quote-settings-page .key-value-editor-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));

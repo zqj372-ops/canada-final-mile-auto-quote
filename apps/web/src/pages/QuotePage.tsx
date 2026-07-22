@@ -22,6 +22,8 @@ import {
 } from "../api/client";
 import AiQuoteInputPanel from "../components/AiQuoteInputPanel";
 import AddressMapPreview from "../components/AddressMapPreview";
+import AccountMenu from "../components/AccountMenu";
+import LogoutConfirmationDialog from "../components/LogoutConfirmationDialog";
 import ParsedAddressCard from "../components/ParsedAddressCard";
 import ParsedCargoTable from "../components/ParsedCargoTable";
 import QuoteCopyButton from "../components/QuoteCopyButton";
@@ -80,6 +82,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   const [recordFilter, setRecordFilter] = useState<SalesQuoteRecordFilter>("all");
   const [recordQuery, setRecordQuery] = useState("");
   const [selectedRecordId, setSelectedRecordId] = useState<number | null>(null);
+  const [isLogoutConfirmationOpen, setIsLogoutConfirmationOpen] = useState(false);
 
   useEffect(() => {
     void restoreSession();
@@ -140,6 +143,15 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     setAiResult(null);
     setStatus("idle");
     setIsResultModalOpen(false);
+  }
+
+  function requestLogout() {
+    setIsLogoutConfirmationOpen(true);
+  }
+
+  function confirmLogout() {
+    setIsLogoutConfirmationOpen(false);
+    logout();
   }
 
   async function loadConfig() {
@@ -374,10 +386,15 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
             <button className="btn-primary" type="button" onClick={() => void loadConfig()}>
               重新加载配置
             </button>
-            <button className="btn-secondary" type="button" onClick={logout}>
+            <button className="btn-danger" type="button" onClick={requestLogout}>
               退出登录
             </button>
           </div>
+          <LogoutConfirmationDialog
+            isOpen={isLogoutConfirmationOpen}
+            onCancel={() => setIsLogoutConfirmationOpen(false)}
+            onConfirm={confirmLogout}
+          />
         </section>
       </div>
     );
@@ -426,16 +443,12 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
                 placeholder="搜索 quote_id、地址、原始询价..."
               />
             </label>
-            <span className="sales-user-chip" title={currentActor.name}>
-              <span className="sales-avatar sales-avatar-small">
-                {currentActor.name.slice(0, 1).toUpperCase()}
-              </span>
-              <span className="hidden sm:block">{currentActor.name}</span>
-              <span className="hidden xl:block">{roleLabel(currentActor.role)}</span>
-            </span>
-            <button className="btn-secondary min-h-10 px-3 py-1" type="button" onClick={logout}>
-              退出登录
-            </button>
+            <AccountMenu
+              actor={currentActor}
+              roleLabel={roleLabel(currentActor.role)}
+              variant="sales"
+              onRequestLogout={requestLogout}
+            />
           </div>
         </header>
 
@@ -613,6 +626,11 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
         searchContext={aiResult?.search_context ?? null}
         onClose={() => setIsResultModalOpen(false)}
         onExport={exportQuote}
+      />
+      <LogoutConfirmationDialog
+        isOpen={isLogoutConfirmationOpen}
+        onCancel={() => setIsLogoutConfirmationOpen(false)}
+        onConfirm={confirmLogout}
       />
     </div>
   );
