@@ -52,8 +52,15 @@ class OpenAICompatibleClient:
             "model": self.config.model_name,
             "messages": [message.model_dump() for message in messages],
             "temperature": self.config.temperature,
-            "max_tokens": self.config.max_tokens,
         }
+        if self.config.provider == "minimax":
+            # MiniMax reasoning models expose the final answer separately when
+            # reasoning_split is enabled. Keeping <think> content out of
+            # message.content makes downstream JSON contracts deterministic.
+            payload["max_completion_tokens"] = self.config.max_tokens
+            payload["reasoning_split"] = True
+        else:
+            payload["max_tokens"] = self.config.max_tokens
         headers = {
             "Authorization": f"Bearer {self.config.api_key}",
             "Content-Type": "application/json",

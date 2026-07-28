@@ -43,18 +43,8 @@ def apply_llm_auxiliary_advice_if_available(
     *,
     pricing_config: ZonePricingConfig,
 ) -> ZoneQuoteResult:
-    if not result.manual_review_required or result.billing_pallets is None:
-        return result
-    if "city_zone_prefix_family_low_support" in result.risk_tags:
-        return result
-
-    try:
-        service = LLMAuxiliaryAdviceService(db, pricing_config=pricing_config)
-        return service.correct(request, result)
-    except Exception:
-        logger.exception("LLM 辅助建议 correction failed.", extra={"quote_id": result.quote_id})
-        db.rollback()
-        return result
+    """Compatibility entry point; Hermes/LLM output is advisory-only."""
+    return result
 
 
 class LLMAuxiliaryAdviceService:
@@ -64,17 +54,7 @@ class LLMAuxiliaryAdviceService:
         self.zone_repository = ZoneRepository(db)
 
     def correct(self, request: ZoneQuoteRequest, result: ZoneQuoteResult) -> ZoneQuoteResult:
-        evidence = self._build_evidence(request, result)
-        if not evidence["curated_safe_options"] and not evidence["resolved_manual_tasks"]:
-            return result
-
-        decision = self._ask_agent(request, result, evidence)
-        if decision is None or decision.action == "no_action":
-            return result
-        if decision.action == "use_zone_matrix":
-            return self._apply_zone_matrix_decision(request, result, decision, evidence)
-        if decision.action == "use_resolved_manual_quote":
-            return self._apply_manual_task_decision(request, result, decision, evidence)
+        """Never apply model output to a quote; retained for import compatibility."""
         return result
 
     def _ask_agent(
