@@ -10,6 +10,8 @@ from apps.api.db.models import Base, CityAlias, PostalCodeCityLookup, ZoneLookup
 from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
 from apps.api.db.session import get_db
 from apps.api.main import app
+from apps.api.routes.imports import _upsert_rows
+from packages.data_importer.zone_loader import build_zone_indexes
 
 
 def build_client() -> tuple[TestClient, sessionmaker[Session]]:
@@ -78,22 +80,24 @@ def test_import_zone_price_matrix_upserts_rows() -> None:
 
 def test_import_zone_rules_upserts_rows() -> None:
     client, SessionLocal = build_client()
+    record = {
+        "postal_prefix": "L4K",
+        "city": "CONCORD",
+        "province": "ON",
+        "origin": "Toronto",
+        "zone": 2,
+        "match_level": "demo",
+        "note": "first",
+    }
     payload = {
-        "records": [
-            {
-                "postal_prefix": "L4K",
-                "city": "Concord",
-                "province": "ON",
-                "origin": "Toronto",
-                "zone": 2,
-                "match_level": "demo",
-                "note": "first",
-            }
-        ]
+        "total_records": 1,
+        "records": [record],
+        "data": build_zone_indexes([record]),
     }
 
     first = upload(client, "/imports/zone-rules", payload)
     payload["records"][0]["note"] = "updated"
+    payload["data"] = build_zone_indexes(payload["records"])
     second = upload(client, "/imports/zone-rules", payload)
 
     assert first["inserted_count"] == 1
@@ -104,6 +108,42 @@ def test_import_zone_rules_upserts_rows() -> None:
         assert records[0].canonical_city == "CONCORD"
         assert records[0].active is True
         assert records[0].note == "updated"
+
+
+def test_zone_rule_upsert_prefers_active_duplicate() -> None:
+    _, SessionLocal = build_client()
+    key = {
+        "postal_prefix": "H8R",
+        "city": "LACHINE",
+        "province": "QC",
+        "origin": "toronto",
+        "zone": 7,
+    }
+    with SessionLocal() as session:
+        session.add_all(
+            [
+                ZoneLookupRule(**key, active=False, note="quarantined duplicate"),
+                ZoneLookupRule(**key, active=True, note="active winner"),
+            ]
+        )
+        session.commit()
+
+        result = _upsert_rows(
+            session,
+            ZoneLookupRule,
+            [{**key, "active": True, "note": "updated winner"}],
+            key_fields=("postal_prefix", "city", "province", "origin", "zone"),
+            update_fields=("active", "note"),
+        )
+
+        records = list(
+            session.scalars(select(ZoneLookupRule).order_by(ZoneLookupRule.id.asc()))
+        )
+        assert result["updated_count"] == 1
+        assert records[0].active is False
+        assert records[0].note == "quarantined duplicate"
+        assert records[1].active is True
+        assert records[1].note == "updated winner"
 
 
 def test_import_postal_code_lookup_upserts_rows() -> None:

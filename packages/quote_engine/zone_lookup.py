@@ -1,5 +1,6 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+import re
 from typing import Any
 
 from packages.address_normalizer import extract_fsa, normalize_city, normalize_postal_code, normalize_province
@@ -61,6 +62,8 @@ ORIGIN_BY_PROVINCE = {
     "NL": "toronto",
 }
 
+STRICT_FSA_RE = re.compile(r"^[ABCEGHJKLMNPRSTVXY]\d[ABCEGHJKLMNPRSTVWXYZ]$")
+
 
 def normalize_origin(value: str | None) -> str | None:
     if not value:
@@ -87,7 +90,26 @@ def get_province_from_postal_prefix(postal_prefix: str | None) -> str | None:
     prefix = extract_fsa(postal_prefix)
     if not prefix:
         return None
+    if prefix[0] == "X":
+        if prefix in {"X0A", "X0B", "X0C"}:
+            return "NU"
+        if prefix in {"X0E", "X0G", "X1A"}:
+            return "NT"
+        return None
     return PROVINCE_BY_POSTAL_INITIAL.get(prefix[0])
+
+
+def get_province_from_strict_fsa(postal_prefix: str | None) -> str | None:
+    """Return an FSA province only when the value is a canonical three-character FSA."""
+
+    if not postal_prefix:
+        return None
+    prefix = postal_prefix.upper()
+    if postal_prefix != prefix:
+        return None
+    if not STRICT_FSA_RE.fullmatch(prefix):
+        return None
+    return get_province_from_postal_prefix(prefix)
 
 
 def postal_prefix_matches_province(postal_prefix: str | None, province: str | None) -> bool:
@@ -366,8 +388,9 @@ def lookup_zone_by_city_province(
             return ZoneLookupDecision(
                 manual_required=True,
                 matched_rule=(
-                    f"城市 {city} + {province} 的 Zone 锚点均为无效旧数据：{issue}。"
-                    f"已忽略该锚点，请补充 {prefix or '当前邮编前缀'} + {city} + {province} 的可信 Zone 规则。"
+                    f"邮编前缀 {prefix or '未知'} 未命中；城市索引中检测到无关的跨省脏记录："
+                    f"{issue}。已忽略该记录，请补充 "
+                    f"{prefix or '当前邮编前缀'} + {city} + {province} 的可信 Zone 规则。"
                 ),
                 risk_tags=("zone_not_found", "zone_rule_province_mismatch"),
                 matched_by="city_fallback_invalid_anchor",
@@ -691,6 +714,9 @@ def _single_group_decision(
             "matched_by": matched_by,
             "candidate_count": len(rules),
             "matched_rule_city": rule.canonical_city or rule.city,
+            "matched_rule_postal_prefix": _normalize_prefix(rule.postal_prefix),
+            "matched_rule_match_level": rule.match_level,
+            "matched_rule_note": rule.note,
         }
     )
     return ZoneLookupDecision(

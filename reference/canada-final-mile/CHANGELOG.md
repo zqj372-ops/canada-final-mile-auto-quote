@@ -2,6 +2,22 @@
 
 本文件只归档历史变化，不作为实时报价入口。实时报价入口是 `SOP_QUICK.md`。
 
+## 2026-07-28 - Zone 跨省污染清理与质量门禁
+
+- 从原始 Zone JSON 删除 162 条跨省错配、43 条省份—始发仓串表记录和 8 条重复业务键，并重建全部派生索引。
+- `by_city` 关联键统一为 `CITY|PROVINCE`；禁止仅按城市名称跨省关联。
+- Zone JSON 导入改为零容忍：非法 FSA、跨省、省份—始发仓错配、重复键和索引偏差均必须为 0，发现错误直接阻断导入，不再静默过滤。
+- 新增运行库约束和活动规则唯一索引：不合格规则不得以 `active=true` 写入；历史脏记录在迁移中停用并以 ID 级备份保留回滚依据。
+- 新增 `V4C + DELTA + BC -> Calgary Zone5` 人工确认规则；同时补入有生产成功报价审计支撑的精确 FSA 规则。
+- 人工任务改为确定性离线重算；只更新或作废旧任务，不写报价审计、不触发学习、不通知客户。
+
+## 2026-07-27 - White Rock V4B Zone 修正
+
+- 废弃 `B4P + WHITE ROCK + BC -> Toronto Zone12` 跨省旧锚点；`B4P` 属于 NS。
+- 新增 `V4B + WHITE ROCK + BC -> Calgary Zone5` 人工修正规则。
+- Zone5 依据同一现行矩阵中的 Lower Mainland 锚点组（Surrey、Langley、Abbotsford 等），不是按 FSA 字母或 Zone 数字线性外推。
+- 完整邮编 `V4B 2C5` 仍须先通过邮编城市库确认 White Rock, BC；Zone 只来自当前供应商分区规则。
+
 ## 2026-06-16 - v2.0 精简重构
 
 - 新增 `SOP_QUICK.md`：只保留报价必走流程和硬阻断。

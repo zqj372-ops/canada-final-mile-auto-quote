@@ -14,6 +14,15 @@ BC 全境按 Calgary 派送。若旧 Zone 表显示 Toronto，视为 stale origi
 | V5N | Vancouver | Zone10 Toronto | Zone5 Calgary |
 | V2S | Abbotsford | Zone12 Toronto | Zone5 Calgary |
 | V3B | Coquitlam | Zone12 Toronto | Zone5 Calgary |
+| V4B | White Rock | B4P/BC + Zone12 Toronto（跨省无效锚点） | Zone5 Calgary |
+| V4C | Delta | K0E/BC + Zone10 Toronto（无关跨省脏记录） | Zone5 Calgary |
+
+`B4P` 属于 Nova Scotia，不能作为 White Rock, BC 的城市回退锚点。White Rock
+必须使用 `V4B + WHITE ROCK + BC -> Calgary Zone5` 的人工修正规则。
+
+`K0E` 属于 Ontario，不是 “Delta, BC 的旧锚点”，而是一条与目的地无关的跨省脏记录。
+该记录必须在原始 JSON 质量门禁中报错，并在运行库中保持停用；Delta 使用
+`V4C + DELTA + BC -> Calgary Zone5` 精确规则。
 
 ## 2. FSA 缺失回退
 

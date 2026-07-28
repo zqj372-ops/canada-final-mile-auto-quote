@@ -282,6 +282,8 @@ def _upsert_rows(
             query = select(model)
             for field in key_fields:
                 query = query.where(getattr(model, field) == row[field])
+            if hasattr(model, "active"):
+                query = query.order_by(getattr(model, "active").desc(), getattr(model, "id").asc())
             record = db.scalars(query).first()
             if record is None:
                 db.add(model(**row))

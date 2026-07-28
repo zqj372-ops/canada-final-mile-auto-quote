@@ -105,7 +105,7 @@ def _manual_next_action(request_json: dict[str, Any], result_json: dict[str, Any
         example = invalid_examples[0] if isinstance(invalid_examples, list) and invalid_examples else {}
         invalid_prefix = _text(example.get("postal_prefix")) if isinstance(example, dict) else ""
         return (
-            f"已忽略邮编前缀 {invalid_prefix or suggested_prefix or '-'} 的跨省旧 Zone 锚点；"
+            f"检测到无关的跨省脏记录：邮编前缀 {invalid_prefix or suggested_prefix or '-'}；已忽略该记录。"
             "请补充当前邮编前缀 + 城市 + 省份对应的正式 Zone 规则，确认后再放价。"
         )
     if "city_zone_prefix_family_low_support" in risk_tags and suggested_origin and suggested_zone is not None:

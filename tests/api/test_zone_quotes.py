@@ -710,6 +710,75 @@ def test_city_fallback_ignores_cross_province_legacy_anchor() -> None:
     assert "zone_rule_province_mismatch" in body["risk_tags"]
     assert "K0E" in body["matched_rule"]
     assert "V4G" in body["matched_rule"]
+    assert "检测到无关的跨省脏记录" in body["matched_rule"]
+    assert "Delta + BC 的 Zone 锚点" not in body["matched_rule"]
+    assert "检测到无关的跨省脏记录" in body["match_trace"]["quote_logic"]["next_action"]
+
+
+def test_white_rock_v4b_uses_corrected_calgary_zone_5() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "V4B 2C5", "preferred_city": "White Rock", "province": "BC"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": "V4B",
+                "city": "WHITE ROCK",
+                "canonical_city": "WHITE ROCK",
+                "province": "BC",
+                "origin": "calgary",
+                "zone": 5,
+                "priority": 10,
+                "match_level": "manual_correction",
+                "note": "White Rock V4B correction",
+            },
+            {
+                "postal_prefix": "B4P",
+                "city": "WHITE ROCK",
+                "canonical_city": "WHITE ROCK",
+                "province": "BC",
+                "origin": "toronto",
+                "zone": 12,
+                "match_level": "legacy_anchor",
+                "note": "B4P is an NS FSA and must be ignored for White Rock, BC",
+            },
+        ],
+        prices=[
+            {
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("180.00"),
+                "source": "test",
+                "last_updated": "2026-07-27",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="15930 Prospect Crescent",
+            postal_code="V4B 2C5",
+            city="White Rock",
+            province="BC",
+            address_type="residential",
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "zone_matrix"
+    assert body["matched_by"] == "fsa_single_zone"
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 5
+    assert body["base_price_usd"] == "180.00"
+    assert body["accessorials"]["residential_fee_usd"] == "50.00"
+    assert body["total_price_usd"] == "293.00"
+    assert body["manual_review_required"] is False
+    assert "residential" in body["risk_tags"]
+    assert "zone_rule_province_mismatch" not in body["risk_tags"]
 
 
 def test_postal_province_prevents_wrong_origin_from_parser_or_address_data() -> None:

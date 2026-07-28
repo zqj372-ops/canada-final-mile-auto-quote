@@ -1,13 +1,15 @@
 from argparse import ArgumentParser
+from collections import Counter
 from pathlib import Path
 import json
 from typing import Any
 
 from packages.address_normalizer import extract_fsa, normalize_city, normalize_postal_code, normalize_province
 from packages.quote_engine.zone_lookup import (
+    ORIGIN_BY_PROVINCE,
     get_province_from_postal_code,
+    get_province_from_strict_fsa,
     normalize_origin,
-    postal_prefix_matches_province,
 )
 
 
@@ -39,17 +41,21 @@ def load_zone_lookup_rules(path: Path) -> list[dict[str, object]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     records = payload.get("records")
     if records is None:
-        records = _flatten_prefix_index(payload.get("data", {}).get("by_postal_prefix", {}))
+        raise ValueError(
+            "Zone reference quality gate failed: official format requires records and all data indexes."
+        )
+    if not isinstance(records, list):
+        raise ValueError("Zone lookup records must be a JSON array.")
+
+    validate_zone_records(records)
+    validate_zone_reference_payload(payload)
 
     rows: list[dict[str, object]] = []
     for record in records:
         postal_prefix = str(record["postal_prefix"]).upper()
-        province = str(record["province"]).upper()
-        if not postal_prefix_matches_province(postal_prefix, province):
-            # A city can be shared by different provinces, but an FSA cannot.
-            # Do not import a cross-province row that could later be reused as
-            # a city-level Zone anchor.
-            continue
+        province = normalize_province(str(record["province"]))
+        if province is None:
+            raise ValueError(f"Unknown province in validated Zone row: {record['province']}")
         rows.append(
             {
                 "postal_prefix": postal_prefix,
@@ -67,6 +73,160 @@ def load_zone_lookup_rules(path: Path) -> list[dict[str, object]]:
             }
         )
     return rows
+
+
+def validate_zone_records(records: list[dict[str, Any]]) -> None:
+    """Reject malformed or cross-province Zone rows before any import occurs."""
+
+    malformed_rows: list[str] = []
+    cross_province_rows: list[str] = []
+    origin_matrix_rows: list[str] = []
+    business_keys: Counter[tuple[str, str, str, str, int]] = Counter()
+    required_fields = ("postal_prefix", "city", "province", "origin", "zone")
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            malformed_rows.append(f"records[{index}] is not an object")
+            continue
+        missing = [field for field in required_fields if record.get(field) in (None, "")]
+        if missing:
+            malformed_rows.append(f"records[{index}] missing {','.join(missing)}")
+            continue
+        raw_postal_prefix = str(record["postal_prefix"])
+        raw_city = str(record["city"])
+        raw_province = str(record["province"])
+        postal_prefix = raw_postal_prefix.upper()
+        province = normalize_province(str(record["province"]))
+        if (
+            raw_postal_prefix != postal_prefix
+            or raw_city != raw_city.strip().upper()
+            or province is None
+            or raw_province != province
+        ):
+            malformed_rows.append(
+                f"records[{index}] values must use canonical FSA/CITY/PROVINCE casing"
+            )
+            continue
+        inferred_province = get_province_from_strict_fsa(postal_prefix)
+        if inferred_province is None or province is None:
+            malformed_rows.append(
+                f"records[{index}] invalid FSA/province {postal_prefix} + {record['province']}"
+            )
+            continue
+        try:
+            zone = int(record["zone"])
+        except (TypeError, ValueError):
+            malformed_rows.append(f"records[{index}] invalid zone {record['zone']}")
+            continue
+        if zone <= 0:
+            malformed_rows.append(f"records[{index}] invalid zone {record['zone']}")
+            continue
+        if inferred_province != province:
+            cross_province_rows.append(
+                f"records[{index}] {postal_prefix} + {record['city']} + {province}"
+            )
+            continue
+        expected_origin = ORIGIN_BY_PROVINCE.get(province)
+        actual_origin = normalize_origin(str(record["origin"]))
+        if expected_origin and actual_origin != expected_origin:
+            origin_matrix_rows.append(
+                f"records[{index}] {postal_prefix} + {province} expects "
+                f"{expected_origin}, got {record['origin']}"
+            )
+            continue
+        city = (normalize_city(str(record["city"])) or str(record["city"])).upper()
+        business_keys[(postal_prefix, city, province, actual_origin or "", zone)] += 1
+
+    duplicate_keys = [key for key, count in business_keys.items() if count > 1]
+
+    if malformed_rows or cross_province_rows or origin_matrix_rows or duplicate_keys:
+        examples = "; ".join(
+            [
+                *malformed_rows[:3],
+                *cross_province_rows[:3],
+                *origin_matrix_rows[:3],
+                *(f"duplicate {key}" for key in duplicate_keys[:3]),
+            ]
+        )
+        raise ValueError(
+            "Zone reference quality gate failed: "
+            f"malformed_error_count={len(malformed_rows)}; "
+            f"cross_province_error_count={len(cross_province_rows)}; "
+            f"origin_matrix_error_count={len(origin_matrix_rows)}; "
+            f"duplicate_business_key_count={len(duplicate_keys)}; "
+            f"examples={examples}"
+        )
+
+
+def build_zone_indexes(records: list[dict[str, Any]]) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """Build all derived indexes from records, using CITY|PROVINCE city keys."""
+
+    indexes: dict[str, dict[str, list[dict[str, Any]]]] = {
+        "by_postal_prefix": {},
+        "by_city": {},
+        "by_zone": {},
+        "by_province": {},
+    }
+    for record in records:
+        normalized = dict(record)
+        postal_prefix = str(record["postal_prefix"]).strip().upper()
+        city = (normalize_city(str(record["city"])) or str(record["city"])).upper()
+        province = (normalize_province(str(record["province"])) or str(record["province"])).upper()
+        zone = str(int(record["zone"]))
+        keys = {
+            "by_postal_prefix": postal_prefix,
+            "by_city": f"{city}|{province}",
+            "by_zone": zone,
+            "by_province": province,
+        }
+        for index_name, key in keys.items():
+            indexes[index_name].setdefault(key, []).append(normalized)
+
+    for index in indexes.values():
+        for key, rows in index.items():
+            index[key] = sorted(rows, key=_zone_record_sort_key)
+    return {name: dict(sorted(index.items())) for name, index in indexes.items()}
+
+
+def validate_zone_reference_payload(payload: dict[str, Any]) -> None:
+    """Enforce a zero-error, internally consistent raw Zone JSON artifact."""
+
+    records = payload.get("records")
+    if not isinstance(records, list):
+        raise ValueError("Zone reference quality gate failed: records must be an array.")
+    validate_zone_records(records)
+
+    errors: list[str] = []
+    if payload.get("total_records") != len(records):
+        errors.append(
+            f"total_records={payload.get('total_records')} but records={len(records)}"
+        )
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        errors.append("data indexes are missing")
+    else:
+        expected = build_zone_indexes(records)
+        for index_name, expected_index in expected.items():
+            actual_index = data.get(index_name)
+            if not isinstance(actual_index, dict):
+                errors.append(f"{index_name} is missing")
+                continue
+            if index_name == "by_city":
+                plain_keys = [key for key in actual_index if "|" not in str(key)]
+                if plain_keys:
+                    errors.append(
+                        "by_city must use CITY|PROVINCE keys; "
+                        f"plain_key_count={len(plain_keys)} examples={plain_keys[:5]}"
+                    )
+            if set(actual_index) != set(expected_index):
+                errors.append(f"{index_name} key set does not match canonical records")
+            if _index_counter(actual_index) != _index_counter(expected_index):
+                errors.append(f"{index_name} does not match canonical records")
+
+    if errors:
+        raise ValueError(
+            "Zone reference quality gate failed: " + "; ".join(errors)
+        )
 
 
 def load_postal_code_city_lookup(path: Path) -> list[dict[str, object]]:
@@ -148,6 +308,28 @@ def _flatten_alias_mapping(payload: dict[str, Any]) -> list[dict[str, Any]]:
                     "alias_type": "mapping",
                 }
             )
+    return rows
+
+
+def _zone_record_sort_key(record: dict[str, Any]) -> tuple[str, str, str, str, int, str]:
+    return (
+        str(record.get("postal_prefix") or "").upper(),
+        str(record.get("city") or "").upper(),
+        str(record.get("province") or "").upper(),
+        str(record.get("origin") or ""),
+        int(record.get("zone") or 0),
+        json.dumps(record, ensure_ascii=False, sort_keys=True),
+    )
+
+
+def _index_counter(index: dict[str, list[dict[str, Any]]]) -> Counter[tuple[str, str]]:
+    rows: Counter[tuple[str, str]] = Counter()
+    for key, records in index.items():
+        if not isinstance(records, list):
+            rows[(str(key), "<not-a-list>")] += 1
+            continue
+        for record in records:
+            rows[(str(key), json.dumps(record, ensure_ascii=False, sort_keys=True))] += 1
     return rows
 
 
