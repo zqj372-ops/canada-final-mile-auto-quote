@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
@@ -8,10 +9,10 @@ import subprocess
 import sys
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -32,12 +33,17 @@ logger = logging.getLogger(__name__)
 
 
 class HermesDiagnosticSuggestionPayload(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="allow")
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    suggested_action: str = Field(default="no_action")
-    can_auto_correct: bool = False
+    suggested_action: Literal[
+        "no_action",
+        "manual_review",
+        "learning_candidate",
+        "suggest_zone_matrix",
+    ] = "no_action"
+    can_auto_correct: Literal[False] = False
     confidence: int = Field(default=0, ge=0, le=100)
-    reason_zh: str
+    reason_zh: str = Field(min_length=1, max_length=1000)
     suggested_origin: str | None = None
     suggested_zone: int | None = None
     missing_table: str | None = None
@@ -142,10 +148,16 @@ def build_quote_diagnostic_package(
             weight_kg=request.weight_kg,
         ),
         "agent_contract": {
-            "role": "Hermes Agent only diagnoses. It must not change quote_result or zone_price_matrix.",
+            "role": "Hermes Agent only diagnoses and suggests. It cannot execute a correction or change any price.",
+            "execution_mode": "advisory_only",
+            "can_change_quote": False,
+            "can_change_price": False,
+            "can_change_zone_matrix": False,
             "allowed_outputs": [
-                "can_auto_correct",
-                "why_this_zone",
+                "suggested_action",
+                "reason_zh",
+                "suggested_origin",
+                "suggested_zone",
                 "missing_table",
                 "recommend_manual_review",
                 "recommend_learning_candidate",
@@ -210,29 +222,47 @@ def run_hermes_diagnostic(
         )
     )
     response = client.complete(
-        [
-            AIMessage(role="system", content=_HERMES_DIAGNOSTIC_SYSTEM_PROMPT),
-            AIMessage(
-                role="user",
-                content=json.dumps(
-                    {
-                        "task": "diagnose_quote_without_changing_price",
-                        "diagnostic_package": diagnostic.diagnostic_package_json,
-                        "output_schema": HermesDiagnosticSuggestionPayload.model_json_schema(),
-                    },
-                    ensure_ascii=False,
-                ),
-            ),
-        ]
+        _build_hermes_messages(diagnostic.diagnostic_package_json)
     )
     if response.error:
         return fail_hermes_diagnostic(db, diagnostic_id, error=response.error)
 
-    data = _parse_json_object(response.content)
-    if data is None:
-        return fail_hermes_diagnostic(db, diagnostic_id, error="Hermes model returned invalid JSON.")
     try:
-        payload = HermesDiagnosticSuggestionPayload.model_validate(data)
+        payload = _validate_hermes_suggestion(response.content)
+    except (ValueError, ValidationError) as first_error:
+        repair = client.complete(
+            [
+                *_build_hermes_messages(diagnostic.diagnostic_package_json),
+                AIMessage(role="assistant", content=response.content[:6000]),
+                AIMessage(
+                    role="user",
+                    content=(
+                        "上次输出未通过 JSON/schema 校验："
+                        f"{_compact_validation_error(first_error)}。"
+                        "重新输出一个完整 JSON 对象；不要输出思考过程、Markdown 或任何额外文字。"
+                        "can_auto_correct 必须是 false，也不能包含任何价格修改字段。"
+                    ),
+                ),
+            ]
+        )
+        if repair.error:
+            return fail_hermes_diagnostic(db, diagnostic_id, error=repair.error)
+        try:
+            payload = _validate_hermes_suggestion(repair.content)
+        except (ValueError, ValidationError) as repair_error:
+            logger.warning(
+                "Hermes returned invalid structured suggestions twice.",
+                extra={
+                    "diagnostic_id": diagnostic_id,
+                    "first_error": _compact_validation_error(first_error),
+                    "repair_error": _compact_validation_error(repair_error),
+                },
+            )
+            return fail_hermes_diagnostic(
+                db,
+                diagnostic_id,
+                error="Hermes 模型连续两次未返回可验证的结构化建议；系统未采纳任何模型输出。",
+            )
     except Exception as exc:
         return fail_hermes_diagnostic(
             db,
@@ -259,29 +289,181 @@ def fail_hermes_diagnostic(
 
 
 _HERMES_DIAGNOSTIC_SYSTEM_PROMPT = """你是加拿大尾程报价系统内置的 Hermes 诊断 Agent。
-你只能解释给定的诊断包并提出建议，不能改价、编造价格、编造 Zone，也不能更新任何表。
+你的运行模式永远是 advisory_only：只能解释诊断包并提出建议，不能执行建议。
+你不能改价、建议新价格、编造价格、编造 Zone，也不能修改报价结果或更新任何表。
 价格和 Zone 必须来自 diagnostic_package 中已有的后端证据。证据不足时，必须建议人工复核。
-只返回符合 output_schema 的 JSON 对象，不要返回 Markdown。
+can_auto_correct 必须为 false。只返回符合 output_schema 的一个 JSON 对象，不要返回思考过程或 Markdown。
 """.strip()
 
 
-def _parse_json_object(content: str) -> dict[str, Any] | None:
-    text = content.strip()
+def _build_hermes_messages(diagnostic_package: dict[str, object]) -> list[AIMessage]:
+    return [
+        AIMessage(role="system", content=_HERMES_DIAGNOSTIC_SYSTEM_PROMPT),
+        AIMessage(
+            role="user",
+            content=json.dumps(
+                {
+                    "task": "diagnose_quote_and_return_advisory_suggestion_only",
+                    "diagnostic_package": diagnostic_package,
+                    "output_schema": HermesDiagnosticSuggestionPayload.model_json_schema(),
+                    "required_invariants": {
+                        "can_auto_correct": False,
+                        "must_not_change_quote": True,
+                        "must_not_change_price": True,
+                        "must_not_change_zone_matrix": True,
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        ),
+    ]
+
+
+def _validate_hermes_suggestion(content: str) -> HermesDiagnosticSuggestionPayload:
+    candidates = _parse_json_objects(content)
+    if not candidates:
+        raise ValueError("Hermes output did not contain a complete JSON object.")
+
+    last_error: ValidationError | None = None
+    for candidate in reversed(candidates):
+        try:
+            return HermesDiagnosticSuggestionPayload.model_validate(
+                _sanitize_model_suggestion(candidate)
+            )
+        except ValidationError as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise ValueError("Hermes output did not contain a valid suggestion.")
+
+
+def _sanitize_model_suggestion(data: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = set(HermesDiagnosticSuggestionPayload.model_fields)
+    sanitized = {key: value for key, value in data.items() if key in allowed_fields}
+
+    if "reason_zh" not in sanitized:
+        sanitized["reason_zh"] = data.get("reason") or data.get("explanation")
+    sanitized["can_auto_correct"] = False
+    sanitized["confidence"] = _bounded_int(sanitized.get("confidence"), default=0)
+
+    for field in ("recommend_manual_review", "recommend_learning_candidate"):
+        sanitized[field] = _coerce_bool(sanitized.get(field), default=field == "recommend_manual_review")
+
+    for field in ("evidence_ids", "notes"):
+        value = sanitized.get(field)
+        if value is None:
+            sanitized[field] = []
+        elif isinstance(value, str):
+            sanitized[field] = [value]
+        elif not isinstance(value, list):
+            sanitized[field] = []
+
+    action_aliases = {
+        "suggest_manual_review": "manual_review",
+        "recommend_manual_review": "manual_review",
+        "recommend_learning_candidate": "learning_candidate",
+        "suggest_learning_candidate": "learning_candidate",
+    }
+    action = str(sanitized.get("suggested_action") or "no_action").strip().lower()
+    sanitized["suggested_action"] = action_aliases.get(action, action)
+    return sanitized
+
+
+def _parse_json_objects(content: str) -> list[dict[str, Any]]:
+    text = content.lstrip("\ufeff").strip()
     if not text:
-        return None
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
-    if fenced:
-        text = fenced.group(1)
-    elif not text.startswith("{"):
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if not match:
-            return None
-        text = match.group(0)
+        return []
+
+    parsed: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in _balanced_object_candidates(text):
+        compact = candidate.strip()
+        if not compact or compact in seen:
+            continue
+        seen.add(compact)
+        value = _load_jsonish_object(compact)
+        if isinstance(value, dict):
+            parsed.append(value)
+    return parsed
+
+
+def _balanced_object_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    start: int | None = None
+    depth = 0
+    in_string = False
+    escaped = False
+
+    for index, char in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == "}" and depth:
+            depth -= 1
+            if depth == 0 and start is not None:
+                candidates.append(text[start : index + 1])
+                start = None
+    return candidates
+
+
+def _load_jsonish_object(candidate: str) -> dict[str, Any] | None:
+    attempts = [
+        candidate,
+        re.sub(r",\s*([}\]])", r"\1", candidate),
+    ]
+    for attempt in attempts:
+        try:
+            value = json.loads(attempt)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            return value
+
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+        value = ast.literal_eval(candidate)
+    except (SyntaxError, ValueError):
         return None
-    return data if isinstance(data, dict) else None
+    return value if isinstance(value, dict) else None
+
+
+def _compact_validation_error(error: Exception) -> str:
+    return " ".join(str(error).split())[:1000]
+
+
+def _bounded_int(value: object, *, default: int) -> int:
+    if isinstance(value, str):
+        match = re.search(r"-?\d+", value)
+        value = match.group(0) if match else None
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_bool(value: object, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes", "y", "是", "建议"}:
+            return True
+        if lowered in {"false", "0", "no", "n", "否", "不建议"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return default
 
 
 def _price_matrix_context(repository: ZoneRepository, result: ZoneQuoteResult) -> dict[str, object]:

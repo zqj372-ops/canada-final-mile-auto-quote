@@ -1,6 +1,15 @@
 from apps.api.services.llm_auxiliary_advice_service import (
+    LLMAuxiliaryAdviceService,
+    apply_llm_auxiliary_advice_if_available,
     _curated_safe_zone_options,
     _zone_option_supported,
+)
+from packages.quote_engine.zone_config import ZonePricingConfig
+from packages.quote_engine.zone_models import (
+    AddressType,
+    ZoneQuoteRequest,
+    ZoneQuoteResult,
+    ZoneQuoteSourceType,
 )
 
 
@@ -55,3 +64,35 @@ def test_same_city_expected_origin_option_remains_safe_evidence() -> None:
     assert curated[0]["zone"] == 5
     assert _zone_option_supported(evidence, "toronto", 5) is True
     assert _zone_option_supported(evidence, "toronto", 2) is False
+
+
+def test_llm_auxiliary_entry_points_never_change_a_quote() -> None:
+    request = ZoneQuoteRequest(
+        postal_code="L4K 2N2",
+        city="Concord",
+        province="ON",
+        cbm=1,
+        weight_kg=100,
+        piece_count=1,
+        packaging_type="carton",
+        address_type=AddressType.COMMERCIAL,
+    )
+    result = ZoneQuoteResult(
+        source_type=ZoneQuoteSourceType.MANUAL_REQUIRED,
+        confidence=0,
+        manual_review_required=True,
+        matched_rule="No verified zone.",
+    )
+
+    assert (
+        apply_llm_auxiliary_advice_if_available(
+            None,  # type: ignore[arg-type]
+            request,
+            result,
+            pricing_config=ZonePricingConfig(),
+        )
+        is result
+    )
+
+    service = object.__new__(LLMAuxiliaryAdviceService)
+    assert service.correct(request, result) is result

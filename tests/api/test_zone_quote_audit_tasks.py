@@ -371,11 +371,20 @@ def test_hermes_diagnostic_suggestion_is_stored_but_does_not_change_quote() -> N
     assert body["manual_review_required"] is True
 
     diagnostic = client.get(f"/quotes/hermes-diagnostics?quote_id={body['quote_id']}").json()[0]
+    rejected = client.post(
+        f"/quotes/hermes-diagnostics/{diagnostic['id']}/suggestion",
+        json={
+            "can_auto_correct": True,
+            "reason_zh": "尝试请求自动纠错。",
+        },
+    )
+    assert rejected.status_code == 422
+
     suggestion = client.post(
         f"/quotes/hermes-diagnostics/{diagnostic['id']}/suggestion",
         json={
             "suggested_action": "suggest_zone_matrix",
-            "can_auto_correct": True,
+            "can_auto_correct": False,
             "confidence": 72,
             "reason_zh": "相邻 R3A 为 Calgary Zone 5，但价格矩阵缺 1 托价格；需人工确认后才能学习。",
             "suggested_origin": "calgary",
@@ -392,7 +401,7 @@ def test_hermes_diagnostic_suggestion_is_stored_but_does_not_change_quote() -> N
     assert suggestion["confidence"] == 72
     assert suggestion["recommend_manual_review"] is True
     assert suggestion["recommend_learning_candidate"] is True
-    assert suggestion["agent_suggestion"]["can_auto_correct"] is True
+    assert suggestion["agent_suggestion"]["can_auto_correct"] is False
 
     audit = client.get(f"/quotes/audit/{body['quote_id']}").json()
     assert audit["source_type"] == "manual_required"
@@ -435,6 +444,54 @@ def test_bound_hermes_model_runs_diagnostic_without_changing_quote(monkeypatch) 
     assert body["status"] == "completed"
     assert body["confidence"] == 81
     assert body["agent_suggestion"]["reason_zh"] == "证据不足，需人工复核。"
+    assert audit["source_type"] == "manual_required"
+    assert audit["total_price_usd"] is None
+
+
+def test_bound_hermes_model_repairs_invalid_json_and_drops_unsafe_fields(monkeypatch) -> None:
+    client = build_client(include_zone_rule=False)
+    quote = client.post("/quotes/zone-calculate", json=payload()).json()
+    diagnostic = client.get(f"/quotes/hermes-diagnostics?quote_id={quote['quote_id']}").json()[0]
+    config = client.post(
+        "/ai-configs",
+        json={
+            "name": "Hermes repair model",
+            "provider": "minimax",
+            "base_url": "https://example.invalid/v1",
+            "api_key": "sk-hermes-repair-0001",
+            "model_name": "MiniMax-M3",
+        },
+    ).json()
+    client.put("/ai-configs/agents/hermes", json={"config_id": config["id"]})
+
+    responses = iter(
+        [
+            AIResponse(content="<think>unfinished reasoning"),
+            AIResponse(
+                content=(
+                    "已修复：\n```json\n"
+                    '{"suggested_action":"manual_review","can_auto_correct":true,'
+                    '"confidence":"84%","reason_zh":"证据不足，需人工复核。",'
+                    '"recommend_manual_review":"是","recommend_learning_candidate":"否",'
+                    '"suggested_price_usd":"999.00",}\n```'
+                )
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "apps.api.services.hermes_diagnostic_service.OpenAICompatibleClient.complete",
+        lambda _client, _messages: next(responses),
+    )
+
+    response = client.post(f"/quotes/hermes-diagnostics/{diagnostic['id']}/run")
+    audit = client.get(f"/quotes/audit/{quote['quote_id']}").json()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["confidence"] == 84
+    assert body["agent_suggestion"]["can_auto_correct"] is False
+    assert "suggested_price_usd" not in body["agent_suggestion"]
     assert audit["source_type"] == "manual_required"
     assert audit["total_price_usd"] is None
 
