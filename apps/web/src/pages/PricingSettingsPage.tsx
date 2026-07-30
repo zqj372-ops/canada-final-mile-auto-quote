@@ -8,13 +8,20 @@ import {
   type ReactNode,
 } from "react";
 import {
+  createZoneCityRule,
+  deactivateZoneCityRule,
   getZonePricingConfig,
   importZonePriceMatrixSpreadsheet,
+  listZoneCityRules,
   listZonePriceMatrix,
   previewZonePriceMatrixImport,
+  updateZoneCityRule,
   updateZonePricingConfig,
   upsertZonePriceMatrix,
   type MoneyValue,
+  type ZoneCityRuleListResponse,
+  type ZoneCityRulePayload,
+  type ZoneCityRuleRecord,
   type ZonePriceMatrixListResponse,
   type ZonePriceMatrixPayload,
   type ZonePriceMatrixRecord,
@@ -38,6 +45,20 @@ type NewPriceDraft = {
 };
 
 type PricingSettingsSection = "fees" | "new-price" | "matrix";
+type ZoneCityEditorTarget = {
+  origin: string;
+  zone: number;
+};
+type ZoneCityRuleDraft = {
+  id: number | null;
+  postal_prefix: string;
+  city: string;
+  province: string;
+  canonical_city: string;
+  zone: string;
+  priority: string;
+  note: string;
+};
 type PricingFieldKey = Exclude<
   keyof ZonePricingConfig,
   "fuel_percent_by_zone" | "zone_price_enabled" | "max_auto_quote_zone" | "zone_price_enabled_by_zone"
@@ -81,6 +102,7 @@ export default function PricingSettingsPage() {
   const [activeSection, setActiveSection] = useState<PricingSettingsSection>("matrix");
   const [selectedZoneKey, setSelectedZoneKey] = useState("all");
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [cityEditorTarget, setCityEditorTarget] = useState<ZoneCityEditorTarget | null>(null);
 
   useEffect(() => {
     void loadAll();
@@ -443,7 +465,7 @@ export default function PricingSettingsPage() {
             <div className="pricing-command-copy">
               <span className="pricing-eyebrow">Zone 管理</span>
               <h2>价格矩阵与分区状态</h2>
-              <p>先选始发仓或 Zone，再维护分区开关与燃油附加；关闭的分区会转人工报价。</p>
+              <p>先选始发仓或 Zone，再维护分区开关、城市归属与燃油附加；关闭的分区会转人工报价。</p>
             </div>
             <div className="pricing-filter-row">
               <FilterSelect label="始发仓" value={filters.origin} options={matrix?.origins ?? []} onChange={(value) => setFilters((current) => ({ ...current, origin: value }))} />
@@ -564,6 +586,16 @@ export default function PricingSettingsPage() {
                                 <span>%</span>
                               </div>
                               <small>{zoneEnabled ? (fuelValue === undefined || fuelValue === null || fuelValue === "" ? `默认 ${formatInputValue(pricingConfig?.fuel_percent) || "0"}%` : "已覆盖") : "价格保留，不参与自动报价"}</small>
+                              <button
+                                className="pricing-city-config-button"
+                                type="button"
+                                onClick={() => setCityEditorTarget({ origin: row.origin, zone: row.zone })}
+                                aria-label={`配置 ${row.origin} Zone ${row.zone} 的城市`}
+                              >
+                                <PricingIcon name="city" />
+                                城市配置
+                                <PricingIcon name="chevron" />
+                              </button>
                             </div>
                           );
                         })}
@@ -659,6 +691,348 @@ export default function PricingSettingsPage() {
           );
         }}
       />
+      <ZoneCityConfigDialog
+        target={cityEditorTarget}
+        onClose={() => setCityEditorTarget(null)}
+        onChanged={(message) => setNotice(message)}
+      />
+    </div>
+  );
+}
+
+function ZoneCityConfigDialog({
+  target,
+  onClose,
+  onChanged,
+}: {
+  target: ZoneCityEditorTarget | null;
+  onClose: () => void;
+  onChanged: (message: string) => void;
+}) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const [rules, setRules] = useState<ZoneCityRuleListResponse | null>(null);
+  const [search, setSearch] = useState("");
+  const [draft, setDraft] = useState<ZoneCityRuleDraft | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [deactivatingId, setDeactivatingId] = useState<number | null>(null);
+  const [confirmDeactivateId, setConfirmDeactivateId] = useState<number | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [localNotice, setLocalNotice] = useState<string | null>(null);
+
+  const visibleRules = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) {
+      return rules?.records ?? [];
+    }
+    return (rules?.records ?? []).filter((rule) =>
+      [rule.city, rule.canonical_city, rule.postal_prefix, rule.province, rule.note]
+        .some((value) => value?.toLowerCase().includes(query)),
+    );
+  }, [rules?.records, search]);
+
+  useEffect(() => {
+    if (!target) {
+      return;
+    }
+    setRules(null);
+    setSearch("");
+    setDraft(null);
+    setLocalError(null);
+    setLocalNotice(null);
+    setConfirmDeactivateId(null);
+    void loadRules(target);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [target?.origin, target?.zone]);
+
+  if (!target) {
+    return null;
+  }
+  const activeTarget = target;
+
+  async function loadRules(scope: ZoneCityEditorTarget = activeTarget) {
+    setIsLoading(true);
+    setLocalError(null);
+    try {
+      setRules(await listZoneCityRules({ origin: scope.origin, zone: scope.zone, limit: 1000 }));
+    } catch (caught) {
+      setLocalError(caught instanceof Error ? caught.message : "城市配置读取失败。");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  function startCreate() {
+    setDraft(emptyZoneCityRuleDraft(activeTarget));
+    setLocalError(null);
+    setLocalNotice(null);
+    setConfirmDeactivateId(null);
+  }
+
+  function startEdit(rule: ZoneCityRuleRecord) {
+    setDraft({
+      id: rule.id,
+      postal_prefix: rule.postal_prefix,
+      city: rule.city,
+      province: rule.province,
+      canonical_city: rule.canonical_city ?? rule.city,
+      zone: String(rule.zone),
+      priority: String(rule.priority),
+      note: rule.note ?? "",
+    });
+    setLocalError(null);
+    setLocalNotice(null);
+    setConfirmDeactivateId(null);
+  }
+
+  async function saveRule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!draft) {
+      return;
+    }
+    const payload = buildZoneCityRulePayload(draft, activeTarget.origin);
+    if (!payload) {
+      setLocalError("请填写有效的城市、省份、FSA 邮编前缀和 Zone。");
+      return;
+    }
+    setIsSaving(true);
+    setLocalError(null);
+    setLocalNotice(null);
+    try {
+      const saved = draft.id === null
+        ? await createZoneCityRule(payload)
+        : await updateZoneCityRule(draft.id, payload);
+      const moved = saved.zone !== activeTarget.zone || saved.origin !== activeTarget.origin;
+      await loadRules();
+      setDraft(null);
+      const message = moved
+        ? `${saved.city} · ${saved.postal_prefix} 已调整到 ${saved.origin} Zone ${saved.zone}。`
+        : `${saved.city} · ${saved.postal_prefix} 的城市分区配置已保存。`;
+      setLocalNotice(message);
+      onChanged(message);
+    } catch (caught) {
+      setLocalError(caught instanceof Error ? caught.message : "城市配置保存失败。");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function deactivateRule(rule: ZoneCityRuleRecord) {
+    setDeactivatingId(rule.id);
+    setLocalError(null);
+    setLocalNotice(null);
+    try {
+      await deactivateZoneCityRule(rule.id);
+      await loadRules();
+      setConfirmDeactivateId(null);
+      if (draft?.id === rule.id) {
+        setDraft(null);
+      }
+      const message = `${rule.city} · ${rule.postal_prefix} 已从当前分区停用。`;
+      setLocalNotice(message);
+      onChanged(message);
+    } catch (caught) {
+      setLocalError(caught instanceof Error ? caught.message : "城市配置停用失败。");
+    } finally {
+      setDeactivatingId(null);
+    }
+  }
+
+  return (
+    <div
+      className="pricing-city-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section
+        className="pricing-city-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pricing-city-dialog-title"
+      >
+        <header className="pricing-city-header">
+          <div>
+            <span className="pricing-eyebrow">城市归属配置</span>
+            <h2 id="pricing-city-dialog-title">
+              {target.origin} · Zone {target.zone}
+            </h2>
+            <p>维护城市与 FSA 邮编前缀的分区归属，保存后下一票报价立即使用。</p>
+          </div>
+          <button
+            ref={closeButtonRef}
+            className="pricing-import-close"
+            type="button"
+            onClick={onClose}
+            aria-label="关闭城市配置"
+          >
+            <PricingIcon name="close" />
+          </button>
+        </header>
+
+        <div className="pricing-city-toolbar">
+          <dl className="pricing-city-summary">
+            <div><dt>有效规则</dt><dd>{rules?.total ?? "—"}</dd></div>
+            <div><dt>城市</dt><dd>{rules?.city_count ?? "—"}</dd></div>
+            <div><dt>FSA 前缀</dt><dd>{rules?.postal_prefix_count ?? "—"}</dd></div>
+          </dl>
+          <div className="pricing-city-actions">
+            <label className="pricing-city-search">
+              <PricingIcon name="search" />
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="搜索城市或 FSA"
+                aria-label="搜索城市或 FSA"
+              />
+            </label>
+            <button className="btn-primary" type="button" onClick={startCreate} disabled={isSaving}>
+              <PricingIcon name="plus" />
+              新增城市规则
+            </button>
+          </div>
+        </div>
+
+        {(localError || localNotice) && (
+          <div className={`pricing-city-feedback ${localError ? "is-error" : "is-success"}`} role={localError ? "alert" : "status"}>
+            <PricingIcon name={localError ? "alert" : "check"} />
+            <span>{localError || localNotice}</span>
+          </div>
+        )}
+
+        {draft && (
+          <form className="pricing-city-editor" onSubmit={saveRule}>
+            <div className="pricing-city-editor-heading">
+              <div>
+                <strong>{draft.id === null ? "新增城市分区规则" : "编辑城市分区规则"}</strong>
+                <small>FSA 与省份必须一致；可以修改 Zone 将规则迁移到其他分区。</small>
+              </div>
+              <button type="button" className="pricing-quiet-button" onClick={() => setDraft(null)} disabled={isSaving}>
+                取消编辑
+              </button>
+            </div>
+            <div className="pricing-city-form-grid">
+              <TextInput label="城市" value={draft.city} onChange={(value) => setDraft((current) => current ? { ...current, city: value } : current)} />
+              <TextInput label="标准城市名" value={draft.canonical_city} onChange={(value) => setDraft((current) => current ? { ...current, canonical_city: value } : current)} />
+              <TextInput label="FSA 邮编前缀" value={draft.postal_prefix} onChange={(value) => setDraft((current) => current ? { ...current, postal_prefix: value.toUpperCase().slice(0, 3) } : current)} />
+              <ProvinceSelect value={draft.province} onChange={(value) => setDraft((current) => current ? { ...current, province: value } : current)} />
+              <TextInput label="目标 Zone" type="number" value={draft.zone} onChange={(value) => setDraft((current) => current ? { ...current, zone: value } : current)} />
+              <TextInput label="优先级" type="number" value={draft.priority} onChange={(value) => setDraft((current) => current ? { ...current, priority: value } : current)} />
+              <label className="pricing-city-note-field">
+                <span className="field-label">备注</span>
+                <input
+                  className="field-input"
+                  value={draft.note}
+                  onChange={(event) => setDraft((current) => current ? { ...current, note: event.target.value } : current)}
+                  placeholder="例如：运营后台调整"
+                />
+              </label>
+            </div>
+            <div className="pricing-city-editor-footer">
+              <span>始发仓：<strong>{target.origin}</strong></span>
+              <button className="btn-primary" type="submit" disabled={isSaving}>
+                <PricingIcon name="save" />
+                {isSaving ? "保存中…" : "保存城市配置"}
+              </button>
+            </div>
+          </form>
+        )}
+
+        <div className="pricing-city-list-wrap">
+          {isLoading && !rules ? (
+            <div className="pricing-city-empty">正在读取城市配置…</div>
+          ) : visibleRules.length ? (
+            <table className="pricing-city-table">
+              <thead>
+                <tr>
+                  <th>城市</th>
+                  <th>省份</th>
+                  <th>FSA 前缀</th>
+                  <th>Zone</th>
+                  <th>备注</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRules.map((rule) => (
+                  <tr key={rule.id}>
+                    <td>
+                      <strong>{rule.city}</strong>
+                      {rule.canonical_city && rule.canonical_city !== rule.city
+                        ? <small>标准名：{rule.canonical_city}</small>
+                        : null}
+                    </td>
+                    <td>{rule.province}</td>
+                    <td><span className="pricing-city-prefix">{rule.postal_prefix}</span></td>
+                    <td><span className="pricing-zone-badge">ZONE {rule.zone}</span></td>
+                    <td className="pricing-city-note">{rule.note || "—"}</td>
+                    <td>
+                      <div className="pricing-city-row-actions">
+                        <button type="button" onClick={() => startEdit(rule)} disabled={isSaving || deactivatingId !== null}>
+                          <PricingIcon name="edit" />
+                          编辑
+                        </button>
+                        {confirmDeactivateId === rule.id ? (
+                          <>
+                            <button
+                              className="is-danger"
+                              type="button"
+                              onClick={() => void deactivateRule(rule)}
+                              disabled={deactivatingId === rule.id}
+                            >
+                              {deactivatingId === rule.id ? "停用中…" : "确认停用"}
+                            </button>
+                            <button type="button" onClick={() => setConfirmDeactivateId(null)} disabled={deactivatingId === rule.id}>
+                              取消
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className="is-danger"
+                            type="button"
+                            onClick={() => setConfirmDeactivateId(rule.id)}
+                            disabled={isSaving || deactivatingId !== null}
+                          >
+                            <PricingIcon name="trash" />
+                            停用
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="pricing-city-empty">
+              <span><PricingIcon name="city" /></span>
+              <strong>{search.trim() ? "没有匹配的城市规则" : "当前分区还没有城市规则"}</strong>
+              <small>{search.trim() ? "换一个城市名或 FSA 前缀试试。" : "点击“新增城市规则”开始配置。"}</small>
+            </div>
+          )}
+        </div>
+
+        <footer className="pricing-city-footer">
+          <span><PricingIcon name="info" />停用仅让规则退出自动匹配，历史报价记录不会被删除。</span>
+          <button className="btn-secondary" type="button" onClick={onClose}>完成</button>
+        </footer>
+      </section>
     </div>
   );
 }
@@ -1047,6 +1421,25 @@ function FilterSelect({
   );
 }
 
+function ProvinceSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label>
+      <span className="field-label">省份</span>
+      <select className="field-input" value={value} onChange={(event) => onChange(event.target.value)}>
+        {["AB", "BC", "SK", "MB", "ON", "QC", "NB", "NS", "PE", "NL", "NT", "NU", "YT"].map((province) => (
+          <option key={province} value={province}>{province}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function Metric({ icon, label, value }: { icon: PricingIconName; label: string; value: string }) {
   return (
     <div className="pricing-summary-item">
@@ -1063,8 +1456,10 @@ type PricingIconName =
   | "alert"
   | "check"
   | "chevron"
+  | "city"
   | "close"
   | "download"
+  | "edit"
   | "file"
   | "filter"
   | "fuel"
@@ -1074,6 +1469,8 @@ type PricingIconName =
   | "refresh"
   | "rows"
   | "save"
+  | "search"
+  | "trash"
   | "upload"
   | "warehouse";
 
@@ -1082,8 +1479,10 @@ function PricingIcon({ name }: { name: PricingIconName }) {
     alert: <path d="M12 3 2.8 20h18.4L12 3Zm0 5.3v5.1m0 3.25h.01" />,
     check: <path d="m5 12 4.2 4L19 6.5" />,
     chevron: <path d="m9 6 6 6-6 6" />,
+    city: <><path d="M4 21V7l6-3v17M10 9l10-3v15M2 21h20" /><path d="M7 9h.01M7 13h.01M7 17h.01M14 10h.01M18 9h.01M14 14h.01M18 13h.01M14 18h.01M18 17h.01" /></>,
     close: <path d="m6 6 12 12M18 6 6 18" />,
     download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M5 19h14" /></>,
+    edit: <><path d="M4 20h4l11-11-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4" /></>,
     file: <><path d="M6 3h8l4 4v14H6z" /><path d="M14 3v5h5M9 13h6m-6 4h6" /></>,
     filter: <path d="M4 5h16M7 12h10m-6 7h2" />,
     fuel: <path d="M7 20V5.5A1.5 1.5 0 0 1 8.5 4h5A1.5 1.5 0 0 1 15 5.5V20M5 20h12M9 8h4m-4 3h4m6-3 1.5 1.5v5a1.5 1.5 0 0 1-3 0v-4" />,
@@ -1093,6 +1492,8 @@ function PricingIcon({ name }: { name: PricingIconName }) {
     refresh: <path d="M20 11a8 8 0 0 0-14.7-4L4 9m0 0V4m0 5h5M4 13a8 8 0 0 0 14.7 4L20 15m0 0v5m0-5h-5" />,
     rows: <path d="M5 6h14M5 12h14M5 18h14M2.5 6h.01M2.5 12h.01M2.5 18h.01" />,
     save: <><path d="M5 3h12l2 2v16H5z" /><path d="M8 3v6h8V3m-8 13h8" /></>,
+    search: <><circle cx="11" cy="11" r="7" /><path d="m16 16 4 4" /></>,
+    trash: <><path d="M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7" /><path d="M10 11v6m4-6v6" /></>,
     upload: <><path d="M12 16V4m0 0 4 4m-4-4-4 4" /><path d="M5 20h14" /></>,
     warehouse: <path d="M3 20V8l9-5 9 5v12M6 20v-7h12v7M9 16h6" />,
   };
@@ -1221,6 +1622,50 @@ function buildNewPricePayload(draft: NewPriceDraft): ZonePriceMatrixPayload | nu
     base_price_usd: draft.base_price_usd,
     source: draft.source.trim() || "admin-ui",
     last_updated: todayString(),
+  };
+}
+
+function emptyZoneCityRuleDraft(target: ZoneCityEditorTarget): ZoneCityRuleDraft {
+  return {
+    id: null,
+    postal_prefix: "",
+    city: "",
+    province: target.origin === "calgary" ? "AB" : "ON",
+    canonical_city: "",
+    zone: String(target.zone),
+    priority: "100",
+    note: "",
+  };
+}
+
+function buildZoneCityRulePayload(
+  draft: ZoneCityRuleDraft,
+  origin: string,
+): ZoneCityRulePayload | null {
+  const zone = Number(draft.zone);
+  const priority = Number(draft.priority || "100");
+  const postalPrefix = draft.postal_prefix.trim().toUpperCase();
+  if (
+    !draft.city.trim()
+    || !draft.province.trim()
+    || !/^[A-Z]\d[A-Z]$/.test(postalPrefix)
+    || !Number.isInteger(zone)
+    || zone < 1
+    || !Number.isInteger(priority)
+    || priority < 1
+    || priority > 1000
+  ) {
+    return null;
+  }
+  return {
+    postal_prefix: postalPrefix,
+    city: draft.city.trim(),
+    province: draft.province.trim().toUpperCase(),
+    origin,
+    zone,
+    canonical_city: draft.canonical_city.trim() || draft.city.trim(),
+    priority,
+    note: draft.note.trim() || null,
   };
 }
 

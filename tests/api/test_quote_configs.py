@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from apps.api.db.models import APIKey, Base
+from apps.api.db.models import APIKey, Base, ZoneLookupRule
 from apps.api.db.session import get_db
 from apps.api.main import app
 from apps.api.security.api_keys import hash_api_key
@@ -16,7 +16,7 @@ ADMIN_KEY = "caq_admin_config_test_key"
 SALES_KEY = "caq_sales_config_test_key"
 
 
-def build_client() -> TestClient:
+def build_client(zone_rules: list[dict[str, object]] | None = None) -> TestClient:
     engine = create_engine(
         "sqlite+pysqlite://",
         connect_args={"check_same_thread": False},
@@ -28,6 +28,8 @@ def build_client() -> TestClient:
     with TestingSessionLocal() as session:
         session.add(APIKey(name="Admin", key_hash=hash_api_key(ADMIN_KEY), role="admin", enabled=True))
         session.add(APIKey(name="Sales", key_hash=hash_api_key(SALES_KEY), role="sales", enabled=True))
+        for rule in zone_rules or []:
+            session.add(ZoneLookupRule(**rule))
         session.commit()
 
     def override_get_db() -> Generator[Session]:
@@ -209,5 +211,142 @@ def test_sales_cannot_manage_zone_price_matrix(monkeypatch: pytest.MonkeyPatch) 
     client = build_client()
 
     response = client.get("/quote-configs/zone-price-matrix", headers={"X-API-Key": SALES_KEY})
+
+    assert response.status_code == 403
+
+
+def test_admin_can_list_create_update_and_deactivate_zone_city_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client(
+        zone_rules=[
+            {
+                "postal_prefix": "L5T",
+                "city": "MISSISSAUGA",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 2,
+                "canonical_city": "MISSISSAUGA",
+                "priority": 100,
+                "active": True,
+                "match_level": "source",
+            },
+            {
+                "postal_prefix": "L6T",
+                "city": "BRAMPTON",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 2,
+                "canonical_city": "BRAMPTON",
+                "priority": 100,
+                "active": True,
+                "match_level": "source",
+            },
+        ]
+    )
+
+    listing = client.get(
+        "/quote-configs/zone-city-rules?origin=toronto&zone=2",
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    created = client.post(
+        "/quote-configs/zone-city-rules",
+        json={
+            "postal_prefix": "L4W",
+            "city": "Mississauga",
+            "province": "Ontario",
+            "origin": "Toronto",
+            "zone": 3,
+            "note": "后台调整",
+        },
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    updated = client.patch(
+        f"/quote-configs/zone-city-rules/{created.json()['id']}",
+        json={"zone": 4, "note": "迁移至 Zone 4"},
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    deactivated = client.delete(
+        f"/quote-configs/zone-city-rules/{created.json()['id']}",
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    active_listing = client.get(
+        "/quote-configs/zone-city-rules?origin=toronto&zone=4",
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 2
+    assert listing.json()["city_count"] == 2
+    assert listing.json()["postal_prefix_count"] == 2
+    assert created.status_code == 201
+    assert created.json()["postal_prefix"] == "L4W"
+    assert created.json()["city"] == "MISSISSAUGA"
+    assert created.json()["province"] == "ON"
+    assert updated.status_code == 200
+    assert updated.json()["zone"] == 4
+    assert updated.json()["note"] == "迁移至 Zone 4"
+    assert deactivated.status_code == 200
+    assert deactivated.json()["active"] is False
+    assert active_listing.json()["total"] == 0
+
+
+def test_zone_city_rule_rejects_geographic_mismatch_and_duplicates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client(
+        zone_rules=[
+            {
+                "postal_prefix": "L5T",
+                "city": "MISSISSAUGA",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 2,
+                "canonical_city": "MISSISSAUGA",
+                "priority": 100,
+                "active": True,
+            }
+        ]
+    )
+
+    mismatch = client.post(
+        "/quote-configs/zone-city-rules",
+        json={
+            "postal_prefix": "T2A",
+            "city": "Calgary",
+            "province": "ON",
+            "origin": "toronto",
+            "zone": 1,
+        },
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    duplicate = client.post(
+        "/quote-configs/zone-city-rules",
+        json={
+            "postal_prefix": "l5t",
+            "city": "mississauga",
+            "province": "ON",
+            "origin": "toronto",
+            "zone": 5,
+        },
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+
+    assert mismatch.status_code == 422
+    assert "属于 AB" in mismatch.json()["detail"]
+    assert duplicate.status_code == 422
+    assert "已有有效分区配置" in duplicate.json()["detail"]
+
+
+def test_sales_cannot_manage_zone_city_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client()
+
+    response = client.get(
+        "/quote-configs/zone-city-rules",
+        headers={"X-API-Key": SALES_KEY},
+    )
 
     assert response.status_code == 403

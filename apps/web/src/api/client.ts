@@ -788,6 +788,40 @@ export interface ZonePriceMatrixPayload {
   last_updated?: string | null;
 }
 
+export interface ZoneCityRuleRecord {
+  id: number;
+  postal_prefix: string;
+  city: string;
+  province: string;
+  origin: string;
+  zone: number;
+  canonical_city: string | null;
+  priority: number;
+  active: boolean;
+  match_level: string | null;
+  note: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface ZoneCityRuleListResponse {
+  records: ZoneCityRuleRecord[];
+  total: number;
+  city_count: number;
+  postal_prefix_count: number;
+}
+
+export interface ZoneCityRulePayload {
+  postal_prefix: string;
+  city: string;
+  province: string;
+  origin: string;
+  zone: number;
+  canonical_city?: string | null;
+  priority?: number;
+  note?: string | null;
+}
+
 export interface ZonePriceImportIssue {
   row: number | null;
   field: string | null;
@@ -1241,6 +1275,53 @@ export function updateZonePriceMatrix(
   return request<ZonePriceMatrixRecord>(`/quote-configs/zone-price-matrix/${recordId}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
+  });
+}
+
+export function listZoneCityRules(params: {
+  origin?: string;
+  zone?: number;
+  search?: string;
+  include_inactive?: boolean;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<ZoneCityRuleListResponse> {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      search.set(key, String(value));
+    }
+  });
+  const query = search.toString();
+  return request<ZoneCityRuleListResponse>(
+    `/quote-configs/zone-city-rules${query ? `?${query}` : ""}`,
+  );
+}
+
+export function createZoneCityRule(
+  payload: ZoneCityRulePayload,
+): Promise<ZoneCityRuleRecord> {
+  return request<ZoneCityRuleRecord>("/quote-configs/zone-city-rules", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateZoneCityRule(
+  recordId: number,
+  payload: Partial<ZoneCityRulePayload>,
+): Promise<ZoneCityRuleRecord> {
+  return request<ZoneCityRuleRecord>(`/quote-configs/zone-city-rules/${recordId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deactivateZoneCityRule(
+  recordId: number,
+): Promise<ZoneCityRuleRecord> {
+  return request<ZoneCityRuleRecord>(`/quote-configs/zone-city-rules/${recordId}`, {
+    method: "DELETE",
   });
 }
 
