@@ -15,6 +15,7 @@ import AccountMenu from "./components/AccountMenu";
 import LogoutConfirmationDialog from "./components/LogoutConfirmationDialog";
 const AIQuotePage = lazy(() => import("./pages/AIQuotePage"));
 const AISettingsPage = lazy(() => import("./pages/AISettingsPage"));
+const CitySettingsPage = lazy(() => import("./pages/CitySettingsPage"));
 const EmailSettingsPage = lazy(() => import("./pages/EmailSettingsPage"));
 const OperationsWorkbenchPage = lazy(() => import("./pages/OperationsWorkbenchPage"));
 const PricingSettingsPage = lazy(() => import("./pages/PricingSettingsPage"));
@@ -83,7 +84,7 @@ const adminRoutes: Array<{
   { path: "/ops", label: "处理工作台", description: "复核/诊断/学习", group: "manual", icon: "user" },
   { path: "/settings/quote", label: "报价规则", description: "前台", group: "pricing", icon: "file" },
   { path: "/settings/pricing", label: "价格矩阵", description: "Zone", group: "pricing", icon: "calculator" },
-  { path: "/settings/cities", label: "城市配置", description: "城市 / FSA", group: "pricing", icon: "map" },
+  { path: "/settings/cities", label: "城市配置", description: "城市 / FSA", group: "pricing", icon: "map", adminOnly: true },
   { path: "/settings/ai", label: "AI 模型配置", description: "模型", group: "system", icon: "settings" },
   { path: "/settings/search", label: "搜索 API 配置", description: "地址", group: "system", icon: "link" },
   { path: "/settings/email", label: "邮件通知配置", description: "通知", group: "system", icon: "mail" },
@@ -190,7 +191,7 @@ export default function App() {
       return <PricingSettingsPage />;
     }
     if (path === "/settings/cities") {
-      return <PricingSettingsPage cityOnly />;
+      return <CitySettingsPage />;
     }
     if (path === "/settings/search") {
       return <SearchSettingsPage />;

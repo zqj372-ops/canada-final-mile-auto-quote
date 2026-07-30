@@ -596,16 +596,15 @@ export default function PricingSettingsPage({ cityOnly = false }: { cityOnly?: b
                                 <span>%</span>
                               </div>
                               <small>{zoneEnabled ? (fuelValue === undefined || fuelValue === null || fuelValue === "" ? `默认 ${formatInputValue(pricingConfig?.fuel_percent) || "0"}%` : "已覆盖") : "价格保留，不参与自动报价"}</small>
-                              <button
+                              <a
                                 className="pricing-city-config-button"
-                                type="button"
-                                onClick={() => setCityEditorTarget({ origin: row.origin, zone: row.zone })}
+                                href={citySettingsHref(row.origin, row.zone)}
                                 aria-label={`配置 ${row.origin} Zone ${row.zone} 的城市`}
                               >
                                 <PricingIcon name="city" />
                                 城市配置
                                 <PricingIcon name="chevron" />
-                              </button>
+                              </a>
                             </div>
                           );
                         })}
@@ -727,16 +726,15 @@ export default function PricingSettingsPage({ cityOnly = false }: { cityOnly?: b
                           <strong>{row.records.size} 个托数价格</strong>
                         </div>
                         <small>维护该分区用于自动匹配的城市、FSA 和标准城市名。</small>
-                        <button
+                        <a
                           className="pricing-city-config-button"
-                          type="button"
-                          onClick={() => setCityEditorTarget({ origin: row.origin, zone: row.zone })}
+                          href={citySettingsHref(row.origin, row.zone)}
                           aria-label={`打开 ${row.origin} Zone ${row.zone} 的城市配置`}
                         >
                           <PricingIcon name="city" />
                           打开城市配置
                           <PricingIcon name="chevron" />
-                        </button>
+                        </a>
                       </div>
                     ))}
                   </div>
@@ -1801,6 +1799,16 @@ function formatFileSize(bytes: number): string {
     return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
   }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function citySettingsHref(origin: string, zone: number): string {
+  const configuredBase = (import.meta.env.VITE_APP_BASE_PATH || "/").trim();
+  const normalizedBase =
+    configuredBase === "/"
+      ? ""
+      : `/${configuredBase.replace(/^\/+|\/+$/g, "")}`;
+  const search = new URLSearchParams({ origin, zone: String(zone) });
+  return `${normalizedBase}/settings/cities?${search.toString()}`;
 }
 
 function todayString(): string {

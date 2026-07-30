@@ -340,6 +340,242 @@ def test_zone_city_rule_rejects_geographic_mismatch_and_duplicates(
     assert "已有有效分区配置" in duplicate.json()["detail"]
 
 
+def test_admin_can_atomically_save_a_city_with_multiple_postal_prefixes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client(
+        zone_rules=[
+            {
+                "postal_prefix": "L6P",
+                "city": "BRAMPTON",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 1,
+                "canonical_city": "BRAMPTON",
+                "priority": 100,
+                "active": True,
+            },
+            {
+                "postal_prefix": "L6T",
+                "city": "BRAMPTON",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 1,
+                "canonical_city": "BRAMPTON",
+                "priority": 100,
+                "active": True,
+            },
+            {
+                "postal_prefix": "L6W",
+                "city": "BRAMPTON",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 1,
+                "canonical_city": "BRAMPTON",
+                "priority": 100,
+                "active": True,
+            },
+        ]
+    )
+    existing = client.get(
+        "/quote-configs/zone-city-rules?search=BRAMPTON",
+        headers={"X-API-Key": ADMIN_KEY},
+    ).json()["records"]
+    ids_by_prefix = {record["postal_prefix"]: record["id"] for record in existing}
+
+    saved = client.put(
+        "/quote-configs/zone-city-rule-groups",
+        json={
+            "city": "Brampton",
+            "province": "ON",
+            "canonical_city": "Brampton",
+            "rules": [
+                {
+                    "id": ids_by_prefix["L6T"],
+                    "postal_prefix": "L6T",
+                    "origin": "toronto",
+                    "zone": 2,
+                    "priority": 90,
+                    "note": "批量迁移",
+                },
+                {
+                    "id": ids_by_prefix["L6W"],
+                    "postal_prefix": "L6W",
+                    "origin": "toronto",
+                    "zone": 2,
+                    "priority": 90,
+                    "note": "批量迁移",
+                },
+                {
+                    "postal_prefix": "L7A",
+                    "origin": "toronto",
+                    "zone": 2,
+                    "priority": 90,
+                    "note": "批量新增",
+                },
+            ],
+            "deactivate_ids": [ids_by_prefix["L6P"]],
+        },
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    active = client.get(
+        "/quote-configs/zone-city-rules?search=BRAMPTON",
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    all_rules = client.get(
+        "/quote-configs/zone-city-rules?search=BRAMPTON&include_inactive=true",
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["created_count"] == 1
+    assert saved.json()["updated_count"] == 2
+    assert saved.json()["deactivated_count"] == 1
+    assert {record["postal_prefix"] for record in saved.json()["records"]} == {
+        "L6T",
+        "L6W",
+        "L7A",
+    }
+    assert {record["zone"] for record in saved.json()["records"]} == {2}
+    assert active.json()["total"] == 3
+    assert all_rules.json()["total"] == 4
+    assert next(
+        record for record in all_rules.json()["records"] if record["postal_prefix"] == "L6P"
+    )["active"] is False
+
+
+def test_city_group_batch_rolls_back_when_one_postal_prefix_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client(
+        zone_rules=[
+            {
+                "postal_prefix": "L6T",
+                "city": "BRAMPTON",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 1,
+                "canonical_city": "BRAMPTON",
+                "priority": 100,
+                "active": True,
+            },
+            {
+                "postal_prefix": "L6W",
+                "city": "BRAMPTON",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 1,
+                "canonical_city": "BRAMPTON",
+                "priority": 100,
+                "active": True,
+            },
+        ]
+    )
+    existing = client.get(
+        "/quote-configs/zone-city-rules?search=BRAMPTON",
+        headers={"X-API-Key": ADMIN_KEY},
+    ).json()["records"]
+    ids_by_prefix = {record["postal_prefix"]: record["id"] for record in existing}
+
+    rejected = client.put(
+        "/quote-configs/zone-city-rule-groups",
+        json={
+            "city": "Brampton",
+            "province": "ON",
+            "canonical_city": "Brampton",
+            "rules": [
+                {
+                    "id": ids_by_prefix["L6T"],
+                    "postal_prefix": "L6T",
+                    "origin": "toronto",
+                    "zone": 3,
+                },
+                {
+                    "postal_prefix": "T2A",
+                    "origin": "toronto",
+                    "zone": 3,
+                },
+            ],
+            "deactivate_ids": [ids_by_prefix["L6W"]],
+        },
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    active = client.get(
+        "/quote-configs/zone-city-rules?search=BRAMPTON",
+        headers={"X-API-Key": ADMIN_KEY},
+    ).json()["records"]
+
+    assert rejected.status_code == 422
+    assert "属于 AB" in rejected.json()["detail"]
+    assert {record["postal_prefix"] for record in active} == {"L6T", "L6W"}
+    assert {record["zone"] for record in active} == {1}
+
+
+def test_city_group_batch_rejects_record_ids_from_another_city(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client(
+        zone_rules=[
+            {
+                "postal_prefix": "L6T",
+                "city": "BRAMPTON",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 1,
+                "canonical_city": "BRAMPTON",
+                "priority": 100,
+                "active": True,
+            },
+            {
+                "postal_prefix": "L5T",
+                "city": "MISSISSAUGA",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 2,
+                "canonical_city": "MISSISSAUGA",
+                "priority": 100,
+                "active": True,
+            },
+        ]
+    )
+    records = client.get(
+        "/quote-configs/zone-city-rules",
+        headers={"X-API-Key": ADMIN_KEY},
+    ).json()["records"]
+    ids_by_city = {record["city"]: record["id"] for record in records}
+
+    rejected = client.put(
+        "/quote-configs/zone-city-rule-groups",
+        json={
+            "city": "Brampton",
+            "province": "ON",
+            "canonical_city": "Brampton",
+            "rules": [
+                {
+                    "id": ids_by_city["BRAMPTON"],
+                    "postal_prefix": "L6T",
+                    "origin": "toronto",
+                    "zone": 1,
+                }
+            ],
+            "deactivate_ids": [ids_by_city["MISSISSAUGA"]],
+        },
+        headers={"X-API-Key": ADMIN_KEY},
+    )
+    active = client.get(
+        "/quote-configs/zone-city-rules",
+        headers={"X-API-Key": ADMIN_KEY},
+    ).json()["records"]
+
+    assert rejected.status_code == 422
+    assert "不属于当前城市" in rejected.json()["detail"]
+    assert {record["city"] for record in active} == {"BRAMPTON", "MISSISSAUGA"}
+    assert all(record["active"] for record in active)
+
+
 def test_sales_cannot_manage_zone_city_rules(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
     client = build_client()

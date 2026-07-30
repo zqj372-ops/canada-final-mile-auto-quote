@@ -111,6 +111,34 @@ class ZoneCityRuleUpdate(BaseModel):
     note: str | None = Field(default=None, max_length=1000)
 
 
+class ZoneCityRuleGroupItem(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    id: int | None = Field(default=None, ge=1)
+    postal_prefix: str = Field(min_length=3, max_length=16)
+    origin: str = Field(min_length=1, max_length=32)
+    zone: int = Field(ge=1)
+    priority: int = Field(default=100, ge=1, le=1000)
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class ZoneCityRuleGroupSave(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    city: str = Field(min_length=1, max_length=100)
+    province: str = Field(min_length=2, max_length=32)
+    canonical_city: str | None = Field(default=None, max_length=100)
+    rules: list[ZoneCityRuleGroupItem] = Field(default_factory=list, max_length=200)
+    deactivate_ids: list[int] = Field(default_factory=list, max_length=200)
+
+
+class ZoneCityRuleGroupSaveResponse(BaseModel):
+    records: list[ZoneCityRuleRecord]
+    created_count: int
+    updated_count: int
+    deactivated_count: int
+
+
 @router.get(
     "/workbench",
     response_model=QuoteWorkbenchConfig,
@@ -286,3 +314,25 @@ def deactivate_zone_city_rule(
     if record is None:
         raise HTTPException(status_code=404, detail="Zone city rule not found.")
     return repository.to_dict(record)
+
+
+@router.put(
+    "/zone-city-rule-groups",
+    response_model=ZoneCityRuleGroupSaveResponse,
+    dependencies=[Depends(require_roles(*ADMIN_ROLES))],
+)
+def save_zone_city_rule_group(
+    payload: ZoneCityRuleGroupSave,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    repository = ZoneCityRuleRepository(db)
+    try:
+        return repository.save_city_group(
+            city=payload.city,
+            province=payload.province,
+            canonical_city=payload.canonical_city,
+            rules=[rule.model_dump() for rule in payload.rules],
+            deactivate_ids=payload.deactivate_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

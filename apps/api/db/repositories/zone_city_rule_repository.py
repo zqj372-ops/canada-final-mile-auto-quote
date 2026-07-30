@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -112,6 +112,127 @@ class ZoneCityRuleRepository:
         self.session.refresh(record)
         return record
 
+    def save_city_group(
+        self,
+        *,
+        city: str,
+        province: str,
+        canonical_city: str | None,
+        rules: Sequence[Mapping[str, object]],
+        deactivate_ids: Sequence[int],
+    ) -> dict[str, object]:
+        """Atomically replace the editable rules for one city group."""
+
+        try:
+            incoming_ids = [
+                int(record_id)
+                for rule in rules
+                if (record_id := rule.get("id")) is not None
+            ]
+            if len(incoming_ids) != len(set(incoming_ids)):
+                raise ValueError("同一条邮编规则不能在批量保存中重复出现。")
+
+            deactivation_ids = {int(record_id) for record_id in deactivate_ids}
+            incoming_id_set = set(incoming_ids)
+            if incoming_id_set & deactivation_ids:
+                raise ValueError("同一条邮编规则不能同时保存和停用。")
+
+            managed_ids = incoming_id_set | deactivation_ids
+            existing_by_id: dict[int, ZoneLookupRule] = {}
+            if managed_ids:
+                target_province = normalize_province(province)
+                target_city = normalize_city(canonical_city or city)
+                if target_province is None or target_city is None:
+                    raise ValueError("城市或省份无效。")
+                target_group = (target_province, target_city.upper())
+                existing = self.session.scalars(
+                    select(ZoneLookupRule).where(ZoneLookupRule.id.in_(managed_ids))
+                ).all()
+                existing_by_id = {record.id: record for record in existing}
+                missing_ids = sorted(managed_ids - set(existing_by_id))
+                if missing_ids:
+                    raise ValueError(
+                        "以下邮编规则不存在或已被删除："
+                        + "、".join(str(record_id) for record_id in missing_ids)
+                        + "。"
+                    )
+
+                current_groups = {
+                    (
+                        normalize_province(record.province),
+                        (
+                            normalize_city(record.canonical_city or record.city)
+                            or record.canonical_city
+                            or record.city
+                        ).upper(),
+                    )
+                    for record in existing_by_id.values()
+                }
+                if current_groups != {target_group}:
+                    raise ValueError("提交的邮编规则不属于当前城市，已拒绝批量保存。")
+
+            normalized_rules: list[tuple[int | None, dict[str, object]]] = []
+            seen_prefixes: set[str] = set()
+            for rule in rules:
+                normalized = self._normalize_values(
+                    {
+                        **rule,
+                        "city": city,
+                        "province": province,
+                        "canonical_city": canonical_city or city,
+                    }
+                )
+                postal_prefix = str(normalized["postal_prefix"])
+                if postal_prefix in seen_prefixes:
+                    raise ValueError(f"邮编前缀 {postal_prefix} 在当前城市中重复。")
+                seen_prefixes.add(postal_prefix)
+                record_id = rule.get("id")
+                normalized_rules.append(
+                    (int(record_id) if record_id is not None else None, normalized)
+                )
+
+            if not normalized_rules and not deactivation_ids:
+                raise ValueError("请至少保留一个邮编，或选择需要停用的现有邮编。")
+
+            for _, normalized in normalized_rules:
+                self._ensure_unique(normalized, exclude_ids=managed_ids)
+
+            deactivated_count = 0
+            for record_id in deactivation_ids:
+                record = existing_by_id[record_id]
+                if record.active:
+                    record.active = False
+                    deactivated_count += 1
+
+            saved_records: list[ZoneLookupRule] = []
+            created_count = 0
+            updated_count = 0
+            for record_id, normalized in normalized_rules:
+                if record_id is None:
+                    record = ZoneLookupRule(**normalized)
+                    self.session.add(record)
+                    created_count += 1
+                else:
+                    record = existing_by_id[record_id]
+                    for key, value in normalized.items():
+                        setattr(record, key, value)
+                    record.active = True
+                    updated_count += 1
+                saved_records.append(record)
+
+            self.session.commit()
+            for record in saved_records:
+                self.session.refresh(record)
+            return {
+                "records": [self.to_dict(record) for record in saved_records],
+                "created_count": created_count,
+                "updated_count": updated_count,
+                "deactivated_count": deactivated_count,
+            }
+        except Exception:
+            self.session.rollback()
+            raise
+
     def to_dict(self, record: ZoneLookupRule) -> dict[str, object]:
         return {
             "id": record.id,
@@ -215,6 +336,7 @@ class ZoneCityRuleRepository:
         values: Mapping[str, object],
         *,
         exclude_id: int | None = None,
+        exclude_ids: set[int] | None = None,
     ) -> None:
         query = select(ZoneLookupRule).where(
             ZoneLookupRule.active.is_(True),
@@ -225,6 +347,8 @@ class ZoneCityRuleRepository:
         )
         if exclude_id is not None:
             query = query.where(ZoneLookupRule.id != exclude_id)
+        if exclude_ids:
+            query = query.where(ZoneLookupRule.id.not_in(exclude_ids))
         duplicate = self.session.scalars(query).first()
         if duplicate is None:
             return

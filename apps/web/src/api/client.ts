@@ -822,6 +822,30 @@ export interface ZoneCityRulePayload {
   note?: string | null;
 }
 
+export interface ZoneCityRuleGroupItemPayload {
+  id?: number | null;
+  postal_prefix: string;
+  origin: string;
+  zone: number;
+  priority?: number;
+  note?: string | null;
+}
+
+export interface ZoneCityRuleGroupPayload {
+  city: string;
+  province: string;
+  canonical_city?: string | null;
+  rules: ZoneCityRuleGroupItemPayload[];
+  deactivate_ids?: number[];
+}
+
+export interface ZoneCityRuleGroupSaveResponse {
+  records: ZoneCityRuleRecord[];
+  created_count: number;
+  updated_count: number;
+  deactivated_count: number;
+}
+
 export interface ZonePriceImportIssue {
   row: number | null;
   field: string | null;
@@ -1322,6 +1346,15 @@ export function deactivateZoneCityRule(
 ): Promise<ZoneCityRuleRecord> {
   return request<ZoneCityRuleRecord>(`/quote-configs/zone-city-rules/${recordId}`, {
     method: "DELETE",
+  });
+}
+
+export function saveZoneCityRuleGroup(
+  payload: ZoneCityRuleGroupPayload,
+): Promise<ZoneCityRuleGroupSaveResponse> {
+  return request<ZoneCityRuleGroupSaveResponse>("/quote-configs/zone-city-rule-groups", {
+    method: "PUT",
+    body: JSON.stringify(payload),
   });
 }
 
