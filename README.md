@@ -103,6 +103,7 @@ VITE_API_BASE_URL=http://localhost:8000 npm run dev
 - `/learning-candidates`：Hermes 自学习候选审核，批准后才发布为可复用学习规则。
 - `/audit`：按 `quote_id` 查询报价审计记录。
 - `/settings/quote`：维护 `/quote` 工作台后台配置，包括示例、字段选项、风险阈值和复制话术。
+- `/settings/cities`：按始发仓和 Zone 维护城市、FSA 邮编前缀及标准城市名。
 - `/settings/ai`：维护 OpenAI-compatible 模型配置，支持输入 API Key 自动获取模型列表并导入，也可为内置 Hermes Agent 独立切换已加密保存的 Key/模型配置。
 - `/settings/search`：维护 Tavily 等搜索 API Key，用于 AI 自动报价时查询地址和行情参考。
 - `/settings/wecom`：维护企业微信群机器人 Webhook 配置。

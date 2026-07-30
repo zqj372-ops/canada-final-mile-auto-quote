@@ -35,6 +35,7 @@ type RoutePath =
   | "/audit"
   | "/settings/quote"
   | "/settings/pricing"
+  | "/settings/cities"
   | "/settings/ai"
   | "/settings/search"
   | "/settings/email"
@@ -58,6 +59,7 @@ type AdminIconName =
   | "file"
   | "link"
   | "mail"
+  | "map"
   | "menu"
   | "refresh"
   | "search"
@@ -81,6 +83,7 @@ const adminRoutes: Array<{
   { path: "/ops", label: "处理工作台", description: "复核/诊断/学习", group: "manual", icon: "user" },
   { path: "/settings/quote", label: "报价规则", description: "前台", group: "pricing", icon: "file" },
   { path: "/settings/pricing", label: "价格矩阵", description: "Zone", group: "pricing", icon: "calculator" },
+  { path: "/settings/cities", label: "城市配置", description: "城市 / FSA", group: "pricing", icon: "map" },
   { path: "/settings/ai", label: "AI 模型配置", description: "模型", group: "system", icon: "settings" },
   { path: "/settings/search", label: "搜索 API 配置", description: "地址", group: "system", icon: "link" },
   { path: "/settings/email", label: "邮件通知配置", description: "通知", group: "system", icon: "mail" },
@@ -185,6 +188,9 @@ export default function App() {
     }
     if (path === "/settings/pricing") {
       return <PricingSettingsPage />;
+    }
+    if (path === "/settings/cities") {
+      return <PricingSettingsPage cityOnly />;
     }
     if (path === "/settings/search") {
       return <SearchSettingsPage />;
@@ -536,6 +542,9 @@ function normalizePath(pathname: string): RoutePath {
   if (strippedPath === "/settings/pricing") {
     return "/settings/pricing";
   }
+  if (strippedPath === "/settings/cities") {
+    return "/settings/cities";
+  }
   if (strippedPath === "/settings/search") {
     return "/settings/search";
   }
@@ -772,6 +781,12 @@ function AdminIcon({ name }: { name: AdminIconName }) {
       <>
         <rect x="3" y="5" width="14" height="10" rx="2" />
         <path d="m4 7 6 4 6-4" />
+      </>
+    ),
+    map: (
+      <>
+        <path d="m3 5 4-2 6 2 4-2v12l-4 2-6-2-4 2V5Z" />
+        <path d="M7 3v12M13 5v12" />
       </>
     ),
     menu: (

@@ -44,7 +44,7 @@ type NewPriceDraft = {
   source: string;
 };
 
-type PricingSettingsSection = "fees" | "new-price" | "matrix";
+type PricingSettingsSection = "fees" | "new-price" | "matrix" | "cities";
 type ZoneCityEditorTarget = {
   origin: string;
   zone: number;
@@ -80,7 +80,7 @@ const pricingFields: Array<{
   { key: "detention_free_minutes", label: "免费等待分钟", suffix: "分钟", step: 1, hint: "等待时间超过该分钟数后开始计费。" },
 ];
 
-export default function PricingSettingsPage() {
+export default function PricingSettingsPage({ cityOnly = false }: { cityOnly?: boolean }) {
   const [pricingConfig, setPricingConfig] = useState<ZonePricingConfig | null>(null);
   const [savedFuelPercentByZone, setSavedFuelPercentByZone] = useState<Record<string, MoneyValue>>({});
   const [savedZonePriceEnabledByZone, setSavedZonePriceEnabledByZone] = useState<Record<string, boolean>>({});
@@ -99,10 +99,11 @@ export default function PricingSettingsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSavingPricing, setIsSavingPricing] = useState(false);
   const [isSavingMatrix, setIsSavingMatrix] = useState(false);
-  const [activeSection, setActiveSection] = useState<PricingSettingsSection>("matrix");
+  const [pricingSection, setPricingSection] = useState<PricingSettingsSection>("matrix");
   const [selectedZoneKey, setSelectedZoneKey] = useState("all");
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [cityEditorTarget, setCityEditorTarget] = useState<ZoneCityEditorTarget | null>(null);
+  const activeSection: PricingSettingsSection = cityOnly ? "cities" : pricingSection;
 
   useEffect(() => {
     void loadAll();
@@ -117,6 +118,7 @@ export default function PricingSettingsPage() {
     [matrixRows, selectedZoneKey],
   );
   const fuelGroups = useMemo(() => buildFuelGroups(matrixRows, selectedZoneKey), [matrixRows, selectedZoneKey]);
+  const cityGroups = useMemo(() => buildFuelGroups(matrixRows, "all"), [matrixRows]);
   const changedCells = useMemo(() => {
     if (!matrix) {
       return [];
@@ -332,20 +334,26 @@ export default function PricingSettingsPage() {
           <div className="pricing-breadcrumb" aria-label="当前位置">
             <span>运价管理</span>
             <span aria-hidden="true">/</span>
-            <strong>价格配置</strong>
+            <strong>{cityOnly ? "城市配置" : "价格配置"}</strong>
           </div>
-          <h1>价格配置</h1>
-          <p>维护 Zone 基础派送费、分区开关、燃油比例和附加费。前台只读取报价结果，不在浏览器计算价格。</p>
+          <h1>{cityOnly ? "城市配置" : "价格配置"}</h1>
+          <p>
+            {cityOnly
+              ? "按始发仓和 Zone 维护城市、FSA 邮编前缀及标准城市名，保存后下一票报价立即使用。"
+              : "维护 Zone 基础派送费、分区开关、燃油比例和附加费。前台只读取报价结果，不在浏览器计算价格。"}
+          </p>
         </div>
         <div className="pricing-page-actions">
           <button className="btn-secondary" type="button" onClick={loadAll} disabled={isLoading}>
             <PricingIcon name="refresh" />
             {isLoading ? "读取中..." : "重新读取"}
           </button>
-          <button className="btn-primary" type="button" onClick={saveMatrixChanges} disabled={isSavingMatrix || changedCount === 0}>
-            <PricingIcon name="save" />
-            {isSavingMatrix ? "保存中..." : `保存所有修改${changedCount ? ` · ${changedCount}` : ""}`}
-          </button>
+          {!cityOnly && (
+            <button className="btn-primary" type="button" onClick={saveMatrixChanges} disabled={isSavingMatrix || changedCount === 0}>
+              <PricingIcon name="save" />
+              {isSavingMatrix ? "保存中..." : `保存所有修改${changedCount ? ` · ${changedCount}` : ""}`}
+            </button>
+          )}
         </div>
       </header>
 
@@ -356,24 +364,26 @@ export default function PricingSettingsPage() {
         </div>
       )}
 
-      <nav className="pricing-tabs" aria-label="价格配置分区">
-        {([
-          ["fees", "附加费规则", "全局规则"],
-          ["new-price", "新增价格", "单条覆盖"],
-          ["matrix", "价格矩阵", "Zone 管理"],
-        ] as Array<[PricingSettingsSection, string, string]>).map(([section, label, meta]) => (
-          <button
-            key={section}
-            className={activeSection === section ? "is-active" : ""}
-            type="button"
-            aria-selected={activeSection === section}
-            onClick={() => setActiveSection(section)}
-          >
-            <span>{label}</span>
-            <small>{meta}</small>
-          </button>
-        ))}
-      </nav>
+      {!cityOnly && (
+        <nav className="pricing-tabs" aria-label="价格配置分区">
+          {([
+            ["fees", "附加费规则", "全局规则"],
+            ["new-price", "新增价格", "单条覆盖"],
+            ["matrix", "价格矩阵", "Zone 管理"],
+          ] as Array<[PricingSettingsSection, string, string]>).map(([section, label, meta]) => (
+            <button
+              key={section}
+              className={activeSection === section ? "is-active" : ""}
+              type="button"
+              aria-selected={activeSection === section}
+              onClick={() => setPricingSection(section)}
+            >
+              <span>{label}</span>
+              <small>{meta}</small>
+            </button>
+          ))}
+        </nav>
+      )}
 
       {activeSection === "fees" && (
         <form className="pricing-panel pricing-fee-panel" onSubmit={savePricing}>
@@ -672,6 +682,72 @@ export default function PricingSettingsPage() {
               </section>
             </div>
           </div>
+        </section>
+      )}
+
+      {activeSection === "cities" && (
+        <section className="pricing-matrix-workspace">
+          <div className="pricing-command-bar">
+            <div className="pricing-command-copy">
+              <span className="pricing-eyebrow">城市与 FSA 规则</span>
+              <h2>选择要维护的始发仓与 Zone</h2>
+              <p>城市规则按分区管理。选择一个 Zone 后，可以新增、编辑或停用对应的城市与邮编前缀。</p>
+            </div>
+          </div>
+
+          <div className="pricing-summary-strip">
+            <Metric icon="warehouse" label="始发仓" value={`${cityGroups.length} 个`} />
+            <Metric icon="city" label="可配置分区" value={`${matrixRows.length} 个`} />
+            <Metric icon="rows" label="配置方式" value="按 Zone 维护" />
+            <Metric icon="check" label="生效时间" value="保存后立即" />
+          </div>
+
+          <section className="pricing-panel pricing-fuel-editor">
+            <div className="pricing-panel-heading compact">
+              <div>
+                <span className="pricing-eyebrow">分区入口</span>
+                <h3>始发仓 / Zone</h3>
+                <p>点击“打开城市配置”进入该分区的规则列表。</p>
+              </div>
+              <span className="pricing-record-count">{matrixRows.length} 个 Zone</span>
+            </div>
+
+            <div className="pricing-fuel-groups">
+              {cityGroups.length ? cityGroups.map((group) => (
+                <div className="pricing-fuel-group" key={group.origin}>
+                  <div className="pricing-fuel-group-heading">
+                    <span className="pricing-origin-mark"><PricingIcon name="warehouse" /></span>
+                    <div><strong>{group.origin}</strong><small>{group.rows.length} 个 Zone</small></div>
+                  </div>
+                  <div className="pricing-fuel-grid">
+                    {group.rows.map((row) => (
+                      <div className="pricing-fuel-cell" key={`${row.origin}|${row.zone}`}>
+                        <div className="pricing-fuel-cell-head">
+                          <span>ZONE {row.zone}</span>
+                          <strong>{row.records.size} 个托数价格</strong>
+                        </div>
+                        <small>维护该分区用于自动匹配的城市、FSA 和标准城市名。</small>
+                        <button
+                          className="pricing-city-config-button"
+                          type="button"
+                          onClick={() => setCityEditorTarget({ origin: row.origin, zone: row.zone })}
+                          aria-label={`打开 ${row.origin} Zone ${row.zone} 的城市配置`}
+                        >
+                          <PricingIcon name="city" />
+                          打开城市配置
+                          <PricingIcon name="chevron" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )) : (
+                <div className="pricing-empty-state">
+                  {isLoading ? "正在读取分区数据…" : "暂无可配置分区，请先在价格矩阵中维护 Zone 数据。"}
+                </div>
+              )}
+            </div>
+          </section>
         </section>
       )}
 
