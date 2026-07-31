@@ -45,7 +45,7 @@ interface ParsedAggregateTotals {
 
 const NUMBER_TOKEN_SOURCE = String.raw`(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?)`;
 const HORIZONTAL_SPACE_SOURCE = String.raw`[^\S\r\n]*`;
-const PIECE_UNIT_SOURCE = String.raw`(?:pcs?|pieces?|units?|ctns?|cartons?|boxes|pkgs?|packages?|cases?|bags?|sacks?|rolls?|drums?|crates?|skids?|skds?|bundles?|sets?|pallets?|plts?|件|箱|包|袋|卷|桶|架|捆|套|台|托盘|托)`;
+const PIECE_UNIT_SOURCE = String.raw`(?:pcs?|pieces?|units?|ctns?|cartons?|boxes|pkgs?|packages?|cases?|bags?|sacks?|rolls?|drums?|crates?|skids?|skds?|bundles?|sets?|pallets?|plts?|(?:个\s*)?(?:件|箱|包|袋|卷|桶|架|捆|套|台|托盘|托))`;
 const DIMENSION_UNIT_SOURCE = String.raw`(?:millimet(?:er|re)s?|mms?|centimet(?:er|re)s?|cms?|met(?:er|re)s?|mm|cm|m|毫米|厘米|米|inches|inch|in|"|feet|foot|ft|英尺|英寸)`;
 const WEIGHT_UNIT_SOURCE = String.raw`(?:metric\s*(?:tons?|tonnes?)|tonnes?|kilograms?|kgs?|kg|公斤|千克|pounds?|lbs?|lb|磅|grams?|g|克|m\.?t\.?|t)`;
 const VOLUME_UNIT_SOURCE = String.raw`(?:c\.?b\.?m\.?|m(?:\^?3|³)|cubic\s*met(?:er|re)s?|cu\.?\s*ft|cuft|cft|ft(?:\^?3|³)|cubic\s*(?:feet|foot)|cu\.?\s*in|cuin|cin|in(?:\^?3|³)|cubic\s*inches?|立方米?|方)`;
@@ -575,7 +575,7 @@ function findQuantity(line: string, dimensionStart: number, itemEnd: number): nu
   if (suffixNumberFirst) {
     return Math.max(1, parseFlexibleNumber(suffixNumberFirst[1]));
   }
-  const prefixMatch = prefix.match(new RegExp(`${number}\\s*${quantityUnit}\\s*$`, "i"));
+  const prefixMatch = prefix.match(new RegExp(`${number}\\s*${quantityUnit}[^\\dA-Za-z]*$`, "i"));
   if (prefixMatch) {
     return Math.max(1, parseFlexibleNumber(prefixMatch[1]));
   }

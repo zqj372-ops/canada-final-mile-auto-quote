@@ -1604,13 +1604,25 @@ function mergeParsedWithAIExtraction(
   if (!extraction) {
     return parsed;
   }
-  const totalCbm = toNumber(extraction.cbm) ?? parsed.total_cbm;
-  const totalWeight = toNumber(extraction.weight_kg) ?? parsed.total_weight_kg;
+  const aiCargoItems = normalizeAICargoItems(extraction);
+  const cargoItems = aiCargoItems.length ? aiCargoItems : parsed.cargo_items;
+  const calculatedCbm = cargoItems.length && cargoItems.every((item) => item.cbm !== null)
+    ? round3(cargoItems.reduce(
+        (sum, item) => sum + (item.total_cbm ?? item.cbm! * item.quantity),
+        0,
+      ))
+    : null;
+  const calculatedWeight = cargoItems.length && cargoItems.every((item) => item.weight_kg !== null)
+    ? round1(cargoItems.reduce(
+        (sum, item) => sum + (item.total_weight_kg ?? item.weight_kg! * item.quantity),
+        0,
+      ))
+    : null;
+  const totalCbm = calculatedCbm ?? toNumber(extraction.cbm) ?? parsed.total_cbm;
+  const totalWeight = calculatedWeight ?? toNumber(extraction.weight_kg) ?? parsed.total_weight_kg;
   const density = totalCbm > 0 && totalWeight > 0 ? round1(totalWeight / totalCbm) : parsed.density_kg_per_cbm;
   const provinceCode = extraction.province || parsed.address.province_code;
   const province = config.provinces.find((item) => item.code.toLowerCase() === String(provinceCode ?? "").toLowerCase());
-  const aiCargoItems = normalizeAICargoItems(extraction);
-  const cargoItems = aiCargoItems.length ? aiCargoItems : parsed.cargo_items;
   const dimensionedItems = cargoItems.filter(hasCargoDimensions);
   const maxItem = dimensionedItems.reduce<ParsedCargoItem | null>(
     (current, item) => (!current || parsedCargoVolume(item) > parsedCargoVolume(current) ? item : current),
@@ -1666,11 +1678,11 @@ function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoIt
       const totalCbm = toNumber(item.total_cbm);
       const weight = toNumber(item.weight_kg) ?? (totalWeight === null ? null : totalWeight / quantity);
       const cbm = toNumber(item.cbm) ??
-        (totalCbm !== null
-          ? totalCbm / quantity
-          : hasDimensions
-            ? (length! * width! * height!) / 1_000_000
-            : null);
+        (hasDimensions
+          ? (length! * width! * height!) / 1_000_000
+          : totalCbm === null
+            ? null
+            : totalCbm / quantity);
       if (!hasDimensions && weight === null && cbm === null && totalWeight === null && totalCbm === null) {
         return null;
       }
@@ -1847,6 +1859,10 @@ function toNumber(value: string | number | null | undefined): number | null {
 
 function round1(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+function round3(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 function filterSalesQuoteRecords(

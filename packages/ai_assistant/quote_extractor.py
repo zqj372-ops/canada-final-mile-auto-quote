@@ -126,7 +126,8 @@ SUSPICIOUS_PIECES_PER_CBM = Decimal("500")
 NUMBER_TOKEN_PATTERN = r"(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:[.,]\d+)?)"
 PIECE_UNIT_PATTERN = (
     r"(?:pcs?|pieces?|units?|ctns?|cartons?|boxes|pkgs?|packages?|cases?|bags?|sacks?|"
-    r"rolls?|drums?|crates?|skids?|skds?|bundles?|sets?|pallets?|plts?|件|箱|包|袋|卷|桶|架|捆|套|台|托盘|托)"
+    r"rolls?|drums?|crates?|skids?|skds?|bundles?|sets?|pallets?|plts?|"
+    r"(?:个\s*)?(?:件|箱|包|袋|卷|桶|架|捆|套|台|托盘|托))"
 )
 DIMENSION_UNIT_PATTERN = (
     r"(?:millimet(?:er|re)s?|mms?|centimet(?:er|re)s?|cms?|met(?:er|re)s?|mm|cm|m|"
@@ -363,7 +364,9 @@ def _merge_agent_draft_with_fallback(
     draft.requires_appointment = draft.requires_appointment or fallback.requires_appointment
     draft.detention_minutes = draft.detention_minutes or fallback.detention_minutes
 
-    if not draft.cargo_items and fallback.cargo_items:
+    if _has_fully_dimensioned_cargo_items(fallback):
+        draft.cargo_items = fallback.cargo_items
+    elif not draft.cargo_items and fallback.cargo_items:
         draft.cargo_items = fallback.cargo_items
 
     if fallback.confidence and draft.confidence < 75:
@@ -376,6 +379,20 @@ def _merge_agent_draft_with_fallback(
         if note not in draft.validation_notes:
             draft.validation_notes.append(note)
     return draft
+
+
+def _has_fully_dimensioned_cargo_items(draft: AIExtractedQuoteDraft) -> bool:
+    if not draft.cargo_items or draft.piece_count is None:
+        return False
+    return (
+        sum(item.quantity for item in draft.cargo_items) == draft.piece_count
+        and all(
+            item.length_cm is not None
+            and item.width_cm is not None
+            and item.height_cm is not None
+            for item in draft.cargo_items
+        )
+    )
 
 
 def _reconcile_with_explicit_facts(
@@ -469,16 +486,26 @@ def _validate_cargo_items_and_totals(draft: AIExtractedQuoteDraft) -> AIExtracte
     computed_cbm = Decimal("0")
     computed_weight = Decimal("0")
     longest_side_cm: Decimal | None = None
+    all_items_have_dimensions = True
+    all_items_have_weight = True
     for item in draft.cargo_items:
         normalized = _normalize_cargo_item(item)
         normalized_items.append(normalized)
         total_quantity += normalized.quantity
         if normalized.cbm is not None:
             computed_cbm += normalized.cbm * Decimal(normalized.quantity)
-        if normalized.weight_kg is not None:
+        else:
+            all_items_have_dimensions = False
+        if normalized.total_weight_kg is not None:
+            computed_weight += normalized.total_weight_kg
+        elif normalized.weight_kg is not None:
             computed_weight += normalized.weight_kg * Decimal(normalized.quantity)
+        else:
+            all_items_have_weight = False
         dimensions = [normalized.length_cm, normalized.width_cm, normalized.height_cm]
         known_dimensions = [value for value in dimensions if value is not None]
+        if len(known_dimensions) != 3:
+            all_items_have_dimensions = False
         if known_dimensions:
             item_longest = max(known_dimensions)
             longest_side_cm = item_longest if longest_side_cm is None else max(longest_side_cm, item_longest)
@@ -486,10 +513,22 @@ def _validate_cargo_items_and_totals(draft: AIExtractedQuoteDraft) -> AIExtracte
     draft.cargo_items = normalized_items
     if draft.piece_count is None or total_quantity > draft.piece_count:
         draft.piece_count = total_quantity
-    if draft.cbm is None and computed_cbm > 0:
-        draft.cbm = _quantize(computed_cbm, "0.001")
-    if draft.weight_kg is None and computed_weight > 0:
-        draft.weight_kg = _quantize(computed_weight, "0.1")
+    if computed_cbm > 0 and (draft.cbm is None or all_items_have_dimensions):
+        calculated_cbm = _quantize(computed_cbm, "0.001")
+        if draft.cbm is not None and draft.cbm != calculated_cbm:
+            _append_validation_note(
+                draft,
+                f"declared_cbm_replaced_by_calculation:{draft.cbm}->{calculated_cbm}",
+            )
+        draft.cbm = calculated_cbm
+    if computed_weight > 0 and (draft.weight_kg is None or all_items_have_weight):
+        calculated_weight = _quantize(computed_weight, "0.1")
+        if draft.weight_kg is not None and draft.weight_kg != calculated_weight:
+            _append_validation_note(
+                draft,
+                f"declared_weight_replaced_by_calculation:{draft.weight_kg}->{calculated_weight}",
+            )
+        draft.weight_kg = calculated_weight
     if draft.longest_side_cm is None and longest_side_cm is not None:
         draft.longest_side_cm = _quantize(longest_side_cm, "0.1")
 
@@ -500,23 +539,53 @@ def _validate_cargo_items_and_totals(draft: AIExtractedQuoteDraft) -> AIExtracte
 def _normalize_cargo_item(item: ExtractedCargoItem) -> ExtractedCargoItem:
     cbm = item.cbm
     if cbm is None and item.length_cm is not None and item.width_cm is not None and item.height_cm is not None:
-        cbm = _quantize(item.length_cm * item.width_cm * item.height_cm / Decimal("1000000"), "0.001")
+        cbm = _quantize(
+            item.length_cm * item.width_cm * item.height_cm / Decimal("1000000"),
+            "0.000001",
+        )
     if cbm is None and item.total_cbm is not None and item.quantity:
         cbm = _quantize(item.total_cbm / Decimal(item.quantity), "0.000001")
 
     weight_kg = item.weight_kg
     if weight_kg is None and item.total_weight_kg is not None and item.quantity:
         weight_kg = item.total_weight_kg / Decimal(item.quantity)
+    normalized_weight = _quantize(weight_kg, "0.01") if weight_kg is not None else None
+    total_weight_kg = (
+        item.total_weight_kg
+        if item.total_weight_kg is not None
+        else (
+            _quantize(normalized_weight * Decimal(item.quantity), "0.1")
+            if normalized_weight is not None
+            else None
+        )
+    )
+    total_cbm = (
+        _quantize(cbm * Decimal(item.quantity), "0.001")
+        if (
+            cbm is not None
+            and item.length_cm is not None
+            and item.width_cm is not None
+            and item.height_cm is not None
+        )
+        else item.total_cbm
+    )
 
     return item.model_copy(
         update={
             "length_cm": _quantize(item.length_cm, "0.1") if item.length_cm is not None else None,
             "width_cm": _quantize(item.width_cm, "0.1") if item.width_cm is not None else None,
             "height_cm": _quantize(item.height_cm, "0.1") if item.height_cm is not None else None,
-            "weight_kg": _quantize(weight_kg, "0.01") if weight_kg is not None else None,
+            "weight_kg": normalized_weight,
             "cbm": cbm,
+            "total_weight_kg": total_weight_kg,
+            "total_cbm": total_cbm,
         }
     )
+
+
+def _append_validation_note(draft: AIExtractedQuoteDraft, note: str) -> None:
+    if note not in draft.validation_notes:
+        draft.validation_notes.append(note)
 
 
 def _split_aggregate_weight_for_single_cargo_item(draft: AIExtractedQuoteDraft) -> None:
@@ -569,6 +638,8 @@ def apply_deterministic_extraction(draft: AIExtractedQuoteDraft, customer_messag
         draft.longest_side_cm = parsed["longest_side_cm"]
     if parsed["cargo_items"]:
         draft.cargo_items = parsed["cargo_items"]
+    for note in parsed["validation_notes"]:
+        _append_validation_note(draft, note)
 
     postal_code = _find_postal_code(customer_message)
     if postal_code and not draft.postal_code:
@@ -899,11 +970,10 @@ def _extract_first_json_object(content: str) -> str:
 
 
 def _parse_measurements(customer_message: str) -> dict[str, Any]:
-    total_cbm = Decimal("0")
-    total_weight_kg = Decimal("0")
     piece_count = 0
     longest_side_cm: Decimal | None = None
     cargo_items: list[ExtractedCargoItem] = []
+    validation_notes: list[str] = []
     parsed_lines = 0
     allow_numeric_table = _has_dimension_weight_table(customer_message)
     dimension_unit_hint: str | None = None
@@ -934,8 +1004,6 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
             height_cm = item["height_cm"]
             weight_kg = item["weight_kg"]
             item_cbm = length_cm * width_cm * height_cm / Decimal("1000000")
-            total_cbm += item_cbm * quantity
-            total_weight_kg += weight_kg * quantity
             piece_count += int(quantity)
             line_longest = max(length_cm, width_cm, height_cm)
             longest_side_cm = line_longest if longest_side_cm is None else max(longest_side_cm, line_longest)
@@ -946,7 +1014,7 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
                     width_cm=_quantize(width_cm, "0.1"),
                     height_cm=_quantize(height_cm, "0.1"),
                     weight_kg=_quantize(weight_kg, "0.01") if weight_kg > 0 else None,
-                    cbm=_quantize(item_cbm, "0.001"),
+                    cbm=_quantize(item_cbm, "0.000001"),
                     total_weight_kg=(
                         _quantize(weight_kg * quantity, "0.1")
                         if weight_kg > 0
@@ -959,7 +1027,12 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
 
     explicit_cbm = _find_explicit_cbm(customer_message)
     explicit_piece_count = _find_explicit_piece_count(customer_message)
-    explicit_weight = _find_explicit_weight(customer_message)
+    weight_arithmetic = _find_weight_arithmetic(customer_message)
+    explicit_weight = (
+        weight_arithmetic["calculated_total"]
+        if weight_arithmetic is not None
+        else _find_explicit_weight(customer_message)
+    )
     per_piece_weight = _find_per_piece_weight(customer_message)
     if explicit_weight is None and explicit_piece_count is not None:
         if per_piece_weight is not None and len(cargo_items) <= 1:
@@ -967,26 +1040,89 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
         elif explicit_cbm is not None:
             explicit_weight = _find_any_weight(customer_message)
 
-    if explicit_cbm is not None:
-        total_cbm = explicit_cbm
-    if explicit_weight is not None:
-        total_weight_kg = explicit_weight
     if explicit_piece_count is not None and explicit_piece_count >= piece_count:
-        parsed_piece_count = piece_count
         cargo_items = _align_single_parsed_cargo_item_with_explicit_totals(
             cargo_items,
             explicit_piece_count=explicit_piece_count,
-            explicit_weight=explicit_weight,
+            explicit_weight=None if per_piece_weight is not None else explicit_weight,
             explicit_cbm=explicit_cbm,
         )
         piece_count = explicit_piece_count
+    elif len(cargo_items) == 1 and piece_count > 1 and explicit_weight is not None:
+        cargo_items = _align_single_parsed_cargo_item_with_explicit_totals(
+            cargo_items,
+            explicit_piece_count=piece_count,
+            explicit_weight=None if per_piece_weight is not None else explicit_weight,
+            explicit_cbm=explicit_cbm,
+        )
+
+    if weight_arithmetic is not None:
+        cargo_items = _apply_weight_components_to_cargo_items(
+            cargo_items,
+            weight_arithmetic["components"],
+            piece_count=piece_count,
+            source_span=weight_arithmetic["source_span"],
+        )
+        validation_notes.append("calculated_weight_from_arithmetic")
+
+    all_items_have_dimensions = bool(cargo_items) and all(
+        item.length_cm is not None
+        and item.width_cm is not None
+        and item.height_cm is not None
+        and item.cbm is not None
+        for item in cargo_items
+    )
+    all_items_have_weight = bool(cargo_items) and all(
+        item.weight_kg is not None for item in cargo_items
+    )
+    calculated_cbm = sum(
+        (item.cbm or Decimal("0")) * Decimal(item.quantity)
+        for item in cargo_items
+    )
+    calculated_weight = sum(
+        (item.weight_kg or Decimal("0")) * Decimal(item.quantity)
+        for item in cargo_items
+    )
+
+    if all_items_have_dimensions and calculated_cbm > 0:
+        total_cbm = calculated_cbm
+        validation_notes.append("calculated_cbm_from_dimensions")
+        if explicit_cbm is not None and _quantize(explicit_cbm, "0.001") != _quantize(calculated_cbm, "0.001"):
+            validation_notes.append(
+                "declared_cbm_mismatch:"
+                f"declared={_quantize(explicit_cbm, '0.001')},"
+                f"calculated={_quantize(calculated_cbm, '0.001')}"
+            )
+    else:
+        total_cbm = explicit_cbm or calculated_cbm
+
+    if weight_arithmetic is not None:
+        total_weight_kg = weight_arithmetic["calculated_total"]
+        declared_weight = weight_arithmetic["declared_total"]
         if (
-            explicit_cbm is None
-            and parsed_piece_count > 0
-            and explicit_piece_count > parsed_piece_count
-            and len(cargo_items) == 1
+            declared_weight is not None
+            and _quantize(declared_weight, "0.1") != _quantize(total_weight_kg, "0.1")
         ):
-            total_cbm = total_cbm / Decimal(parsed_piece_count) * Decimal(explicit_piece_count)
+            validation_notes.append(
+                "declared_weight_mismatch:"
+                f"declared={_quantize(declared_weight, '0.1')},"
+                f"calculated={_quantize(total_weight_kg, '0.1')}"
+            )
+    elif all_items_have_weight and calculated_weight > 0:
+        total_weight_kg = calculated_weight
+        validation_notes.append("calculated_weight_from_cargo_items")
+        if (
+            explicit_weight is not None
+            and _quantize(explicit_weight, "0.1") != _quantize(calculated_weight, "0.1")
+        ):
+            validation_notes.append(
+                "declared_weight_mismatch:"
+                f"declared={_quantize(explicit_weight, '0.1')},"
+                f"calculated={_quantize(calculated_weight, '0.1')}"
+            )
+    else:
+        total_weight_kg = explicit_weight or calculated_weight
+
     if not cargo_items and piece_count > 0 and (total_cbm > 0 or total_weight_kg > 0):
         cargo_items = [
             _build_aggregate_cargo_item(
@@ -1003,12 +1139,56 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
         "weight_kg": _quantize(total_weight_kg, "0.1") if total_weight_kg > 0 else None,
         "longest_side_cm": _quantize(longest_side_cm, "0.1") if longest_side_cm is not None else None,
         "cargo_items": cargo_items,
+        "validation_notes": validation_notes,
         "notes": (
             f"Deterministic parser normalized {piece_count} piece(s) from {parsed_lines} cargo line(s)."
             if piece_count
             else None
         ),
     }
+
+
+def _apply_weight_components_to_cargo_items(
+    cargo_items: list[ExtractedCargoItem],
+    components: list[Decimal],
+    *,
+    piece_count: int,
+    source_span: str,
+) -> list[ExtractedCargoItem]:
+    if not components or piece_count != len(components):
+        return cargo_items
+
+    if not cargo_items:
+        return [
+            ExtractedCargoItem(
+                quantity=1,
+                weight_kg=_quantize(weight, "0.01"),
+                total_weight_kg=_quantize(weight, "0.1"),
+                source_span=source_span,
+            )
+            for weight in components
+        ]
+
+    if sum(item.quantity for item in cargo_items) != len(components):
+        return cargo_items
+
+    expanded_items: list[ExtractedCargoItem] = []
+    component_index = 0
+    for item in cargo_items:
+        for _ in range(item.quantity):
+            weight = components[component_index]
+            component_index += 1
+            expanded_items.append(
+                item.model_copy(
+                    update={
+                        "quantity": 1,
+                        "weight_kg": _quantize(weight, "0.01"),
+                        "total_weight_kg": _quantize(weight, "0.1"),
+                        "total_cbm": item.cbm,
+                    }
+                )
+            )
+    return expanded_items
 
 
 def _build_aggregate_cargo_item(
@@ -1366,7 +1546,7 @@ def _find_quantity(line: str, dimension_start: int, item_end: int) -> int:
     if suffix_quantity_match:
         return max(1, int(_decimal_from_token(suffix_quantity_match.group("qty"))))
     prefix_match = re.search(
-        rf"(?P<qty>{NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}\s*$",
+        rf"(?P<qty>{NUMBER_TOKEN_PATTERN})\s*{PIECE_UNIT_PATTERN}[^\dA-Za-z]*$",
         prefix,
         re.IGNORECASE,
     )
@@ -1471,6 +1651,10 @@ def _find_explicit_cbm(customer_message: str) -> Decimal | None:
 
 
 def _find_authoritative_weight(customer_message: str) -> Decimal | None:
+    arithmetic = _find_weight_arithmetic(customer_message)
+    if arithmetic is not None:
+        return arithmetic["calculated_total"]
+
     normalized = _normalize_text(customer_message)
     patterns = [
         rf"{TOTAL_WEIGHT_LABEL_PATTERN}\s*[:：=#-]?\s*({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
@@ -1484,6 +1668,54 @@ def _find_authoritative_weight(customer_message: str) -> Decimal | None:
         for match in re.finditer(pattern, normalized, re.IGNORECASE)
     }
     return next(iter(values)) if len(values) == 1 else None
+
+
+def _find_weight_arithmetic(customer_message: str) -> dict[str, Any] | None:
+    weight_pattern = re.compile(
+        rf"(?P<value>{NUMBER_TOKEN_PATTERN})\s*(?P<unit>{WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
+        re.IGNORECASE,
+    )
+    candidates: list[dict[str, Any]] = []
+    for source_line in customer_message.splitlines():
+        normalized_line = _normalize_text(source_line)
+        if "+" not in normalized_line:
+            continue
+
+        equation_parts = re.split(r"[=＝]", normalized_line, maxsplit=1)
+        expression = equation_parts[0]
+        component_matches = list(weight_pattern.finditer(expression))
+        if len(component_matches) < 2:
+            continue
+        expression_span = expression[
+            component_matches[0].start() : component_matches[-1].end()
+        ]
+        if expression_span.count("+") < len(component_matches) - 1:
+            continue
+
+        components = [
+            _to_kg(match.group("value"), match.group("unit"))
+            for match in component_matches
+        ]
+        declared_total: Decimal | None = None
+        if len(equation_parts) == 2:
+            declared_match = weight_pattern.search(equation_parts[1])
+            if declared_match:
+                declared_total = _to_kg(
+                    declared_match.group("value"),
+                    declared_match.group("unit"),
+                )
+        candidates.append(
+            {
+                "components": components,
+                "calculated_total": sum(components, Decimal("0")),
+                "declared_total": declared_total,
+                "source_span": source_line.strip()[:240],
+            }
+        )
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda candidate: len(candidate["components"]))
 
 
 def _find_explicit_weight(customer_message: str) -> Decimal | None:
@@ -1508,6 +1740,8 @@ def _find_per_piece_weight(customer_message: str) -> Decimal | None:
     normalized = _normalize_text(customer_message)
     item_name = rf"(?:{PIECE_UNIT_PATTERN}|pc|ctn|pkg|plt)"
     patterns = [
+        rf"/\s*(?:件|箱|包|袋|卷|桶|托|托盘)\s*"
+        rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
         rf"(?:单|每)(?:件|箱|包|袋|卷|桶|托|托盘)(?:毛重|重量|重)?\s*[:：=]?\s*"
         rf"({NUMBER_TOKEN_PATTERN})\s*({WEIGHT_UNIT_PATTERN})(?=$|[^A-Za-z])",
         rf"(?:weight\s*)?(?:each|per\s*{item_name})\s*[:：=]?\s*"
@@ -1592,7 +1826,8 @@ def _find_explicit_piece_count(customer_message: str) -> int | None:
 def _find_explicit_pallet_count(customer_message: str) -> int | None:
     normalized = _normalize_text(customer_message)
     match = re.search(
-        rf"({NUMBER_TOKEN_PATTERN})[^\S\r\n]*(?:托盘|托|pallets?\b|skids?\b|skds?\b|plts?\b)",
+        rf"({NUMBER_TOKEN_PATTERN})[^\S\r\n]*(?:个[^\S\r\n]*)?"
+        r"(?:托盘|托|pallets?\b|skids?\b|skds?\b|plts?\b)",
         normalized,
         re.IGNORECASE,
     )

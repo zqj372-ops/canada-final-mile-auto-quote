@@ -129,7 +129,7 @@ class RepairingDualAIClient(FakeDualAIClient):
         ),
         (
             "3 CASES\nDIMENSIONS EACH: 40\"L x 48\"W x 60\"H\nWEIGHT EACH: 200 LBS\nTOTAL CUBE: 120 CFT",
-            {"piece_count": 3, "weight_kg": Decimal("272.2"), "cbm": Decimal("3.398")},
+            {"piece_count": 3, "weight_kg": Decimal("272.2"), "cbm": Decimal("5.663")},
         ),
         (
             "12 bundles; 980 kilograms gross; 6.2 cubic metres",
@@ -191,7 +191,7 @@ def test_cargo_inquiry_format_corpus(raw: str, expected: dict[str, object]) -> N
             {
                 "piece_count": 14,
                 "weight_kg": Decimal("737.0"),
-                "cbm": Decimal("1.300"),
+                "cbm": Decimal("1.255"),
                 "quantities": [4, 4, 3, 3],
                 "dimensions": [
                     (Decimal("60.0"), Decimal("36.0"), Decimal("50.0")),
@@ -214,7 +214,7 @@ def test_cargo_inquiry_format_corpus(raw: str, expected: dict[str, object]) -> N
             {
                 "piece_count": 7,
                 "weight_kg": Decimal("296.0"),
-                "cbm": Decimal("1.600"),
+                "cbm": Decimal("1.573"),
                 "quantities": [4, 2, 1],
                 "dimensions": [
                     (Decimal("321.0"), Decimal("27.0"), Decimal("25.0")),
@@ -234,7 +234,7 @@ def test_cargo_inquiry_format_corpus(raw: str, expected: dict[str, object]) -> N
             {
                 "piece_count": 3,
                 "weight_kg": Decimal("345.0"),
-                "cbm": Decimal("2.420"),
+                "cbm": Decimal("2.419"),
                 "quantities": [3],
                 "dimensions": [(Decimal("96.0"), Decimal("120.0"), Decimal("70.0"))],
                 "weights": [Decimal("115.00")],
@@ -330,7 +330,7 @@ def test_deterministic_extraction_infers_large_unlabeled_dimensions_as_mm() -> N
     draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
 
     assert draft.piece_count == 1
-    assert draft.cbm == Decimal("2.500")
+    assert draft.cbm == Decimal("2.123")
     assert draft.weight_kg == Decimal("224.0")
     assert draft.longest_side_cm == Decimal("216.0")
     assert draft.postal_code == "T6R 3E9"
@@ -465,7 +465,7 @@ def test_deterministic_extraction_reads_carton_specs_with_trailing_quantities() 
     assert draft.longest_side_cm == Decimal("62.0")
 
 
-def test_deterministic_extraction_prefers_declared_totals_for_single_carton_spec() -> None:
+def test_deterministic_extraction_prefers_calculated_totals_for_single_carton_spec() -> None:
     raw = """
     厨房不锈钢水龙头
     HScode： 8481809000
@@ -479,7 +479,7 @@ def test_deterministic_extraction_prefers_declared_totals_for_single_carton_spec
     assert draft.address_line == "9-9699 Sills Ave"
     assert draft.postal_code == "V6Y 0C8"
     assert draft.piece_count == 15
-    assert draft.cbm == Decimal("2.180")
+    assert draft.cbm == Decimal("2.092")
     assert draft.weight_kg == Decimal("352.5")
     assert draft.longest_side_cm == Decimal("62.5")
 
@@ -500,7 +500,7 @@ def test_deterministic_extraction_reads_richmond_faucet_sample() -> None:
     assert draft.province == "BC"
     assert draft.postal_code == "V6Y 0C8"
     assert draft.piece_count == 15
-    assert draft.cbm == Decimal("2.180")
+    assert draft.cbm == Decimal("2.092")
     assert draft.weight_kg == Decimal("352.5")
     assert draft.longest_side_cm == Decimal("62.5")
 
@@ -520,7 +520,7 @@ def test_deterministic_extraction_does_not_read_cbm_decimal_as_piece_count() -> 
     assert draft.province == "SK"
     assert draft.postal_code == "S7K 1X6"
     assert draft.piece_count == 20
-    assert draft.cbm == Decimal("3.840")
+    assert draft.cbm == Decimal("3.836")
     assert draft.weight_kg == Decimal("1100.0")
     assert draft.longest_side_cm == Decimal("144.0")
 
@@ -537,7 +537,7 @@ def test_deterministic_extraction_keeps_dimension_quantities_without_item_weight
     draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
 
     assert draft.piece_count == 42
-    assert draft.cbm == Decimal("2.730")
+    assert draft.cbm == Decimal("2.722")
     assert draft.weight_kg == Decimal("579.0")
     assert draft.longest_side_cm == Decimal("113.0")
     assert draft.postal_code == "V6V 2L9"
@@ -563,7 +563,7 @@ def test_deterministic_extraction_overrides_ai_weight_as_piece_count() -> None:
     assert draft.province == "QC"
     assert draft.postal_code == "G0S 2X0"
     assert draft.piece_count == 1
-    assert draft.cbm == Decimal("5.100")
+    assert draft.cbm == Decimal("5.049")
     assert draft.weight_kg == Decimal("1630.0")
     assert draft.longest_side_cm == Decimal("270.0")
     assert len(draft.cargo_items) == 1
@@ -584,9 +584,54 @@ def test_deterministic_extraction_recognizes_chinese_pallet_count() -> None:
     assert draft.piece_count == 3
     assert draft.explicit_pallet_count == 3
     assert draft.weight_kg == Decimal("1200.0")
-    assert draft.cbm == Decimal("4.500")
+    assert draft.cbm == Decimal("5.400")
     assert draft.cargo_items[0].quantity == 3
     assert draft.cargo_items[0].weight_kg == Decimal("400.00")
+
+
+def test_deterministic_extraction_calculates_pallet_volume_and_weight_expression() -> None:
+    raw = """
+    3cbm，2个托盘，120x100x125cm
+    毛重：785公斤+800kg=1585kgs
+    到门地址:1729 chemin de château-bigot, Québec (Québec) Canada G2L 1H4
+    """
+
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    assert draft.address_line == "1729 chemin de château-bigot"
+    assert draft.postal_code == "G2L 1H4"
+    assert draft.province == "QC"
+    assert draft.packaging_type == "pallet"
+    assert draft.explicit_pallet_count == 2
+    assert draft.piece_count == 2
+    assert draft.cbm == Decimal("3.000")
+    assert draft.weight_kg == Decimal("1585.0")
+    assert [item.quantity for item in draft.cargo_items] == [1, 1]
+    assert [item.weight_kg for item in draft.cargo_items] == [
+        Decimal("785.00"),
+        Decimal("800.00"),
+    ]
+    assert [item.cbm for item in draft.cargo_items] == [
+        Decimal("1.500000"),
+        Decimal("1.500000"),
+    ]
+    assert "calculated_cbm_from_dimensions" in draft.validation_notes
+    assert "calculated_weight_from_arithmetic" in draft.validation_notes
+
+
+def test_deterministic_extraction_replaces_incorrect_declared_cargo_totals() -> None:
+    raw = """
+    4cbm，2个托盘，120x100x125cm
+    毛重：785公斤+800kg=9999kgs
+    """
+
+    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
+
+    assert draft.piece_count == 2
+    assert draft.cbm == Decimal("3.000")
+    assert draft.weight_kg == Decimal("1585.0")
+    assert "declared_cbm_mismatch:declared=4.000,calculated=3.000" in draft.validation_notes
+    assert "declared_weight_mismatch:declared=9999.0,calculated=1585.0" in draft.validation_notes
 
 
 def test_deterministic_extraction_clears_suspicious_model_piece_count() -> None:
@@ -848,7 +893,69 @@ def test_extract_quote_draft_with_agents_merges_cargo_and_address_outputs() -> N
     assert draft.weight_kg == Decimal("2270")
     assert draft.cargo_items[0].quantity == 200
     assert draft.cargo_items[0].weight_kg == Decimal("11.35")
-    assert "split_total_weight_across_single_cargo_line" in draft.validation_notes
+    assert "calculated_weight_from_cargo_items" in draft.validation_notes
+
+
+def test_extract_quote_draft_with_agents_recalculates_copied_cargo_totals() -> None:
+    cargo = """
+    {
+      "cbm": 4,
+      "weight_kg": 9999,
+      "piece_count": 2,
+      "packaging_type": "pallet",
+      "longest_side_cm": 125,
+      "explicit_pallet_count": 2,
+      "is_stackable": null,
+      "cargo_items": [{
+        "quantity": 2,
+        "length_cm": 120,
+        "width_cm": 100,
+        "height_cm": 125,
+        "weight_kg": 4999.5,
+        "cbm": 2,
+        "total_weight_kg": 9999,
+        "total_cbm": 4,
+        "source_span": "4cbm，2个托盘，120x100x125cm"
+      }],
+      "missing_fields": [],
+      "confidence": 90,
+      "extraction_notes": "copied the declared totals"
+    }
+    """
+    address = """
+    {
+      "address_line": "1729 chemin de château-bigot",
+      "postal_code": "G2L1H4",
+      "city": "Québec",
+      "province": "Québec",
+      "country": "Canada",
+      "address_type": "commercial",
+      "requires_liftgate": false,
+      "requires_pallet_jack": false,
+      "requires_appointment": false,
+      "detention_minutes": 0,
+      "missing_fields": [],
+      "confidence": 90,
+      "extraction_notes": "address parsed"
+    }
+    """
+    raw = """
+    4cbm，2个托盘，120x100x125cm
+    毛重：785公斤+800kg=9999kgs
+    到门地址:1729 chemin de château-bigot, Québec (Québec) Canada G2L 1H4
+    """
+
+    draft = extract_quote_draft_with_agents(raw, FakeDualAIClient(cargo=cargo, address=address))
+
+    assert draft.piece_count == 2
+    assert draft.cbm == Decimal("3.000")
+    assert draft.weight_kg == Decimal("1585.0")
+    assert [item.weight_kg for item in draft.cargo_items] == [
+        Decimal("785.00"),
+        Decimal("800.00"),
+    ]
+    assert "declared_cbm_mismatch:declared=4.000,calculated=3.000" in draft.validation_notes
+    assert "declared_weight_mismatch:declared=9999.0,calculated=1585.0" in draft.validation_notes
 
 
 def test_extract_quote_draft_with_agents_repairs_invalid_json_once() -> None:
