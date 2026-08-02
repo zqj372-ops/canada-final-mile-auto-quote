@@ -1483,13 +1483,13 @@ function SalesQuoteRecordDetail({ record }: { record: SalesQuoteRecord | null })
 }
 
 function FclSalesRecordDetail({ record }: { record: SalesQuoteRecord }) {
-  const resultJson = record.result_json;
+  const resultJson = record.public_snapshot;
   const quoteResult =
     resultJson && typeof resultJson === "object" && !Array.isArray(resultJson)
       ? ((resultJson as Record<string, unknown>).quote_result as FCLQuoteResult | undefined)
       : undefined;
   const normalized = quoteResult?.normalized_input;
-  const manual = record.status === "manual_required" || Boolean(quoteResult?.manual_review_required);
+  const manual = record.workflow_status === "pending_review" || record.workflow_status === "in_review" || record.workflow_status === "needs_sales_info" || Boolean(quoteResult?.manual_review_required);
   const visibleItems = quoteResult?.fee_items.filter((item) =>
     ["both", "quoteOnly", "merged"].includes(item.display_mode),
   );
@@ -1502,7 +1502,7 @@ function FclSalesRecordDetail({ record }: { record: SalesQuoteRecord }) {
           <h3 className="mt-1 break-all text-lg font-semibold text-slate-900">{record.quote_id}</h3>
           <p className="mt-1 text-sm text-slate-500">{formatRecordDate(record.created_at)}</p>
         </div>
-        <SalesRecordStatusBadge status={record.status} />
+        <SalesRecordStatusBadge status={record.workflow_status} label={record.status_label} />
       </div>
 
       {manual && (
@@ -1538,10 +1538,8 @@ function FclSalesRecordDetail({ record }: { record: SalesQuoteRecord }) {
 
       <div className="mt-4 grid gap-3 xl:grid-cols-2">
         <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-          <h4 className="text-sm font-semibold text-slate-700">客户原始询价</h4>
-          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
-            {record.customer_message}
-          </pre>
+          <h4 className="text-sm font-semibold text-slate-700">结构化询价摘要</h4>
+          <p className="mt-2 text-sm leading-6 text-slate-700">{record.destination} · {record.cargo_summary}</p>
         </div>
         <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
           <h4 className="text-sm font-semibold text-slate-700">客户回复</h4>
@@ -1616,16 +1614,17 @@ function RecordMetric({
   );
 }
 
-function SalesRecordStatusBadge({ status }: { status: string }) {
+function SalesRecordStatusBadge({ status, label }: { status: string; label?: string }) {
+  const positive = ["quoted", "ready_to_send", "sent", "accepted"].includes(status);
   return (
     <span
       className={`shrink-0 rounded-md border px-2 py-1 text-xs font-semibold ${
-        status === "quoted"
+        positive
           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
           : "border-amber-200 bg-amber-50 text-amber-700"
       }`}
     >
-      {status === "quoted" ? "已报价" : "人工复核"}
+      {label ?? (status === "quoted" ? "已报价" : status === "manual_required" ? "人工复核" : status)}
     </span>
   );
 }

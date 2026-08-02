@@ -311,6 +311,14 @@ class SalesQuoteRecord(Base):
     actor_name: Mapped[str | None] = mapped_column(String(128), index=True)
     actor_role: Mapped[str | None] = mapped_column(String(32), index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    workflow_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending_review", index=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    valid_until: Mapped[date | None] = mapped_column(Date)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_action_by: Mapped[str | None] = mapped_column(String(128))
+    last_action_role: Mapped[str | None] = mapped_column(String(32))
+    sent_snapshot_json: Mapped[dict[str, object] | None] = mapped_column(JSON)
     customer_message: Mapped[str] = mapped_column(Text, nullable=False)
     customer_reply: Mapped[str | None] = mapped_column(Text)
     request_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
@@ -328,6 +336,7 @@ class ManualQuoteTask(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     quote_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    sales_quote_record_id: Mapped[int | None] = mapped_column(ForeignKey("sales_quote_records.id", ondelete="SET NULL"), index=True)
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     risk_tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     request_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
@@ -336,6 +345,15 @@ class ManualQuoteTask(Base):
     assigned_to: Mapped[str | None] = mapped_column(String(128))
     resolved_price_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     resolved_note: Mapped[str | None] = mapped_column(Text)
+    fee_items: Mapped[list[dict[str, object]] | None] = mapped_column(JSON)
+    totals_by_currency: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    settlement_currency: Mapped[str | None] = mapped_column(String(8))
+    converted_total: Mapped[Decimal | None] = mapped_column(Numeric(18, 4))
+    valid_until: Mapped[date | None] = mapped_column(Date)
+    public_note: Mapped[str | None] = mapped_column(Text)
+    customer_terms: Mapped[list[str] | None] = mapped_column(JSON)
+    customer_reply: Mapped[str | None] = mapped_column(Text)
+    internal_note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -347,6 +365,23 @@ class ManualQuoteTask(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class QuoteWorkflowEvent(Base):
+    __tablename__ = "quote_workflow_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    record_id: Mapped[int] = mapped_column(ForeignKey("sales_quote_records.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    from_status: Mapped[str | None] = mapped_column(String(32))
+    to_status: Mapped[str | None] = mapped_column(String(32))
+    actor_id: Mapped[int | None] = mapped_column(Integer)
+    actor_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    actor_role: Mapped[str] = mapped_column(String(32), nullable=False)
+    public_note: Mapped[str | None] = mapped_column(Text)
+    internal_note: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
 
 class AIModelConfig(Base):

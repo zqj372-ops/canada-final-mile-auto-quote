@@ -329,7 +329,7 @@ export interface FCLQuoteResult {
 }
 
 export interface FCLAutoQuoteRequest {
-  raw_message: string;
+  raw_message?: string;
   confirmed_fields: FCLQuoteDraft;
   auto_submit_when_complete: boolean;
   ai_config_id?: number | null;
@@ -670,6 +670,11 @@ export interface ManualQuoteTask {
   resolved_note: string | null;
   created_at: string | null;
   updated_at: string | null;
+  sales_quote_record_id?: number | null;
+  fee_items?: JsonValue;
+  totals_by_currency?: Record<string, MoneyValue> | null;
+  customer_reply?: string | null;
+  public_note?: string | null;
 }
 
 export interface ManualQuoteTaskUpdate {
@@ -718,6 +723,10 @@ export interface SalesQuoteRecord {
   actor_name: string | null;
   actor_role: string | null;
   status: "quoted" | "manual_required" | string;
+  workflow_status: string;
+  status_label: string;
+  next_action: string;
+  allowed_actions: string[];
   customer_message: string;
   customer_reply: string | null;
   destination: string;
@@ -737,8 +746,11 @@ export interface SalesQuoteRecord {
   missing_fields: string[];
   manual_reason: string | null;
   created_at: string | null;
-  request_json: JsonValue;
-  result_json: JsonValue;
+  public_snapshot?: JsonValue;
+  timeline?: Array<{ event_type: string; from_status: string | null; to_status: string | null; actor_name: string; actor_role: string; public_note: string | null; created_at: string | null }>;
+  /** @deprecated legacy detail fields are omitted by the new API list response. */
+  request_json?: JsonValue;
+  result_json?: JsonValue;
 }
 
 export interface SalesQuoteManualPricePayload {
@@ -1328,6 +1340,18 @@ export function updateManualTask(
   });
 }
 
+export function claimManualTask(taskId: number): Promise<ManualQuoteTask> {
+  return request<ManualQuoteTask>(`/quotes/manual-tasks/${taskId}/claim`, { method: "POST", body: "{}" });
+}
+
+export function requestManualTaskInfo(taskId: number, public_note: string): Promise<ManualQuoteTask> {
+  return request<ManualQuoteTask>(`/quotes/manual-tasks/${taskId}/request-info`, { method: "POST", body: JSON.stringify({ public_note }) });
+}
+
+export function resolveManualTask(taskId: number, payload: Record<string, unknown>): Promise<ManualQuoteTask> {
+  return request<ManualQuoteTask>(`/quotes/manual-tasks/${taskId}/resolve`, { method: "POST", body: JSON.stringify(payload) });
+}
+
 export function getQuoteAudit(quoteId: string): Promise<QuoteAuditLog> {
   return request<QuoteAuditLog>(`/quotes/audit/${encodeURIComponent(quoteId)}`);
 }
@@ -1349,7 +1373,7 @@ export function getQuoteErrorSummary(limit = 20): Promise<QuoteErrorSummary> {
 }
 
 export function listSalesQuoteRecords(params: {
-  status?: "quoted" | "manual_required" | "";
+  status?: string;
   limit?: number;
 } = {}): Promise<SalesQuoteRecord[]> {
   const search = new URLSearchParams();
@@ -1361,6 +1385,22 @@ export function listSalesQuoteRecords(params: {
   }
   const query = search.toString();
   return request<SalesQuoteRecord[]>(`/quotes/sales-records${query ? `?${query}` : ""}`, {}, "quote");
+}
+
+export function getSalesQuoteRecord(recordId: number): Promise<SalesQuoteRecord> {
+  return request<SalesQuoteRecord>(`/quotes/sales-records/${recordId}`, {}, "quote");
+}
+
+export function markSalesQuoteSent(recordId: number, payload: { channel: string; note?: string }): Promise<SalesQuoteRecord> {
+  return request<SalesQuoteRecord>(`/quotes/sales-records/${recordId}/mark-sent`, { method: "POST", body: JSON.stringify(payload) }, "quote");
+}
+
+export function recordSalesQuoteOutcome(recordId: number, payload: { outcome: string; note?: string }): Promise<SalesQuoteRecord> {
+  return request<SalesQuoteRecord>(`/quotes/sales-records/${recordId}/outcome`, { method: "POST", body: JSON.stringify(payload) }, "quote");
+}
+
+export function submitSalesAdditionalInfo(recordId: number, confirmed_fields: FCLQuoteDraft): Promise<SalesQuoteRecord> {
+  return request<SalesQuoteRecord>(`/quotes/sales-records/${recordId}/additional-info`, { method: "POST", body: JSON.stringify({ confirmed_fields }) }, "quote");
 }
 
 export function updateSalesQuoteManualPrice(

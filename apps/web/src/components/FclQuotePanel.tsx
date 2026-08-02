@@ -124,7 +124,6 @@ export default function FclQuotePanel({
     try {
       const response = await calculateFCLAutoQuote(
         {
-          raw_message: "",
           confirmed_fields: draft,
           auto_submit_when_complete: false,
         },
@@ -147,7 +146,6 @@ export default function FclQuotePanel({
     try {
       const response = await calculateFCLAutoQuote(
         {
-          raw_message: "",
           confirmed_fields: draft,
           auto_submit_when_complete: true,
         },
