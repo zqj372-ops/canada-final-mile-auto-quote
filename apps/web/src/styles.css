@@ -118,6 +118,23 @@ textarea {
     @apply mt-1 min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-base text-slate-950 shadow-sm outline-none transition focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500;
   }
 
+  .fcl-form .field-input {
+    @apply mt-0.5 min-h-10 px-2.5 py-1.5;
+  }
+
+  .fcl-form details > summary {
+    @apply list-none;
+  }
+
+  .fcl-form details > summary::after {
+    content: "▾";
+    @apply float-right text-xs text-slate-400;
+  }
+
+  .fcl-form details:not([open]) > summary::after {
+    content: "▸";
+  }
+
   .field-hint {
     @apply mt-1 text-xs leading-5 text-slate-500;
   }
@@ -7285,4 +7302,38 @@ body {
     align-items: flex-start;
     flex-direction: column;
   }
+}
+
+/* Sales front desk font bump: Canada final-mile + AI FCL */
+.sales-frontdesk {
+  font-size: 1.0625rem;
+}
+.sales-frontdesk .text-xs {
+  font-size: 0.875rem;
+}
+.sales-frontdesk .text-sm {
+  font-size: 1rem;
+}
+.sales-frontdesk .text-base {
+  font-size: 1.125rem;
+}
+.sales-frontdesk .text-lg {
+  font-size: 1.25rem;
+}
+.sales-frontdesk .text-xl {
+  font-size: 1.375rem;
+}
+.sales-frontdesk .field-input {
+  font-size: 1.05rem !important;
+}
+.sales-frontdesk .btn-primary,
+.sales-frontdesk .btn-secondary,
+.sales-frontdesk .btn-danger {
+  font-size: 1rem;
+}
+.sales-frontdesk .sales-page-heading h1 {
+  font-size: clamp(1.8rem, 3vw, 2.6rem);
+}
+.sales-frontdesk .sales-page-heading p {
+  font-size: 1.05rem;
 }

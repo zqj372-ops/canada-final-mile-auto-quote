@@ -21,6 +21,7 @@ const OperationsWorkbenchPage = lazy(() => import("./pages/OperationsWorkbenchPa
 const PricingSettingsPage = lazy(() => import("./pages/PricingSettingsPage"));
 const QuotePage = lazy(() => import("./pages/QuotePage"));
 const QuoteSettingsPage = lazy(() => import("./pages/QuoteSettingsPage"));
+const FclSettingsPage = lazy(() => import("./pages/FclSettingsPage"));
 const SearchSettingsPage = lazy(() => import("./pages/SearchSettingsPage"));
 const UserSettingsPage = lazy(() => import("./pages/UserSettingsPage"));
 
@@ -35,6 +36,7 @@ type RoutePath =
   | "/learning-candidates"
   | "/audit"
   | "/settings/quote"
+  | "/settings/fcl"
   | "/settings/pricing"
   | "/settings/cities"
   | "/settings/ai"
@@ -83,6 +85,7 @@ const adminRoutes: Array<{
   { path: "/quote", label: "销售前台", description: "报价", group: "core", icon: "truck" },
   { path: "/ops", label: "处理工作台", description: "复核/诊断/学习", group: "manual", icon: "user" },
   { path: "/settings/quote", label: "报价规则", description: "前台", group: "pricing", icon: "file" },
+  { path: "/settings/fcl", label: "整柜报价设置", description: "FCL", group: "pricing", icon: "box", adminOnly: true },
   { path: "/settings/pricing", label: "价格矩阵", description: "Zone", group: "pricing", icon: "calculator" },
   { path: "/settings/cities", label: "城市配置", description: "城市 / FSA", group: "pricing", icon: "map", adminOnly: true },
   { path: "/settings/ai", label: "AI 模型配置", description: "模型", group: "system", icon: "settings" },
@@ -186,6 +189,9 @@ export default function App() {
     }
     if (path === "/settings/quote") {
       return <QuoteSettingsPage />;
+    }
+    if (path === "/settings/fcl") {
+      return <FclSettingsPage />;
     }
     if (path === "/settings/pricing") {
       return <PricingSettingsPage />;
@@ -539,6 +545,9 @@ function normalizePath(pathname: string): RoutePath {
   }
   if (strippedPath === "/settings/quote") {
     return "/settings/quote";
+  }
+  if (strippedPath === "/settings/fcl") {
+    return "/settings/fcl";
   }
   if (strippedPath === "/settings/pricing") {
     return "/settings/pricing";

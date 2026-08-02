@@ -14,6 +14,7 @@ import {
   type AddressType,
   type CurrentActor,
   type EmailConfigPublic,
+  type FCLQuoteResult,
   type PackagingType,
   type QuoteSearchContext,
   type QuoteWorkbenchConfig,
@@ -21,6 +22,7 @@ import {
   type ZoneQuoteResult,
 } from "../api/client";
 import AiQuoteInputPanel from "../components/AiQuoteInputPanel";
+import FclQuotePanel from "../components/FclQuotePanel";
 import AddressMapPreview from "../components/AddressMapPreview";
 import AccountMenu from "../components/AccountMenu";
 import LogoutConfirmationDialog from "../components/LogoutConfirmationDialog";
@@ -29,6 +31,19 @@ import ParsedCargoTable from "../components/ParsedCargoTable";
 import QuoteCopyButton from "../components/QuoteCopyButton";
 import QuoteCalculationPanel from "../components/QuoteCalculationPanel";
 import QuoteRiskPanel from "../components/QuoteRiskPanel";
+import {
+  FCL_ADDRESS_TYPES,
+  FCL_CUSTOMER_TYPES,
+  FCL_DEADLINE_STRICTNESS,
+  FCL_EXPORT_DECLARATIONS,
+  FCL_IMPORTER_EXISTS,
+  FCL_SERVICE_STAGES,
+  FCL_SPECIAL_ATTRIBUTES,
+  FCL_TAX_INCLUDED,
+  FCL_TRADE_TERMS,
+  labelOf,
+} from "../components/fclFieldLabels";
+import { printFclQuoteHtml } from "../components/fclQuoteHtml";
 import { parseQuoteInput, type ParsedCargoItem, type ParsedQuoteInput } from "../utils/quoteParser";
 
 type WorkbenchStatus =
@@ -40,6 +55,7 @@ type WorkbenchStatus =
   | "manual_required";
 
 type SalesQuoteTab = "quote" | "records";
+type QuoteMode = "final_mile" | "fcl";
 type QuoteWorkspaceStage = "input" | "parsed";
 type SalesQuoteRecordStatus = "quoted" | "manual_required";
 type SalesQuoteRecordFilter = SalesQuoteRecordStatus | "all";
@@ -74,6 +90,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   const [isCheckingAuth, setIsCheckingAuth] = useState(Boolean(getStoredAuthToken()));
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [activeSalesTab, setActiveSalesTab] = useState<SalesQuoteTab>("quote");
+  const [quoteMode, setQuoteMode] = useState<QuoteMode>("final_mile");
   const [workspaceStage, setWorkspaceStage] = useState<QuoteWorkspaceStage>("input");
   const [isResultModalOpen, setIsResultModalOpen] = useState(false);
   const [quoteRecords, setQuoteRecords] = useState<SalesQuoteRecord[]>([]);
@@ -455,23 +472,45 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
         <main id="top">
         <section className="sales-page-heading">
           <div className="min-w-0">
-            <h1>{activeSalesTab === "quote" ? "AI 智能报价" : "报价记录"}</h1>
+            <h1>{activeSalesTab === "quote" ? (quoteMode === "fcl" ? "AI 整柜报价" : "AI 智能报价") : "报价记录"}</h1>
             <p>
               {activeSalesTab === "quote"
-                ? "粘贴客户询价，系统会自动解析货物、地址与服务要求，再交给 Quote Engine 查表报价。"
+                ? quoteMode === "fcl"
+                  ? "填写结构化询价字段；货物重算与计价全部由确定性引擎完成。"
+                  : "粘贴客户询价，系统会自动解析货物、地址与服务要求，再交给 Quote Engine 查表报价。"
                 : "回查自己的报价记录，筛选人工复核状态，并复制已生成的客户回复。"}
             </p>
           </div>
           {activeSalesTab === "quote" ? (
-            <span
-              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                manualRequired
-                  ? "border-amber-200 bg-amber-50 text-amber-700"
-                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
-              }`}
-            >
-              {statusLabel}
-            </span>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-0.5 text-xs font-semibold" role="group" aria-label="报价模式">
+                <button
+                  className={`rounded-md px-3 py-1.5 ${quoteMode === "final_mile" ? "bg-teal-700 text-white" : "text-slate-600"}`}
+                  type="button"
+                  onClick={() => setQuoteMode("final_mile")}
+                >
+                  加拿大尾程
+                </button>
+                <button
+                  className={`rounded-md px-3 py-1.5 ${quoteMode === "fcl" ? "bg-teal-700 text-white" : "text-slate-600"}`}
+                  type="button"
+                  onClick={() => setQuoteMode("fcl")}
+                >
+                  AI 整柜
+                </button>
+              </div>
+              {quoteMode === "final_mile" && (
+                <span
+                  className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                    manualRequired
+                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                      : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  }`}
+                >
+                  {statusLabel}
+                </span>
+              )}
+            </div>
           ) : (
             <div className="flex flex-wrap gap-2">
               <button className="btn-secondary min-h-10 px-3 py-1" type="button" onClick={() => void refreshSalesRecords()} disabled={isLoadingRecords}>
@@ -509,6 +548,9 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
           )}
 
           {activeSalesTab === "quote" ? (
+            quoteMode === "fcl" ? (
+              <FclQuotePanel onRecordsRefresh={refreshSalesRecords} />
+            ) : (
             <div className="grid gap-4">
               <nav className="sales-stage-tabs" aria-label="报价工作区阶段">
                 <button
@@ -595,6 +637,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
                 }}
               />
             </div>
+            )
           ) : (
             <SalesQuoteRecordsPanel
               filter={recordFilter}
@@ -1363,6 +1406,9 @@ function SalesQuoteRecordDetail({ record }: { record: SalesQuoteRecord | null })
 
   const canCopyReply = record.status === "quoted" && Boolean(record.customer_reply?.trim());
   const manualOverride = getManualOverride(record);
+  if (record.quote_type === "fcl") {
+    return <FclSalesRecordDetail record={record} />;
+  }
 
   return (
     <article className="rounded-md border border-slate-200 bg-white p-4">
@@ -1432,6 +1478,119 @@ function SalesQuoteRecordDetail({ record }: { record: SalesQuoteRecord | null })
           </div>
         </div>
       </div>
+    </article>
+  );
+}
+
+function FclSalesRecordDetail({ record }: { record: SalesQuoteRecord }) {
+  const resultJson = record.result_json;
+  const quoteResult =
+    resultJson && typeof resultJson === "object" && !Array.isArray(resultJson)
+      ? ((resultJson as Record<string, unknown>).quote_result as FCLQuoteResult | undefined)
+      : undefined;
+  const normalized = quoteResult?.normalized_input;
+  const manual = record.status === "manual_required" || Boolean(quoteResult?.manual_review_required);
+  const visibleItems = quoteResult?.fee_items.filter((item) =>
+    ["both", "quoteOnly", "merged"].includes(item.display_mode),
+  );
+
+  return (
+    <article className="rounded-md border border-slate-200 bg-white p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase text-slate-400">FCL Quote ID</p>
+          <h3 className="mt-1 break-all text-lg font-semibold text-slate-900">{record.quote_id}</h3>
+          <p className="mt-1 text-sm text-slate-500">{formatRecordDate(record.created_at)}</p>
+        </div>
+        <SalesRecordStatusBadge status={record.status} />
+      </div>
+
+      {manual && (
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-700">
+          已提交人工复核。{(quoteResult?.manual_reasons ?? []).join("、") || record.manual_reason || "请等待后台确认后再回复客户金额。"}
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <RecordMetric label="报价金额" value={formatRecordMoney(record)} strong wide />
+        <RecordMetric label="线路" value={record.destination} />
+        <RecordMetric label="货物" value={record.cargo_summary} />
+        <RecordMetric label="来源" value={record.source_type === "fcl_rate_card" ? "整柜费率卡" : "人工复核"} />
+        <RecordMetric label="报价有效期至" value={quoteResult?.quote_valid_until ?? "—"} />
+      </div>
+
+      {normalized && (
+        <div className="mt-4 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 xl:grid-cols-3">
+          <RecordMetric label="客户 / 联系人" value={`${normalized.customer_name || "—"} / ${normalized.contact || "—"}`} />
+          <RecordMetric label="客户类型" value={labelOf(FCL_CUSTOMER_TYPES, normalized.customer_type)} />
+          <RecordMetric label="目的邮编 / 地址" value={`${normalized.destination_postal_code || "—"} / ${normalized.destination_address || "—"}`} />
+          <RecordMetric label="货名 / 材质用途" value={`${normalized.cargo_name || "—"}${normalized.cargo_details ? ` / ${normalized.cargo_details}` : ""}`} />
+          <RecordMetric label="货值 / HS / 原产地" value={`${normalized.cargo_value ? `${normalized.cargo_value_currency ?? ""} ${normalized.cargo_value}` : "—"} / ${normalized.hs_code || "—"} / ${normalized.origin_country || "—"}`} />
+          <RecordMetric label="特殊属性" value={(normalized.special_attributes ?? []).map((value) => labelOf(FCL_SPECIAL_ATTRIBUTES, value)).join("、") || "—"} />
+          <RecordMetric label="备货 / ETD / 期望到门" value={`${normalized.ready_date || "—"} / ${normalized.target_etd || "—"} / ${normalized.expected_delivery_date || "—"}（${labelOf(FCL_DEADLINE_STRICTNESS, normalized.deadline_strictness)}）`} />
+          <RecordMetric label="贸易条款 / 出口报关" value={`${labelOf(FCL_TRADE_TERMS, normalized.trade_terms)} / ${labelOf(FCL_EXPORT_DECLARATIONS, normalized.export_declaration)}`} />
+          <RecordMetric label="进口商 / 包税" value={`${labelOf(FCL_IMPORTER_EXISTS, normalized.importer_exists)} / ${labelOf(FCL_TAX_INCLUDED, normalized.tax_included)}`} />
+          <RecordMetric label="服务环节" value={(normalized.service_stages ?? []).map((value) => labelOf(FCL_SERVICE_STAGES, value)).join("、") || "—"} />
+          <RecordMetric label="到门信息" value={`${labelOf(FCL_ADDRESS_TYPES, normalized.address_type)} / 尾板 ${normalized.tail_lift || "—"} / 叉车 ${normalized.forklift || "—"}`} />
+          <RecordMetric label="平台仓 / 预约" value={`${normalized.platform_warehouse || "—"} / ${normalized.appointment_window || "—"}`} />
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-3 xl:grid-cols-2">
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <h4 className="text-sm font-semibold text-slate-700">客户原始询价</h4>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+            {record.customer_message}
+          </pre>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <h4 className="text-sm font-semibold text-slate-700">客户回复</h4>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+            {record.customer_reply || "人工复核单不生成可直接发送的报价话术。"}
+          </pre>
+          <div className="mt-3">
+            <QuoteCopyButton text={record.customer_reply ?? ""} disabled={manual || !record.customer_reply} />
+          </div>
+        </div>
+      </div>
+
+      {quoteResult && (
+        <>
+          <div className="mt-4 overflow-x-auto rounded-md border border-slate-200">
+            <table className="w-full min-w-[520px] text-left text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-xs text-slate-500">
+                  <th className="px-3 py-2">费用项目</th>
+                  <th className="px-3 py-2">数量</th>
+                  <th className="px-3 py-2">单价</th>
+                  <th className="px-3 py-2">金额</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(visibleItems ?? []).map((item) => (
+                  <tr key={item.item_name} className="border-t border-slate-100">
+                    <td className="px-3 py-2">{item.item_name}</td>
+                    <td className="px-3 py-2">{item.quantity} {item.unit}</td>
+                    <td className="px-3 py-2">{item.unit_price === null || item.unit_price === "" ? "—" : `${item.currency} ${item.unit_price}`}</td>
+                    <td className="px-3 py-2">{item.amount === null || item.amount === "" ? "按实际/人工确认" : `${item.currency} ${item.amount}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <span className="text-sm font-semibold text-slate-800">{formatRecordMoney(record)}</span>
+            <button
+              className="btn-primary"
+              type="button"
+              disabled={manual}
+              onClick={() => printFclQuoteHtml(quoteResult)}
+            >
+              打印 A4 报价单 / 另存为 PDF
+            </button>
+          </div>
+        </>
+      )}
     </article>
   );
 }
@@ -1915,6 +2074,21 @@ function salesRecordFilterLabel(
 function formatRecordMoney(record: SalesQuoteRecord): string {
   if (record.status === "manual_required") {
     return "待人工确认";
+  }
+  if (record.quote_type === "fcl") {
+    const totals = record.totals_by_currency ?? {};
+    const entries = Object.entries(totals)
+      .filter(([, value]) => value !== null && value !== undefined && value !== "")
+      .map(([currency, value]) => `${currency} ${value}`);
+    if (
+      record.currency_code &&
+      record.total_price_usd !== null &&
+      record.total_price_usd !== undefined &&
+      record.total_price_usd !== ""
+    ) {
+      entries.push(`折算 ${record.currency_code} ${record.total_price_usd}`);
+    }
+    return entries.length ? entries.join("；") : "待匹配";
   }
   const value = record.total_price_usd;
   if (value === null || value === undefined || value === "") {
