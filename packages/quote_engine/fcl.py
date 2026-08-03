@@ -361,6 +361,8 @@ class FCLFeeLine(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     item_name: str = Field(min_length=1, max_length=200)
+    fee_id: str | None = Field(default=None, max_length=100)
+    scope: Literal["per_container", "per_shipment", "per_piece", "per_kg", "per_cbm"] | None = None
     description: str = Field(default="", max_length=500)
     unit: Literal["container", "shipment", "piece", "kg", "cbm"]
     currency: str
@@ -647,6 +649,7 @@ def calculate_fcl_quote(
     fee_items: list[FCLFeeItemPublic] = []
     internal_fee_items: list[dict[str, Any]] = []
     totals: dict[str, Decimal] = defaultdict(Decimal)
+    applied_shipment_fee_ids: set[str] = set()
 
     if not reasons:
         for container_type, container_quantity in quantities.items():
@@ -667,7 +670,10 @@ def calculate_fcl_quote(
             public_cards.append(_public_rate_card(card_data, card_payload))
             internal_cards.append(card_data)
             for raw_line in card_payload.fee_lines:
-                quantity = _line_quantity(raw_line.unit, container_quantity, cargo)
+                fee_scope = raw_line.scope or raw_line.unit
+                if fee_scope == "per_shipment" and raw_line.fee_id and raw_line.fee_id in applied_shipment_fee_ids:
+                    continue
+                quantity = _line_quantity(fee_scope, container_quantity, cargo)
                 if quantity is None:
                     reasons.append(f"missing_quantity:{raw_line.item_name}")
                     continue
@@ -682,6 +688,8 @@ def calculate_fcl_quote(
                     elif included:
                         amount = money(unit_price * quantity)
                         totals[raw_line.currency] += amount
+                        if fee_scope == "per_shipment" and raw_line.fee_id:
+                            applied_shipment_fee_ids.add(raw_line.fee_id)
                 internal_fee_items.append(
                     {
                         **raw_line.model_dump(mode="json"),
@@ -709,6 +717,27 @@ def calculate_fcl_quote(
                     )
                 )
 
+    if config.markup_fixed > 0:
+        if not config.settlement_currency:
+            reasons.append("markup_fixed_requires_settlement_currency")
+        elif not reasons:
+            fixed_amount = money(config.markup_fixed)
+            totals[config.settlement_currency] += fixed_amount
+            fee_items.append(
+                FCLFeeItemPublic(
+                    item_name="固定加价（每票）",
+                    description="",
+                    quantity=Decimal("1"),
+                    unit="shipment",
+                    unit_price=fixed_amount,
+                    amount=fixed_amount,
+                    currency=config.settlement_currency,
+                    pricing_status="auto",
+                    display_mode="both",
+                    included=True,
+                    public_note="",
+                )
+            )
     if fee_items and not any(item.amount is not None for item in fee_items):
         reasons.append("no_automatic_fee_total")
 
@@ -955,6 +984,13 @@ def _public_rate_card(data: Mapping[str, Any], payload: FCLRateCardPayload) -> d
 
 
 def _line_quantity(unit: str, container_quantity: int, cargo: FCLCargoCalculation) -> Decimal | None:
+    unit = {
+        "per_container": "container",
+        "per_shipment": "shipment",
+        "per_piece": "piece",
+        "per_kg": "kg",
+        "per_cbm": "cbm",
+    }.get(unit, unit)
     if unit == "container":
         return Decimal(container_quantity)
     if unit == "shipment":
@@ -972,10 +1008,10 @@ def _resolve_unit_price(line: FCLFeeLine, config: FCLQuoteConfig) -> Decimal | N
     if line.pricing_status != "auto":
         return None
     if line.sales_unit_price is not None:
-        return money(line.sales_unit_price)
+        return line.sales_unit_price
     if line.cost_unit_price is None:
         return None
-    return money(line.cost_unit_price * (Decimal("1") + config.markup_percent / Decimal("100")) + config.markup_fixed)
+    return line.cost_unit_price * (Decimal("1") + config.markup_percent / Decimal("100"))
 
 
 def _find_exchange_rate(
