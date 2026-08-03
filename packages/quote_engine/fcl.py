@@ -18,7 +18,7 @@ FCL_CURRENCIES = ("USD", "CAD", "CNY")
 FCL_DISPLAY_MODES = ("both", "quoteOnly", "hiddenIncluded", "hiddenExcluded", "merged")
 FCL_UNITS = ("container", "shipment", "piece", "kg", "cbm")
 FCL_PRICING_STATUSES = ("auto", "actual", "manual", "quote_required")
-FCL_SERVICE_SCOPES = ("port-to-port", "door-to-port", "port-to-door", "door-to-door")
+FCL_SERVICE_SCOPES = ("port-to-port", "port-to-door")
 FCL_CUSTOMER_TYPES = ("importer", "exporter", "platform_seller", "forwarder", "warehouse", "other")
 FCL_SPECIAL_ATTRIBUTES = (
     "general_cargo",
@@ -104,7 +104,6 @@ class FCLQuoteDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     customer_name: str | None = Field(default=None, max_length=200)
-    contact: str | None = Field(default=None, max_length=200)
     customer_type: str | None = Field(default=None, max_length=32)
     pol: str | None = Field(default=None, max_length=64)
     pod: str | None = Field(default=None, max_length=64)
@@ -133,7 +132,6 @@ class FCLQuoteDraft(BaseModel):
     carrier: str | None = Field(default=None, max_length=128)
     service_preference: str | None = Field(default=None, max_length=128)
     service_scope: str | None = None
-    service_stages: list[str] = Field(default_factory=list, max_length=20)
     trade_terms: str | None = Field(default=None, max_length=16)
     export_declaration: str | None = Field(default=None, max_length=16)
     importer_exists: str | None = Field(default=None, max_length=16)
@@ -150,8 +148,8 @@ class FCLQuoteDraft(BaseModel):
     platform_warehouse: str | None = Field(default=None, max_length=300)
     declaration_acknowledged: bool | None = None
     notes: str | None = Field(default=None, max_length=5000)
-    confidence: int = Field(default=0, ge=0, le=100)
-    extraction_notes: list[str] = Field(default_factory=list, max_length=30)
+    vessel: str | None = Field(default=None, max_length=128)
+    voyage: str | None = Field(default=None, max_length=128)
 
     @field_validator("customer_type")
     @classmethod
@@ -162,11 +160,6 @@ class FCLQuoteDraft(BaseModel):
     @classmethod
     def validate_special_attributes(cls, values: list[str]) -> list[str]:
         return _validate_enum_list(values, FCL_SPECIAL_ATTRIBUTES, "special attribute")
-
-    @field_validator("service_stages")
-    @classmethod
-    def validate_service_stages(cls, values: list[str]) -> list[str]:
-        return _validate_enum_list(values, FCL_SERVICE_STAGES, "service stage")
 
     @field_validator("trade_terms")
     @classmethod

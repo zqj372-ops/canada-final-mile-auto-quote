@@ -27,10 +27,8 @@ logger = logging.getLogger(__name__)
 class FCLAutoQuoteRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    raw_message: str = Field(default="", max_length=20000, description="历史兼容字段；FCL 不再解析")
-    confirmed_fields: FCLQuoteDraft = Field(default_factory=FCLQuoteDraft)
-    auto_submit_when_complete: bool = True
-    ai_config_id: int | None = None
+    customer_id: int = Field(gt=0)
+    confirmed_fields: FCLQuoteDraft
 
 
 class FCLAutoQuoteResponse(BaseModel):
@@ -48,6 +46,7 @@ def calculate_fcl_auto_quote(
     db: Session,
     payload: FCLAutoQuoteRequest,
     actor: CurrentActor | None = None,
+    idempotency_key: str | None = None,
 ) -> FCLAutoQuoteResponse:
     draft = payload.confirmed_fields.model_copy(update={"extraction_notes": ["structured_form"]})
     repository = FCLQuoteConfigRepository(db)
@@ -57,19 +56,6 @@ def calculate_fcl_auto_quote(
 
     if active_config is None:
         raise HTTPException(status_code=409, detail="暂无已发布整柜报价配置，无法自动报价。")
-    if not payload.auto_submit_when_complete:
-        cargo = calculate_cargo(draft)
-        missing = _missing_fields(draft, active_config.required_fields, cargo)
-        response = FCLAutoQuoteResponse(
-            extraction=draft,
-            cargo_recalculation=cargo,
-            quote_result=None,
-            customer_reply="字段已提取，请确认后提交整柜报价。",
-            missing_fields=missing,
-            manual_review_required=False,
-        )
-        return response
-
     rate_cards = repository.list_rate_cards(status="published")
     result, internal_snapshot = calculate_fcl_quote(
         draft,
@@ -93,7 +79,6 @@ def calculate_fcl_auto_quote(
     )
     internal_snapshot.update(
         {
-            "raw_message": payload.raw_message,
             "request": payload.model_dump(mode="json"),
             "config": active_config.model_dump(mode="json"),
             "config_version": config_version,
