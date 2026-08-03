@@ -5,7 +5,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.orm import Session
 
 from apps.api.auth import CurrentActor
@@ -29,6 +29,19 @@ class FCLAutoQuoteRequest(BaseModel):
 
     customer_id: int = Field(gt=0)
     confirmed_fields: FCLQuoteDraft
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_legacy_form_fields(cls, values: object) -> object:
+        if not isinstance(values, dict):
+            return values
+        legacy = {"contact", "confidence", "extraction_notes", "service_stages", "customer_name"}
+        confirmed = values.get("confirmed_fields")
+        if isinstance(confirmed, dict):
+            forbidden = sorted(legacy.intersection(confirmed))
+            if forbidden:
+                raise ValueError(f"legacy FCL fields are not accepted: {', '.join(forbidden)}")
+        return values
 
 
 class FCLAutoQuoteResponse(BaseModel):

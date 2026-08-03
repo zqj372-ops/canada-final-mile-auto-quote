@@ -96,6 +96,8 @@ class FCLCargoItem(BaseModel):
     weight: Decimal | None = Field(default=None, ge=0)
     weight_unit: Literal["g", "kg", "lb"] = "kg"
     weight_kg: Decimal | None = Field(default=None, ge=0)
+    piece_weights_kg: list[Decimal] = Field(default_factory=list)
+    line_total_weight: Decimal | None = Field(default=None, ge=0)
     total_weight_kg: Decimal | None = Field(default=None, ge=0)
     total_volume_cbm: Decimal | None = Field(default=None, ge=0)
 
@@ -104,6 +106,7 @@ class FCLQuoteDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     customer_name: str | None = Field(default=None, max_length=200)
+    contact: str | None = Field(default=None, max_length=200)
     customer_type: str | None = Field(default=None, max_length=32)
     pol: str | None = Field(default=None, max_length=64)
     pod: str | None = Field(default=None, max_length=64)
@@ -132,6 +135,7 @@ class FCLQuoteDraft(BaseModel):
     carrier: str | None = Field(default=None, max_length=128)
     service_preference: str | None = Field(default=None, max_length=128)
     service_scope: str | None = None
+    service_stages: list[str] = Field(default_factory=list, max_length=20)
     trade_terms: str | None = Field(default=None, max_length=16)
     export_declaration: str | None = Field(default=None, max_length=16)
     importer_exists: str | None = Field(default=None, max_length=16)
@@ -148,6 +152,8 @@ class FCLQuoteDraft(BaseModel):
     platform_warehouse: str | None = Field(default=None, max_length=300)
     declaration_acknowledged: bool | None = None
     notes: str | None = Field(default=None, max_length=5000)
+    confidence: int = Field(default=0, ge=0, le=100)
+    extraction_notes: list[str] = Field(default_factory=list, max_length=30)
     vessel: str | None = Field(default=None, max_length=128)
     voyage: str | None = Field(default=None, max_length=128)
 
@@ -160,6 +166,11 @@ class FCLQuoteDraft(BaseModel):
     @classmethod
     def validate_special_attributes(cls, values: list[str]) -> list[str]:
         return _validate_enum_list(values, FCL_SPECIAL_ATTRIBUTES, "special attribute")
+
+    @field_validator("service_stages")
+    @classmethod
+    def validate_service_stages(cls, values: list[str]) -> list[str]:
+        return _validate_enum_list(values, FCL_SERVICE_STAGES, "service stage")
 
     @field_validator("trade_terms")
     @classmethod
@@ -495,21 +506,43 @@ def calculate_cargo(draft: FCLQuoteDraft) -> FCLCargoCalculation:
     items: list[dict[str, Any]] = []
     computed_weight = Decimal("0")
     computed_volume = Decimal("0")
-    computed_weight_available = False
-    computed_volume_available = False
+    all_weight_complete = bool(draft.cargo_items)
+    all_volume_complete = bool(draft.cargo_items)
 
     for index, item in enumerate(draft.cargo_items, start=1):
+        weight_evidence: dict[str, Decimal] = {}
         per_piece_weight: Decimal | None = item.weight_kg
         if per_piece_weight is None and item.weight is not None:
             per_piece_weight = item.weight * {"g": Decimal("0.001"), "kg": Decimal("1"), "lb": Decimal("0.45359237")} [item.weight_unit]
-        total_weight = item.total_weight_kg
         if per_piece_weight is not None:
-            calculated_total_weight = per_piece_weight * item.quantity
-            if total_weight is not None and abs(total_weight - calculated_total_weight) > Decimal("0.01"):
-                conflicts.append(f"cargo_items[{index}].weight_conflict")
-            total_weight = calculated_total_weight
-            computed_weight += calculated_total_weight
-            computed_weight_available = True
+            weight_evidence["unit_weight"] = per_piece_weight * item.quantity
+        if item.piece_weights_kg:
+            if len(item.piece_weights_kg) != item.quantity:
+                conflicts.append("piece_weight_count_mismatch")
+            else:
+                weight_evidence["piece_weights"] = sum(item.piece_weights_kg, Decimal("0"))
+        line_total_weight = item.line_total_weight if item.line_total_weight is not None else item.total_weight_kg
+        if line_total_weight is not None:
+            weight_evidence["line_total_weight"] = line_total_weight
+        if not weight_evidence:
+            all_weight_complete = False
+            conflicts.append("cargo_items_incomplete")
+            total_weight = None
+        else:
+            evidence_values = list(weight_evidence.values())
+            if any(value != evidence_values[0] for value in evidence_values[1:]):
+                conflicts.append("line_weight_evidence_conflict")
+            total_weight = evidence_values[0]
+            computed_weight += total_weight
+            if item.piece_weights_kg:
+                max_weight = max(item.piece_weights_kg)
+            elif per_piece_weight is not None:
+                max_weight = per_piece_weight
+            elif item.quantity == 1:
+                max_weight = total_weight
+            else:
+                max_weight = None
+                conflicts.append("max_single_weight_unknown")
 
         total_volume = item.total_volume_cbm
         if item.length is not None and item.width is not None and item.height is not None:
@@ -520,7 +553,12 @@ def calculate_cargo(draft: FCLQuoteDraft) -> FCLCargoCalculation:
                 conflicts.append(f"cargo_items[{index}].volume_conflict")
             total_volume = calculated_total_volume
             computed_volume += calculated_total_volume
-            computed_volume_available = True
+        elif total_volume is not None:
+            computed_volume += total_volume
+        else:
+            all_volume_complete = False
+            conflicts.append("cargo_items_incomplete")
+            total_volume = None
 
         items.append(
             {
@@ -537,25 +575,22 @@ def calculate_cargo(draft: FCLQuoteDraft) -> FCLCargoCalculation:
         )
 
     piece_count = sum(item.quantity for item in draft.cargo_items) if draft.cargo_items else draft.declared_piece_count
-    total_weight = computed_weight.quantize(HUNDREDTH, rounding=ROUND_HALF_UP) if computed_weight_available else draft.declared_total_weight_kg
-    total_volume = computed_volume.quantize(THOUSANDTH, rounding=ROUND_HALF_UP) if computed_volume_available else draft.declared_total_volume_cbm
+    complete_rows = all_weight_complete and all_volume_complete
+    total_weight = computed_weight.quantize(HUNDREDTH, rounding=ROUND_HALF_UP) if complete_rows else None
+    total_volume = computed_volume.quantize(THOUSANDTH, rounding=ROUND_HALF_UP) if complete_rows else None
 
     if draft.declared_piece_count is not None and piece_count is not None and draft.cargo_items and draft.declared_piece_count != piece_count:
         conflicts.append("declared_piece_count_conflict")
-    if computed_weight_available and draft.declared_total_weight_kg is not None and abs(draft.declared_total_weight_kg - computed_weight) > Decimal("0.01"):
+    if all_weight_complete and draft.declared_total_weight_kg is not None and abs(draft.declared_total_weight_kg - computed_weight) > Decimal("0.01"):
         conflicts.append("declared_total_weight_conflict")
-    if computed_volume_available and draft.declared_total_volume_cbm is not None and abs(draft.declared_total_volume_cbm - computed_volume) > Decimal("0.000001"):
+    if all_volume_complete and draft.declared_total_volume_cbm is not None and abs(draft.declared_total_volume_cbm - computed_volume) > Decimal("0.000001"):
         conflicts.append("declared_total_volume_conflict")
 
     basis: list[str] = []
-    if computed_weight_available:
+    if complete_rows:
         basis.append("weight_from_items")
-    elif draft.declared_total_weight_kg is not None:
-        basis.append("declared_total_weight")
-    if computed_volume_available:
+    if complete_rows:
         basis.append("volume_from_dimensions")
-    elif draft.declared_total_volume_cbm is not None:
-        basis.append("declared_total_volume")
 
     return FCLCargoCalculation(
         items=items,
