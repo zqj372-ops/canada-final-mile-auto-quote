@@ -267,6 +267,17 @@ class FCLQuoteConfigVersion(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class Customer(Base):
+    __tablename__ = "customers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    normalized_name: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
     published_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -306,6 +317,7 @@ class SalesQuoteRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     quote_type: Mapped[str] = mapped_column(String(32), nullable=False, default="final_mile", index=True)
     quote_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id", ondelete="RESTRICT"), index=True)
     actor_user_id: Mapped[int | None] = mapped_column(Integer, index=True)
     actor_api_key_id: Mapped[int | None] = mapped_column(Integer, index=True)
     actor_name: Mapped[str | None] = mapped_column(String(128), index=True)
