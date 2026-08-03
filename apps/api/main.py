@@ -10,6 +10,7 @@ from apps.api.routes.auth import router as auth_router
 from apps.api.routes.audit import router as audit_router
 from apps.api.routes.email_configs import router as email_configs_router
 from apps.api.routes.fcl_quotes import router as fcl_quotes_router
+from apps.api.routes.customers import router as customers_router
 from apps.api.routes.hermes_diagnostics import router as hermes_diagnostics_router
 from apps.api.routes.hermes_learning import router as hermes_learning_router
 from apps.api.routes.imports import router as imports_router
@@ -49,6 +50,7 @@ app.add_middleware(
 app.include_router(quotes_router)
 app.include_router(ai_quotes_router)
 app.include_router(fcl_quotes_router)
+app.include_router(customers_router)
 app.include_router(sales_records_router)
 app.include_router(auth_router)
 app.include_router(manual_tasks_router)
