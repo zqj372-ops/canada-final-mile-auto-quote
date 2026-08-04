@@ -661,14 +661,12 @@ def test_stale_exact_zone_uses_same_city_expected_origin_anchor() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "zone_matrix"
-    assert body["matched_by"] == "city_zone_fallback"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 5
-    assert body["base_price_usd"] == "180.00"
-    assert body["manual_review_required"] is False
-    assert "stale_origin_overridden" not in body["risk_tags"]
-    assert "expected_origin_preferred" in body["risk_tags"]
+    assert body["source_type"] == "manual_required"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["base_price_usd"] is None
+    assert body["total_price_usd"] is None
+    assert body["manual_review_required"] is True
 
 
 def test_city_fallback_ignores_cross_province_legacy_anchor() -> None:
@@ -1175,13 +1173,15 @@ def test_city_zone_fallback_when_postal_prefix_missing() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "zone_matrix"
-    assert body["origin"] == "toronto"
-    assert body["zone"] == 3
-    assert body["billing_pallets"] == 6
-    assert body["base_price_usd"] == "250.00"
-    assert "city_zone_fallback" in body["risk_tags"]
-    assert body["manual_review_required"] is False
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "city_zone_prefix_not_configured"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["base_price_usd"] is None
+    assert body["total_price_usd"] is None
+    assert "zone_not_found" in body["risk_tags"]
+    assert body["match_trace"]["fsa"] == "L1X"
+    assert body["manual_review_required"] is True
 
 
 def test_city_zone_fallback_prefers_requested_postal_prefix_family() -> None:
@@ -1239,20 +1239,18 @@ def test_city_zone_fallback_prefers_requested_postal_prefix_family() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "zone_matrix"
+    assert body["source_type"] == "manual_required"
     assert body["preferred_city"] == "Richmond"
     assert body["city"] == "Richmond"
     assert body["province"] == "BC"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 5
-    assert body["billing_pallets"] == 2
-    assert body["base_price_usd"] == "365.00"
-    assert body["fuel_usd"] == "127.75"
-    assert body["total_price_usd"] == "492.75"
-    assert "city_zone_fallback" in body["risk_tags"]
-    assert "city_zone_prefix_family_fallback" in body["risk_tags"]
-    assert "expected_origin_preferred" in body["risk_tags"]
-    assert body["manual_review_required"] is False
+    assert body["matched_by"] == "city_zone_prefix_not_configured"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["base_price_usd"] is None
+    assert body["total_price_usd"] is None
+    assert "zone_not_found" in body["risk_tags"]
+    assert body["match_trace"]["fsa"] == "V6Y"
+    assert body["manual_review_required"] is True
 
 
 def test_surrey_v3w_uses_expected_origin_adjacent_city_anchor() -> None:
@@ -1310,17 +1308,15 @@ def test_surrey_v3w_uses_expected_origin_adjacent_city_anchor() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "zone_matrix"
-    assert body["matched_by"] == "city_zone_fallback"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 5
-    assert body["billing_pallets"] == 3
-    assert body["base_price_usd"] == "300.00"
-    assert body["fuel_usd"] == "105.00"
-    assert body["total_price_usd"] == "405.00"
-    assert "city_zone_prefix_family_fallback" in body["risk_tags"]
-    assert "expected_origin_preferred" in body["risk_tags"]
-    assert body["manual_review_required"] is False
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "city_zone_prefix_not_configured"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["base_price_usd"] is None
+    assert body["total_price_usd"] is None
+    assert "zone_not_found" in body["risk_tags"]
+    assert body["match_trace"]["fsa"] == "V3W"
+    assert body["manual_review_required"] is True
 
 
 def test_vancouver_v5l_uses_corrected_calgary_city_anchor() -> None:
@@ -1368,13 +1364,15 @@ def test_vancouver_v5l_uses_corrected_calgary_city_anchor() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "zone_matrix"
-    assert body["matched_by"] == "city_zone_fallback"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 5
-    assert body["billing_pallets"] == 4
-    assert body["base_price_usd"] == "560.00"
-    assert body["manual_review_required"] is False
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "city_zone_prefix_not_configured"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["base_price_usd"] is None
+    assert body["total_price_usd"] is None
+    assert "zone_not_found" in body["risk_tags"]
+    assert body["match_trace"]["fsa"] == "V5L"
+    assert body["manual_review_required"] is True
 
 
 def test_city_zone_fallback_allows_single_expected_origin_adjacent_anchor() -> None:
@@ -1432,16 +1430,15 @@ def test_city_zone_fallback_allows_single_expected_origin_adjacent_anchor() -> N
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "zone_matrix"
-    assert body["matched_by"] == "city_zone_fallback"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 5
-    assert body["billing_pallets"] == 1
-    assert body["base_price_usd"] == "240.00"
-    assert body["fuel_usd"] == "84.00"
-    assert body["total_price_usd"] == "324.00"
-    assert "city_zone_prefix_family_fallback" in body["risk_tags"]
-    assert "expected_origin_preferred" in body["risk_tags"]
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "city_zone_prefix_not_configured"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["base_price_usd"] is None
+    assert body["total_price_usd"] is None
+    assert "zone_not_found" in body["risk_tags"]
+    assert body["match_trace"]["fsa"] == "V5J"
+    assert body["manual_review_required"] is True
 
 
 def test_ab_city_fallback_prefers_expected_origin_anchor_over_stale_toronto() -> None:
@@ -1506,15 +1503,15 @@ def test_ab_city_fallback_prefers_expected_origin_anchor_over_stale_toronto() ->
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "zone_matrix"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 11
-    assert body["billing_pallets"] == 6
-    assert body["base_price_usd"] == "2000.00"
-    assert body["fuel_usd"] == "700.00"
-    assert body["total_price_usd"] == "2700.00"
-    assert "city_zone_fallback" in body["risk_tags"]
-    assert body["manual_review_required"] is False
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "city_zone_prefix_not_configured"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["base_price_usd"] is None
+    assert body["total_price_usd"] is None
+    assert "zone_not_found" in body["risk_tags"]
+    assert body["match_trace"]["fsa"] == "T4B"
+    assert body["manual_review_required"] is True
 
 
 def test_regina_s4s_uses_corrected_calgary_zone_5() -> None:
@@ -1655,22 +1652,15 @@ def test_saskatoon_s7k_fuzzy_matches_calgary_zone_5_not_stale_toronto_zone_14() 
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "zone_matrix"
-    assert body["matched_by"] == "city_zone_fallback"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 5
-    assert body["billing_pallets"] == 3
-    assert body["pallet_breakdown"]["volume_pallets"] == 2
-    assert body["pallet_breakdown"]["weight_pallets"] == 3
-    assert body["pallet_breakdown"]["long_piece_pallets"] == 0
-    assert body["base_price_usd"] == "180.00"
-    assert body["fuel_usd"] == "63.00"
-    assert body["total_price_usd"] == "243.00"
-    assert "city_zone_fallback" in body["risk_tags"]
-    assert "city_zone_prefix_family_fallback" in body["risk_tags"]
-    assert body["match_trace"]["expected_origin"] == "calgary"
-    assert body["match_trace"]["origin_preference_applied"] is True
-    assert body["manual_review_required"] is False
+    assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "city_zone_prefix_not_configured"
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["base_price_usd"] is None
+    assert body["total_price_usd"] is None
+    assert "zone_not_found" in body["risk_tags"]
+    assert body["match_trace"]["fsa"] == "S7K"
+    assert body["manual_review_required"] is True
 
 
 def test_nanaimo_v9s_does_not_treat_fsa_character_distance_as_geography() -> None:
@@ -1956,7 +1946,7 @@ def test_city_fallback_requires_expected_origin_anchor() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["source_type"] == "manual_required"
-    assert body["matched_by"] == "city_fallback_expected_origin_not_found"
+    assert body["matched_by"] == "city_zone_prefix_not_configured"
     assert body["manual_review_required"] is True
 
 
