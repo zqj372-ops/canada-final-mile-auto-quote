@@ -177,6 +177,245 @@ export interface AIAutoQuoteResponse {
   address_validation: LocalAddressValidation | null;
 }
 
+export type FCLServiceScope = "port-to-port" | "door-to-port" | "port-to-door" | "door-to-door";
+export type FCLCustomerType =
+  | "importer"
+  | "exporter"
+  | "platform_seller"
+  | "forwarder"
+  | "warehouse"
+  | "other";
+export type FCLSpecialAttribute =
+  | "general_cargo"
+  | "battery"
+  | "magnetic"
+  | "liquid"
+  | "powder"
+  | "food"
+  | "wood"
+  | "dangerous_goods"
+  | "branded"
+  | "reefer"
+  | "oversized";
+export type FCLServiceStage =
+  | "pickup"
+  | "ocean"
+  | "customs"
+  | "warehousing"
+  | "delivery"
+  | "door_to_door";
+
+export interface FCLContainerInput {
+  container_type: string;
+  quantity: number;
+}
+
+export interface FCLCargoItem {
+  name?: string | null;
+  quantity: number;
+  length?: MoneyValue;
+  width?: MoneyValue;
+  height?: MoneyValue;
+  dimension_unit?: "mm" | "cm" | "m" | "in";
+  weight?: MoneyValue;
+  weight_unit?: "g" | "kg" | "lb";
+  weight_kg?: MoneyValue;
+  total_weight_kg?: MoneyValue;
+  total_volume_cbm?: MoneyValue;
+}
+
+export interface FCLQuoteDraft {
+  customer_name?: string | null;
+  contact?: string | null;
+  customer_type?: FCLCustomerType | null;
+  pol?: string | null;
+  pod?: string | null;
+  destination_postal_code?: string | null;
+  destination_address?: string | null;
+  containers: FCLContainerInput[];
+  cargo_name?: string | null;
+  cargo_details?: string | null;
+  cargo_items: FCLCargoItem[];
+  declared_piece_count?: number | null;
+  declared_total_weight_kg?: MoneyValue;
+  declared_total_volume_cbm?: MoneyValue;
+  cargo_value?: MoneyValue;
+  cargo_value_currency?: string | null;
+  hs_code?: string | null;
+  origin_country?: string | null;
+  stackable?: boolean | null;
+  special_attributes: FCLSpecialAttribute[];
+  sds_un_info?: string | null;
+  wood_packaging?: string | null;
+  ready_date?: string | null;
+  target_etd?: string | null;
+  expected_delivery_date?: string | null;
+  deadline_strictness?: string | null;
+  acceptable_transit_days?: number | null;
+  carrier?: string | null;
+  service_preference?: string | null;
+  service_scope?: FCLServiceScope | null;
+  service_stages?: FCLServiceStage[];
+  trade_terms?: string | null;
+  export_declaration?: string | null;
+  importer_exists?: string | null;
+  importer_legal_name?: string | null;
+  bn_rm_status?: string | null;
+  carm_status?: string | null;
+  has_broker?: string | null;
+  tax_included?: string | null;
+  priority_goal?: string | null;
+  address_type?: string | null;
+  tail_lift?: string | null;
+  appointment_window?: string | null;
+  forklift?: string | null;
+  platform_warehouse?: string | null;
+  declaration_acknowledged?: boolean | null;
+  notes?: string | null;
+  confidence: number;
+  extraction_notes: string[];
+}
+
+export interface FCLCargoCalculation {
+  items: Record<string, JsonValue>[];
+  piece_count: number | null;
+  total_weight_kg: MoneyValue;
+  total_volume_cbm: MoneyValue;
+  declared_piece_count: number | null;
+  declared_total_weight_kg: MoneyValue;
+  declared_total_volume_cbm: MoneyValue;
+  conflicts: string[];
+  calculation_basis: string[];
+}
+
+export interface FCLFeeItemPublic {
+  item_name: string;
+  description: string;
+  quantity: MoneyValue;
+  unit: string;
+  unit_price: MoneyValue;
+  amount: MoneyValue;
+  currency: string;
+  pricing_status: string;
+  display_mode: string;
+  included: boolean;
+  public_note: string;
+}
+
+export interface FCLQuoteResult {
+  quote_id: string;
+  quote_type: "fcl";
+  source_type: string;
+  normalized_input: FCLQuoteDraft;
+  cargo_calculation: FCLCargoCalculation;
+  matched_rate_cards: Record<string, JsonValue>[];
+  fee_items: FCLFeeItemPublic[];
+  totals_by_currency: Record<string, MoneyValue>;
+  settlement_currency: string | null;
+  converted_total: MoneyValue;
+  exchange_snapshot: Record<string, JsonValue>[];
+  quote_valid_until: string | null;
+  public_terms: string[];
+  company_name: string;
+  company_address: string;
+  company_phone: string;
+  company_email: string;
+  company_logo: string;
+  footer: string;
+  renderer_version: string;
+  manual_review_required: boolean;
+  manual_reasons: string[];
+  customer_reply: string | null;
+}
+
+export interface FCLAutoQuoteRequest {
+  raw_message?: string;
+  confirmed_fields: FCLQuoteDraft;
+  auto_submit_when_complete: boolean;
+  ai_config_id?: number | null;
+}
+
+export interface FCLAutoQuoteResponse {
+  extraction: FCLQuoteDraft;
+  cargo_recalculation: FCLCargoCalculation;
+  quote_result: FCLQuoteResult | null;
+  customer_reply: string | null;
+  missing_fields: string[];
+  manual_review_required: boolean;
+}
+
+export interface FCLExchangeRate {
+  from_currency: string;
+  to_currency: string;
+  rate: MoneyValue;
+  effective_from?: string | null;
+  effective_to?: string | null;
+}
+
+export interface FCLQuoteConfig {
+  markup_percent: MoneyValue;
+  markup_fixed: MoneyValue;
+  default_quote_valid_days: number;
+  required_fields: string[];
+  port_aliases: Record<string, string>;
+  container_aliases: Record<string, string>;
+  settlement_currency: string | null;
+  exchange_rates: FCLExchangeRate[];
+  company_name: string;
+  company_address: string;
+  company_phone: string;
+  company_email: string;
+  company_logo: string;
+  terms: string[];
+  footer: string;
+  renderer_version: string;
+}
+
+export interface FCLConfigAdminSnapshot {
+  draft: FCLQuoteConfig;
+  published: FCLQuoteConfig | null;
+  published_version: number;
+}
+
+export interface FCLFeeLinePayload {
+  item_name: string;
+  description?: string;
+  unit: "container" | "shipment" | "piece" | "kg" | "cbm";
+  currency: "USD" | "CAD" | "CNY";
+  sales_unit_price?: MoneyValue;
+  cost_unit_price?: MoneyValue;
+  pricing_status?: "auto" | "actual" | "manual" | "quote_required";
+  display_mode?: "both" | "quoteOnly" | "hiddenIncluded" | "hiddenExcluded" | "merged";
+  include_in_quote?: boolean;
+  public_note?: string;
+  vendor?: string | null;
+  internal_note?: string | null;
+}
+
+export interface FCLRateCardPayload {
+  pol: string;
+  pod: string;
+  container_type: string;
+  carrier?: string | null;
+  service?: string | null;
+  service_scope?: FCLServiceScope | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  etd_date?: string | null;
+  vessel_voyage?: string | null;
+  priority?: number;
+  source?: string | null;
+  enabled?: boolean;
+  fee_lines: FCLFeeLinePayload[];
+}
+
+export interface FCLRateCardRecord extends FCLRateCardPayload {
+  id: number;
+  status: "draft" | "published" | string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export interface AIModelConfigPublic {
   id: number;
   name: string;
@@ -431,6 +670,11 @@ export interface ManualQuoteTask {
   resolved_note: string | null;
   created_at: string | null;
   updated_at: string | null;
+  sales_quote_record_id?: number | null;
+  fee_items?: JsonValue;
+  totals_by_currency?: Record<string, MoneyValue> | null;
+  customer_reply?: string | null;
+  public_note?: string | null;
 }
 
 export interface ManualQuoteTaskUpdate {
@@ -472,18 +716,24 @@ export interface QuoteAuditLog {
 
 export interface SalesQuoteRecord {
   id: number;
+  quote_type: string;
   quote_id: string | null;
   actor_user_id: number | null;
   actor_api_key_id: number | null;
   actor_name: string | null;
   actor_role: string | null;
   status: "quoted" | "manual_required" | string;
+  workflow_status: string;
+  status_label: string;
+  next_action: string;
+  allowed_actions: string[];
   customer_message: string;
   customer_reply: string | null;
   destination: string;
   cargo_summary: string;
   total_price_usd: MoneyValue;
   currency_code: string;
+  totals_by_currency?: Record<string, MoneyValue>;
   zone: number | null;
   billing_pallets: number | null;
   confidence: number;
@@ -496,8 +746,11 @@ export interface SalesQuoteRecord {
   missing_fields: string[];
   manual_reason: string | null;
   created_at: string | null;
-  request_json: JsonValue;
-  result_json: JsonValue;
+  public_snapshot?: JsonValue;
+  timeline?: Array<{ event_type: string; from_status: string | null; to_status: string | null; actor_name: string; actor_role: string; public_note: string | null; created_at: string | null }>;
+  /** @deprecated legacy detail fields are omitted by the new API list response. */
+  request_json?: JsonValue;
+  result_json?: JsonValue;
 }
 
 export interface SalesQuoteManualPricePayload {
@@ -1044,6 +1297,16 @@ export function calculateAIAutoQuote(
   }, apiKeyScope);
 }
 
+export function calculateFCLAutoQuote(
+  payload: FCLAutoQuoteRequest,
+  apiKeyScope: ApiKeyScope = "quote",
+): Promise<FCLAutoQuoteResponse> {
+  return request<FCLAutoQuoteResponse>("/quotes/fcl-auto-quote", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }, apiKeyScope);
+}
+
 export function verifyLocalAddress(params: {
   address_line?: string | null;
   postal_code?: string | null;
@@ -1077,6 +1340,18 @@ export function updateManualTask(
   });
 }
 
+export function claimManualTask(taskId: number): Promise<ManualQuoteTask> {
+  return request<ManualQuoteTask>(`/quotes/manual-tasks/${taskId}/claim`, { method: "POST", body: "{}" });
+}
+
+export function requestManualTaskInfo(taskId: number, public_note: string): Promise<ManualQuoteTask> {
+  return request<ManualQuoteTask>(`/quotes/manual-tasks/${taskId}/request-info`, { method: "POST", body: JSON.stringify({ public_note }) });
+}
+
+export function resolveManualTask(taskId: number, payload: Record<string, unknown>): Promise<ManualQuoteTask> {
+  return request<ManualQuoteTask>(`/quotes/manual-tasks/${taskId}/resolve`, { method: "POST", body: JSON.stringify(payload) });
+}
+
 export function getQuoteAudit(quoteId: string): Promise<QuoteAuditLog> {
   return request<QuoteAuditLog>(`/quotes/audit/${encodeURIComponent(quoteId)}`);
 }
@@ -1098,7 +1373,7 @@ export function getQuoteErrorSummary(limit = 20): Promise<QuoteErrorSummary> {
 }
 
 export function listSalesQuoteRecords(params: {
-  status?: "quoted" | "manual_required" | "";
+  status?: string;
   limit?: number;
 } = {}): Promise<SalesQuoteRecord[]> {
   const search = new URLSearchParams();
@@ -1110,6 +1385,22 @@ export function listSalesQuoteRecords(params: {
   }
   const query = search.toString();
   return request<SalesQuoteRecord[]>(`/quotes/sales-records${query ? `?${query}` : ""}`, {}, "quote");
+}
+
+export function getSalesQuoteRecord(recordId: number): Promise<SalesQuoteRecord> {
+  return request<SalesQuoteRecord>(`/quotes/sales-records/${recordId}`, {}, "quote");
+}
+
+export function markSalesQuoteSent(recordId: number, payload: { channel: string; note?: string }): Promise<SalesQuoteRecord> {
+  return request<SalesQuoteRecord>(`/quotes/sales-records/${recordId}/mark-sent`, { method: "POST", body: JSON.stringify(payload) }, "quote");
+}
+
+export function recordSalesQuoteOutcome(recordId: number, payload: { outcome: string; note?: string }): Promise<SalesQuoteRecord> {
+  return request<SalesQuoteRecord>(`/quotes/sales-records/${recordId}/outcome`, { method: "POST", body: JSON.stringify(payload) }, "quote");
+}
+
+export function submitSalesAdditionalInfo(recordId: number, confirmed_fields: FCLQuoteDraft): Promise<SalesQuoteRecord> {
+  return request<SalesQuoteRecord>(`/quotes/sales-records/${recordId}/additional-info`, { method: "POST", body: JSON.stringify({ confirmed_fields }) }, "quote");
 }
 
 export function updateSalesQuoteManualPrice(
@@ -1248,6 +1539,54 @@ export function updateQuoteWorkbenchConfig(
   return request<QuoteWorkbenchConfig>("/quote-configs/workbench", {
     method: "PUT",
     body: JSON.stringify(payload),
+  });
+}
+
+export function getFCLConfig(): Promise<FCLConfigAdminSnapshot> {
+  return request<FCLConfigAdminSnapshot>("/quote-configs/fcl");
+}
+
+export function updateFCLConfigDraft(payload: FCLQuoteConfig): Promise<FCLConfigAdminSnapshot> {
+  return request<FCLConfigAdminSnapshot>("/quote-configs/fcl/draft", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function validateFCLConfig(): Promise<{ valid: boolean; errors: string[] }> {
+  return request<{ valid: boolean; errors: string[] }>("/quote-configs/fcl/validate", {
+    method: "POST",
+  });
+}
+
+export function publishFCLConfig(): Promise<{ config: FCLQuoteConfig; published_version: number }> {
+  return request<{ config: FCLQuoteConfig; published_version: number }>("/quote-configs/fcl/publish", {
+    method: "POST",
+  });
+}
+
+export function listFCLRateCards(status?: "draft" | "published"): Promise<FCLRateCardRecord[]> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  return request<FCLRateCardRecord[]>(`/quote-configs/fcl-rate-cards${query}`);
+}
+
+export function createFCLRateCard(payload: FCLRateCardPayload): Promise<FCLRateCardRecord> {
+  return request<FCLRateCardRecord>("/quote-configs/fcl-rate-cards", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateFCLRateCard(recordId: number, payload: FCLRateCardPayload): Promise<FCLRateCardRecord> {
+  return request<FCLRateCardRecord>(`/quote-configs/fcl-rate-cards/${recordId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function publishFCLRateCard(recordId: number): Promise<FCLRateCardRecord> {
+  return request<FCLRateCardRecord>(`/quote-configs/fcl-rate-cards/${recordId}/publish`, {
+    method: "POST",
   });
 }
 

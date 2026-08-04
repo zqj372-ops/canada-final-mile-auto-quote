@@ -576,7 +576,7 @@ function InquiryDetails({ task }: { task: ManualQuoteTask }) {
         )}
       </div>
 
-      {details.customerMessage && (
+      {details.customerMessage && !task.risk_tags.includes("fcl") && (
         <div className="mt-4 rounded-md border border-slate-200 bg-white p-3">
           <p className="field-label">客户原始询价</p>
           <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-800">
@@ -606,10 +606,6 @@ function InquiryDetails({ task }: { task: ManualQuoteTask }) {
         </div>
       )}
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <JsonDetails title="请求 JSON" value={task.request_json} />
-        <JsonDetails title="结果 JSON" value={task.result_json} />
-      </div>
     </section>
   );
 }
@@ -856,7 +852,7 @@ function buildInquiryDetails(task: ManualQuoteTask): {
   const accessorials = asRecord(result?.accessorials);
   const source = extraction ?? request ?? {};
   const resultRecord = result ?? {};
-  const customerMessage = stringValue(request?.customer_message);
+  const customerMessage = task.risk_tags.includes("fcl") ? null : stringValue(request?.customer_message);
   const cbm = firstValue(source.cbm, request?.cbm);
   const weightKg = firstValue(source.weight_kg, request?.weight_kg);
 
