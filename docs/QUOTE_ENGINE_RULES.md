@@ -46,7 +46,9 @@ The Canada final-mile MVP uses the Zone quote path as the primary pricing path:
 
 1. Normalize the full postal code and extract FSA.
 2. Optionally look up preferred city from `postal_code_city_lookup`.
-3. Resolve `postal_prefix + city + province` to a unique `zone_lookup_rules` row.
+3. Resolve the supplied `postal_prefix + city + province` against the active production FSA rules. An exact FSA is the only rule allowed to provide a Zone.
+
+   An FSA that is not configured for that city must return `manual_required`; the engine must not borrow a Zone from the same two-character postal family, a nearby FSA, or a city-only anchor. The preferred city from the postal reference is context only and cannot enlarge the active city/FSA rule set.
 4. Override stale BC origins to `calgary` and add `stale_origin_overridden`.
 5. Calculate billing pallets with the deterministic pallet rules.
 6. Look up `origin + zone + billing_pallets` in `zone_price_matrix`.
