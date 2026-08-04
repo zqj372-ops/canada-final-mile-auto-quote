@@ -2,7 +2,6 @@ export type PackagingType =
   | "carton"
   | "wooden_crate"
   | "pallet"
-  | "bare_piece"
   | "woven_bag"
   | "flexible_packaging"
   | "unknown";
@@ -74,8 +73,6 @@ export interface ZoneQuoteWithNotifyRequest {
 
 export interface ZoneQuoteResult {
   quote_id: string;
-  origin: string | null;
-  zone: number | null;
   billing_pallets: number | null;
   total_price_usd: MoneyValue;
   manual_review_required: boolean;

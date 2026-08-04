@@ -123,16 +123,12 @@ def test_zone_engine_uses_handling_units_and_keeps_oversize_trace_private() -> N
     assert public.total_price_usd == Decimal("210.00")
     assert set(public.model_dump()) == {
         "quote_id",
-        "origin",
-        "zone",
         "billing_pallets",
         "total_price_usd",
         "sales_note",
         "manual_review_required",
         "public_flags",
     }
-    assert public.origin == "calgary"
-    assert public.zone == 1
     assert "pallet_breakdown" not in public.model_dump()
     assert "internal_trace" not in public.model_dump()
     assert "oversize_heavy_fee_usd" not in public.model_dump()

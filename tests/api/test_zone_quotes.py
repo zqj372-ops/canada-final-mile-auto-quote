@@ -25,8 +25,7 @@ class _LegacyQuoteBody(dict[str, object]):
     The zone endpoint intentionally returns only the public allowlist.  These
     legacy tests still exercise matching details, so missing keys are resolved
     from the persisted audit snapshot; keys present in the public response
-    (notably ``billing_pallets``, ``origin`` and ``zone`` on manual results)
-    always win.
+    (notably ``billing_pallets`` on manual results) always win.
     """
 
     def __init__(self, public_body: dict[str, object], internal_body: dict[str, object]):
@@ -497,11 +496,8 @@ def test_zone_8_price_is_disabled_by_default_even_when_matrix_has_a_price() -> N
     body = response.json()
     assert body["source_type"] == "manual_required"
     assert body["matched_by"] == "zone_price_disabled"
-    assert body["origin"] is None
-    assert body["zone"] is None
-    audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
-    assert audit_result["origin"] == "calgary"
-    assert audit_result["zone"] == 8
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 8
     assert body["base_price_usd"] is None
     assert body["fuel_usd"] is None
     assert body["total_price_usd"] is None
@@ -554,11 +550,8 @@ def test_disabled_zone_price_reason_separates_destination_from_origin() -> None:
     assert body["matched_by"] == "zone_price_disabled"
     assert body["city"] == "Edmonton"
     assert body["province"] == "AB"
-    assert body["origin"] is None
-    assert body["zone"] is None
-    audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
-    assert audit_result["origin"] == "calgary"
-    assert audit_result["zone"] == 9
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 9
     assert body["matched_rule"] == "分区价格已关闭：目的地 Edmonton, AB, T5T 4B2；始发仓 卡尔加里；Zone 9。"
     logic_steps = body["match_trace"]["quote_logic"]["steps"]
     assert any("目的地 Edmonton, AB, T5T 4B2 已命中 卡尔加里 始发仓 Zone 9" in step for step in logic_steps)
@@ -647,11 +640,8 @@ def test_zone_1_price_can_be_explicitly_disabled() -> None:
     body = response.json()
     assert body["source_type"] == "manual_required"
     assert body["matched_by"] == "zone_price_disabled"
-    assert body["origin"] is None
-    assert body["zone"] is None
-    audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
-    assert audit_result["origin"] == "calgary"
-    assert audit_result["zone"] == 1
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 1
     assert body["total_price_usd"] is None
     assert "zone_price_disabled" in body["risk_tags"]
 
@@ -682,11 +672,7 @@ def test_global_zone_price_switch_disables_an_enabled_low_zone() -> None:
     body = response.json()
     assert body["source_type"] == "manual_required"
     assert body["matched_by"] == "zone_price_disabled"
-    assert body["origin"] is None
-    assert body["zone"] is None
-    audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
-    assert audit_result["origin"] == "calgary"
-    assert audit_result["zone"] == 1
+    assert body["zone"] == 1
     assert body["total_price_usd"] is None
     assert "zone_price_disabled" in body["risk_tags"]
 

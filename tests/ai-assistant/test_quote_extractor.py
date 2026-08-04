@@ -371,36 +371,6 @@ def test_deterministic_extraction_reads_aggregate_cbm_weight_cartons() -> None:
     assert draft.requires_appointment is False
 
 
-def test_confirmed_unknown_packaging_does_not_override_explicit_carton_text() -> None:
-    raw = """
-    纸箱尺寸：140*20*75 4件 19.08KG/件
-    146*20*76 3件 19KG/件
-
-    前台已确认字段：
-    packaging_type=unknown
-    """
-
-    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
-
-    assert draft.packaging_type == "carton"
-
-
-def test_deterministic_extraction_preserves_packaging_per_cargo_line() -> None:
-    raw = """
-    木箱尺寸：200*130*100 1件 900KG/件
-    纸箱尺寸：140*20*75 4件 19.08KG/件
-    146*20*76 3件 19KG/件
-    """
-
-    draft = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), raw)
-
-    assert [item.model_dump().get("packaging_type") for item in draft.cargo_items] == [
-        "wooden_crate",
-        "carton",
-        "carton",
-    ]
-
-
 def test_deterministic_extraction_preserves_aggregate_only_cargo_as_a_summary_item() -> None:
     raw = """
     QTY: 700 CTNS / G.W.: 2,814 KGS / MEAS: 35 CBM

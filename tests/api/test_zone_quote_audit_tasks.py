@@ -609,11 +609,8 @@ def test_zone_switch_blocks_learned_rule_from_reactivating_zone_8() -> None:
     assert body["source_type"] == "manual_required"
     assert body["matched_by"] == "zone_price_disabled"
     assert body["match_trace"]["previous_source_type"] == "learned_manual_quote"
-    assert body["origin"] is None
-    assert body["zone"] is None
-    audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
-    assert audit_result["origin"] == "toronto"
-    assert audit_result["zone"] == 8
+    assert body["origin"] == "toronto"
+    assert body["zone"] == 8
     assert body["base_price_usd"] is None
     assert body["total_price_usd"] is None
     assert body["manual_review_required"] is True

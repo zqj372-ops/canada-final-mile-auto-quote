@@ -60,45 +60,6 @@ from packages.quote_engine.zone_models import (
 logger = logging.getLogger(__name__)
 
 
-_CONFIRMED_HANDLING_UNIT_PACKAGING = frozenset({"pallet", "wooden_crate", "bare_piece"})
-
-
-def _packaging_from_source_span(source_span: str | None) -> str | None:
-    """Return only packaging explicitly evidenced by one cargo source span."""
-
-    if not source_span:
-        return None
-    lowered = source_span.lower()
-    has_customer_packages = bool(
-        re.search(
-            r"纸箱|\bcartons?\b|\bctns?\b|\bboxes?\b|编织袋|woven\s*bag|软包|软包装|flexible",
-            lowered,
-        )
-    )
-    has_confirmed_handling_units = bool(
-        re.search(
-            r"木箱|wooden\s*crate|\bcrates?\b|托盘|\bpallets?\b|\bskids?\b|\bplts?\b|"
-            r"裸件|裸货|\bbare\s+pieces?\b|\buncrated\b|\blong\s+pieces?\b|长件|长货",
-            lowered,
-        )
-    )
-    if has_customer_packages and has_confirmed_handling_units:
-        return "unknown"
-    if re.search(r"木箱|wooden\s*crate|\bcrates?\b", lowered):
-        return "wooden_crate"
-    if re.search(r"托盘|\bpallets?\b|\bskids?\b|\bplts?\b", lowered):
-        return "pallet"
-    if re.search(r"裸件|裸货|\bbare\s+pieces?\b|\buncrated\b|\blong\s+pieces?\b|长件|长货", lowered):
-        return "bare_piece"
-    if re.search(r"纸箱|\bcartons?\b|\bctns?\b|\bboxes?\b|箱", lowered):
-        return "carton"
-    if re.search(r"编织袋|woven\s*bag", lowered):
-        return "woven_bag"
-    if re.search(r"软包|软包装|flexible", lowered):
-        return "flexible_packaging"
-    return None
-
-
 class AIAutoQuoteRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
@@ -436,31 +397,15 @@ def _zone_request_from_extraction(extraction: AIExtractedQuoteDraft) -> ZoneQuot
             stackability = item.stackability
             if stackability in (None, "unknown") and extraction.is_stackable is not None:
                 stackability = "stackable" if extraction.is_stackable else "non_stackable"
-            source_packaging = _packaging_from_source_span(item.source_span)
-            packaging_type = (
-                source_packaging
-                or item.packaging_type
-                or extraction.packaging_type
-                or "unknown"
-            )
-            is_confirmed_handling_unit = packaging_type in _CONFIRMED_HANDLING_UNIT_PACKAGING
             row: dict[str, object] = {
-                # Customer package counts are reconciliation evidence, not a
-                # physical-handling-unit multiplier.  Without an explicitly
-                # identified pallet/crate, leave the handling-unit quantity
-                # unknown so the deterministic calculator fails closed.
-                "quantity": item.quantity if is_confirmed_handling_unit else None,
-                "packaging_type": packaging_type,
+                "quantity": item.quantity,
+                "packaging_type": extraction.packaging_type or "unknown",
                 "length_cm": item.length_cm,
                 "width_cm": item.width_cm,
                 "height_cm": item.height_cm,
                 "unit_weight_kg": item.weight_kg,
                 "cbm": item.cbm,
-                "contained_customer_pieces": (
-                    item.contained_customer_pieces
-                    if item.contained_customer_pieces is not None
-                    else (None if is_confirmed_handling_unit else item.quantity)
-                ),
+                "contained_customer_pieces": item.contained_customer_pieces,
                 "stackability": stackability or "unknown",
                 "max_stack_layers": item.max_stack_layers,
                 "max_top_load_kg": item.max_top_load_kg,

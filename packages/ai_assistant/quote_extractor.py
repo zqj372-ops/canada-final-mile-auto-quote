@@ -21,7 +21,6 @@ class ExtractedCargoItem(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
     quantity: int = Field(default=1, ge=1)
-    packaging_type: str | None = None
     length_cm: Decimal | None = Field(default=None, ge=0)
     width_cm: Decimal | None = Field(default=None, ge=0)
     height_cm: Decimal | None = Field(default=None, ge=0)
@@ -39,11 +38,6 @@ class ExtractedCargoItem(BaseModel):
     max_top_load_kg: Decimal | None = Field(default=None, gt=0)
     floor_rotation_allowed: bool | None = None
     source_span: str | None = None
-
-    @field_validator("packaging_type")
-    @classmethod
-    def normalize_packaging_type(cls, value: str | None) -> str | None:
-        return value.strip().lower() if value else value
 
 
 class AIExtractedQuoteDraft(BaseModel):
@@ -142,15 +136,7 @@ REQUIRED_FIELDS = {
     "packaging_type",
     "address_type",
 }
-ALLOWED_PACKAGING_TYPES = {
-    "carton",
-    "wooden_crate",
-    "pallet",
-    "bare_piece",
-    "woven_bag",
-    "flexible_packaging",
-    "unknown",
-}
+ALLOWED_PACKAGING_TYPES = {"carton", "wooden_crate", "pallet", "woven_bag", "flexible_packaging", "unknown"}
 ALLOWED_ADDRESS_TYPES = {"commercial", "residential", "private", "rural_residential"}
 POSTAL_CODE_PATTERN = re.compile(r"[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d")
 SUSPICIOUS_MODEL_PIECE_COUNT = 1000
@@ -929,7 +915,6 @@ def _sanitize_cargo_items(value: Any) -> list[dict[str, Any]]:
         items.append(
             {
                 "quantity": quantity,
-                "packaging_type": _none_if_placeholder(item.get("packaging_type")),
                 "length_cm": _coerce_optional_decimal(item.get("length_cm")),
                 "width_cm": _coerce_optional_decimal(item.get("width_cm")),
                 "height_cm": _coerce_optional_decimal(item.get("height_cm")),
@@ -1122,12 +1107,8 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
     parsed_lines = 0
     allow_numeric_table = _has_dimension_weight_table(customer_message)
     dimension_unit_hint: str | None = None
-    packaging_type_hint: str | None = None
 
     for line in customer_message.splitlines():
-        explicit_line_packaging = _infer_packaging_type(line)
-        if explicit_line_packaging == "unknown":
-            explicit_line_packaging = None
         items = _parse_measurement_line(
             line,
             allow_numeric_table=allow_numeric_table,
@@ -1136,10 +1117,7 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
         if not items:
             if line.strip():
                 dimension_unit_hint = None
-                packaging_type_hint = explicit_line_packaging
             continue
-        if explicit_line_packaging is not None:
-            packaging_type_hint = explicit_line_packaging
         dimension_unit_hint = next(
             (
                 item["_dimension_unit"]
@@ -1162,7 +1140,6 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
             cargo_items.append(
                 ExtractedCargoItem(
                     quantity=int(quantity),
-                    packaging_type=packaging_type_hint,
                     length_cm=_quantize(length_cm, "0.1"),
                     width_cm=_quantize(width_cm, "0.1"),
                     height_cm=_quantize(height_cm, "0.1"),
@@ -2177,15 +2154,7 @@ def _apply_confirmed_fields(draft: AIExtractedQuoteDraft, fields: dict[str, str]
     if "province" in fields:
         draft.province = _find_province(fields["province"]) or fields["province"].upper() or draft.province
     if "packaging_type" in fields:
-        confirmed_packaging = fields["packaging_type"].strip().lower()
-        # The workbench appends its default ``unknown`` value to the source
-        # message.  It is absence of confirmation, not stronger evidence than
-        # an explicit packaging word in the customer's text.
-        if confirmed_packaging and not (
-            confirmed_packaging == "unknown"
-            and draft.packaging_type not in (None, "unknown")
-        ):
-            draft.packaging_type = confirmed_packaging
+        draft.packaging_type = fields["packaging_type"].strip().lower() or draft.packaging_type
     if "address_type" in fields:
         draft.address_type = fields["address_type"].strip().lower() or draft.address_type
     if "requires_liftgate" in fields:
@@ -2382,8 +2351,6 @@ def _infer_packaging_type(customer_message: str) -> str | None:
         return "woven_bag"
     if re.search(r"软包|软包装|flexible", lowered):
         return "flexible_packaging"
-    if re.search(r"裸件|裸货|bare\s+pieces?|uncrated|long\s+pieces?|长件|长货", lowered):
-        return "bare_piece"
     if re.search(r"纸箱|carton|ctn|box|boxes|箱", lowered):
         return "carton"
     return "unknown"

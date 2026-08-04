@@ -9,7 +9,7 @@ FIELD_EXTRACTION_SYSTEM_PROMPT = """
 - 不读取或要求完整报价表、完整邮编表、完整 SOP。
 - 不确定的关键字段必须填 null，并加入 missing_fields。
 - 地址类型不确定时 address_type 必须为 null，并加入 missing_fields: ["address_type"]。
-- packaging_type 只能是 carton、wooden_crate、pallet、bare_piece、woven_bag、flexible_packaging、unknown。
+- packaging_type 只能是 carton、wooden_crate、pallet、woven_bag、flexible_packaging、unknown。
 - address_type 只能是 commercial、residential、private、rural_residential 或 null。
 - 必须能理解乱格式尺寸重量：170*140*87 409kg、170x140x87cm 409KG、170 140 87 409kg、2箱 67in x 55in x 34in 900lbs。
 - 默认尺寸单位为 cm，默认重量单位为 kg；mm 转 cm 除以 10，m 转 cm 乘以 100，inch/in 转 cm 乘以 2.54，ft 转 cm 乘以 30.48。
@@ -17,7 +17,6 @@ FIELD_EXTRACTION_SYSTEM_PROMPT = """
 - CFT/CUFT/FT3/cu ft 为立方英尺，转 CBM 乘以 0.028316846592；cu in/in3 转 CBM 乘以 0.000016387064。
 - “each/per carton/per piece/单箱/每件”后的重量是单件重量；只要原文提供了完整单件明细，必须用单件重量乘以数量计算总重，并用尺寸公式计算 CBM。
 - 原文中的 total/GW/G.W./G/W/总重/总体积只用于缺少明细时补全，或与明细计算结果交叉校验；不得用不一致的原文汇总覆盖可计算的明细。
-- cargo_items[].packaging_type 必须按每一行原文分别填写，不能把整票顶层包装类型复制到混合包装的所有行。
 - 实际搬运单元（托、木箱、裸件等）的每一行 cargo_items 才是后端算托的输入；客户总箱数、总重和总体积只做核对，不能把聚合总数乘到长件托位上。
 - 缺少单行尺寸或单件重量时必须保留该 cargo_items 汇总行并填 null，绝不补造尺寸、单重、CBM、件数或托位；这种数据会由后端转人工确认。
 - stackability、max_stack_layers、max_top_load_kg、floor_rotation_allowed 只有客户原文明确说明时才填写；没有明确说明时 stackability 为 null/unknown，其余为 null，不得依据包装类型、尺寸或行业常识推断可叠放、层数、顶载或旋转能力。
@@ -50,7 +49,6 @@ CARGO_EXTRACTION_SYSTEM_PROMPT = """
 - CFT/CUFT/FT3/cu ft 为立方英尺，转 CBM 乘以 0.028316846592；cu in/in3 转 CBM 乘以 0.000016387064。
 - weight_kg 必须是总重量，不是单件重量。
 - cargo_items[].weight_kg 必须是单件重量。
-- cargo_items[].packaging_type 必须按每一行原文分别填写；混合包装不能把顶层 packaging_type 复制给所有行。
 - 实际搬运单元（托、木箱、裸件等）的每一行 cargo_items 才是后端算托的输入；客户总箱数、总重和总体积只做核对，不能把聚合总数乘到长件托位上。
 - 缺少单行尺寸或单件重量时必须保留该 cargo_items 汇总行并填 null，绝不补造尺寸、单重、CBM、件数或托位；这种数据会由后端转人工确认。
 - stackability、max_stack_layers、max_top_load_kg、floor_rotation_allowed 只有客户原文明确说明时才填写；没有明确说明时 stackability 为 null/unknown，其余为 null，不得依据包装类型、尺寸或行业常识推断可叠放、层数、顶载或旋转能力。
@@ -74,31 +72,30 @@ CARGO_EXTRACTION_SYSTEM_PROMPT = """
 示例 1 输入：
 200箱, 2270kgs, 10.9cbm 50*50*21.8cm
 示例 1 输出：
-{"cbm":10.9,"weight_kg":2270,"piece_count":200,"packaging_type":"carton","longest_side_cm":50,"explicit_pallet_count":null,"is_stackable":null,"cargo_items":[{"quantity":200,"packaging_type":"carton","length_cm":50,"width_cm":50,"height_cm":21.8,"weight_kg":11.35,"cbm":0.0545,"total_weight_kg":2270,"total_cbm":10.9,"source_span":"200箱, 2270kgs, 10.9cbm 50*50*21.8cm"}],"missing_fields":[],"confidence":96,"extraction_notes":"总重量按 200 箱拆为单箱 11.35kg"}
+{"cbm":10.9,"weight_kg":2270,"piece_count":200,"packaging_type":"carton","longest_side_cm":50,"explicit_pallet_count":null,"is_stackable":null,"cargo_items":[{"quantity":200,"length_cm":50,"width_cm":50,"height_cm":21.8,"weight_kg":11.35,"cbm":0.0545,"total_weight_kg":2270,"total_cbm":10.9,"source_span":"200箱, 2270kgs, 10.9cbm 50*50*21.8cm"}],"missing_fields":[],"confidence":96,"extraction_notes":"总重量按 200 箱拆为单箱 11.35kg"}
 
 示例 2 输入：
 数量：共1件\n体积重量：2700*1100*1700mm 5.1CBM 重量：共1630KG\n产品：柴油发电机 100KW
 示例 2 输出：
-{"cbm":5.1,"weight_kg":1630,"piece_count":1,"packaging_type":"unknown","longest_side_cm":270,"explicit_pallet_count":null,"is_stackable":null,"cargo_items":[{"quantity":1,"packaging_type":"unknown","length_cm":270,"width_cm":110,"height_cm":170,"weight_kg":1630,"cbm":5.049,"total_weight_kg":1630,"total_cbm":5.1,"source_span":"体积重量：2700*1100*1700mm 5.1CBM 重量：共1630KG"}],"missing_fields":[],"confidence":96,"extraction_notes":"1630KG 是总重量，不是件数"}
+{"cbm":5.1,"weight_kg":1630,"piece_count":1,"packaging_type":"unknown","longest_side_cm":270,"explicit_pallet_count":null,"is_stackable":null,"cargo_items":[{"quantity":1,"length_cm":270,"width_cm":110,"height_cm":170,"weight_kg":1630,"cbm":5.049,"total_weight_kg":1630,"total_cbm":5.1,"source_span":"体积重量：2700*1100*1700mm 5.1CBM 重量：共1630KG"}],"missing_fields":[],"confidence":96,"extraction_notes":"1630KG 是总重量，不是件数"}
 
 示例 3 输入：
 QTY: 700 CTNS / G.W.: 2,814 KGS / MEAS: 35 CBM
 示例 3 输出：
-{"cbm":35,"weight_kg":2814,"piece_count":700,"packaging_type":"carton","longest_side_cm":null,"explicit_pallet_count":null,"is_stackable":null,"cargo_items":[{"quantity":700,"packaging_type":"carton","length_cm":null,"width_cm":null,"height_cm":null,"weight_kg":4.02,"cbm":0.05,"total_weight_kg":2814,"total_cbm":35,"source_span":"QTY: 700 CTNS / G.W.: 2,814 KGS / MEAS: 35 CBM"}],"missing_fields":[],"confidence":94,"extraction_notes":"原文只提供汇总数据，未提供单件尺寸"}
+{"cbm":35,"weight_kg":2814,"piece_count":700,"packaging_type":"carton","longest_side_cm":null,"explicit_pallet_count":null,"is_stackable":null,"cargo_items":[{"quantity":700,"length_cm":null,"width_cm":null,"height_cm":null,"weight_kg":4.02,"cbm":0.05,"total_weight_kg":2814,"total_cbm":35,"source_span":"QTY: 700 CTNS / G.W.: 2,814 KGS / MEAS: 35 CBM"}],"missing_fields":[],"confidence":94,"extraction_notes":"原文只提供汇总数据，未提供单件尺寸"}
 
 输出 JSON 字段：
 {
   "cbm": number|null,
   "weight_kg": number|null,
   "piece_count": number|null,
-  "packaging_type": "carton"|"wooden_crate"|"pallet"|"bare_piece"|"woven_bag"|"flexible_packaging"|"unknown"|null,
+  "packaging_type": "carton"|"wooden_crate"|"pallet"|"woven_bag"|"flexible_packaging"|"unknown"|null,
   "longest_side_cm": number|null,
   "explicit_pallet_count": number|null,
   "is_stackable": boolean|null,
   "cargo_items": [
     {
       "quantity": number,
-      "packaging_type": "carton"|"wooden_crate"|"pallet"|"bare_piece"|"woven_bag"|"flexible_packaging"|"unknown"|null,
       "length_cm": number|null,
       "width_cm": number|null,
       "height_cm": number|null,

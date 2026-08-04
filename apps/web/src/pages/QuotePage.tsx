@@ -1851,7 +1851,7 @@ function formatMissingField(field: string): string {
 function isPackagingType(value: string | null): value is PackagingType {
   return Boolean(
     value &&
-      ["carton", "wooden_crate", "pallet", "bare_piece", "woven_bag", "flexible_packaging", "unknown"].includes(value),
+      ["carton", "wooden_crate", "pallet", "woven_bag", "flexible_packaging", "unknown"].includes(value),
   );
 }
 

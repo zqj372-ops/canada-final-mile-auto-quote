@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { MoneyValue, ZoneQuoteResult } from "../api/client";
-import { formatBillingPalletSummary, formatZoneMatch } from "../utils/quoteResultView";
+import { formatBillingPalletSummary } from "../utils/quoteResultView";
 
 interface ResultCardProps {
   result: ZoneQuoteResult;
@@ -66,8 +66,7 @@ export default function ResultCard({ result }: ResultCardProps) {
         <div className="space-y-5">
           <div>
             <h3 className="section-title">报价结果</h3>
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <Metric label="命中分区" value={formatZoneMatch(result)} />
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <Metric label="算托摘要" value={formatBillingPalletSummary(result)} />
               <Metric label="报价合计" value={isManual ? "需要人工确认" : formatMoney(result.total_price_usd)} />
             </div>

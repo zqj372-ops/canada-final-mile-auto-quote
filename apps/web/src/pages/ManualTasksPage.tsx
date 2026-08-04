@@ -993,7 +993,6 @@ function packagingLabel(value: string | null): string {
   const labels: Record<string, string> = {
     carton: "纸箱",
     wooden_crate: "木箱",
-    bare_piece: "裸件",
     pallet: "托盘",
     woven_bag: "编织袋",
     flexible_packaging: "软包装",
