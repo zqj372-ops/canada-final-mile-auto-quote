@@ -662,9 +662,11 @@ function QuoteResultDialog({
   searchContext: QuoteSearchContext | null;
 }) {
   const [acknowledgedQuoteKey, setAcknowledgedQuoteKey] = useState<string | null>(null);
-  const ruralPostalPrefix = extractPostalPrefix(parsed.address.postal_code);
+  const ruralPostalPrefix = extractPostalPrefix(
+    result?.postal_prefix || result?.postal_code || parsed.address.postal_code,
+  );
   const requiresRuralConfirmation = Boolean(
-    parsed.risk_hints.includes("rural_fsa_secondary_confirmation") ||
+    result?.risk_tags.includes("rural_fsa_secondary_confirmation") ||
       (ruralPostalPrefix && ruralPostalPrefix[1] === "0"),
   );
   const confirmationKey =
@@ -782,9 +784,9 @@ function QuoteResultDialog({
         <RuralPostalConfirmationDialog
           inputCity={parsed.address.city}
           manualRequired={manualRequired}
-          postalCode={parsed.address.postal_code}
+          postalCode={result?.postal_code || parsed.address.postal_code}
           postalPrefix={ruralPostalPrefix}
-          systemCity={parsed.address.city}
+          systemCity={result?.preferred_city || result?.city || parsed.address.city}
           onAcknowledge={() => setAcknowledgedQuoteKey(confirmationKey)}
           onReturnToEdit={onClose}
         />
@@ -1511,9 +1513,8 @@ function buildRiskMessages(
   if (!aiResult) {
     return ["待提交给后台大模型解析；本地预览不再作为最终字段来源。"];
   }
-  const backendRisks = parsed.risk_hints
-    .map((tag) => config.backend_risk_tag_labels[tag] || tag)
-    .filter(Boolean);
+  const backendRisks =
+    result?.risk_tags.map((tag) => config.backend_risk_tag_labels[tag] || tag) ?? [];
   const manualRisk = manualRequired ? ["需要人工确认，不要直接发客户。"] : [];
   const aiMissingRisks =
     aiResult?.missing_fields.map((field) => `AI 解析缺少：${formatMissingField(field)}`) ?? [];
@@ -1550,7 +1551,7 @@ function buildSalesText(
     result?.total_price_usd && !result.manual_review_required
       ? `${config.copy_template.currency_code} ${Number(result.total_price_usd).toFixed(2)}`
       : config.copy_template.manual_price_text;
-  const ruralConfirmationLines = parsed.risk_hints.includes(
+  const ruralConfirmationLines = result?.risk_tags.includes(
     "rural_fsa_secondary_confirmation",
   )
     ? ["特别提醒：该地址为乡村邮编，完整地址、卡车准入及可能附加费需二次确认。"]
@@ -1666,7 +1667,8 @@ function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoIt
   if (!Array.isArray(extraction.cargo_items)) {
     return [];
   }
-  return extraction.cargo_items.flatMap((item, index): ParsedCargoItem[] => {
+  return extraction.cargo_items
+    .map((item, index) => {
       const length = toNumber(item.length_cm);
       const width = toNumber(item.width_cm);
       const height = toNumber(item.height_cm);
@@ -1681,17 +1683,10 @@ function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoIt
           : totalCbm === null
             ? null
             : totalCbm / quantity);
-      if (
-        !hasDimensions
-        && weight === null
-        && cbm === null
-        && totalWeight === null
-        && totalCbm === null
-        && !item.source_span
-      ) {
-        return [];
+      if (!hasDimensions && weight === null && cbm === null && totalWeight === null && totalCbm === null) {
+        return null;
       }
-      const normalized: ParsedCargoItem = {
+      return {
         id: index + 1,
         quantity,
         length_cm: length,
@@ -1701,15 +1696,10 @@ function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoIt
         cbm,
         total_weight_kg: totalWeight ?? (weight === null ? null : weight * quantity),
         total_cbm: totalCbm ?? (cbm === null ? null : cbm * quantity),
-        contained_customer_pieces: item.contained_customer_pieces ?? null,
-        stackability: item.stackability ?? null,
-        max_stack_layers: item.max_stack_layers ?? null,
-        max_top_load_kg: toNumber(item.max_top_load_kg),
-        floor_rotation_allowed: item.floor_rotation_allowed ?? null,
         source_span: item.source_span,
       };
-      return [normalized];
-    });
+    })
+    .filter((item): item is ParsedCargoItem => item !== null);
 }
 
 function hasCargoDimensions(

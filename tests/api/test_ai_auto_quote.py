@@ -12,7 +12,7 @@ from apps.api.db.session import get_db
 from apps.api.services.ai_quote_service import _build_guarded_sales_note
 from apps.api.main import app
 from packages.ai_assistant.model_client import AIResponse
-from packages.ai_assistant.quote_extractor import AIExtractedQuoteDraft, ExtractedCargoItem, QuoteExtractionError
+from packages.ai_assistant.quote_extractor import AIExtractedQuoteDraft, QuoteExtractionError
 from packages.quote_engine.zone_models import ZoneQuoteResult
 
 
@@ -94,30 +94,7 @@ def complete_extraction() -> AIExtractedQuoteDraft:
         requires_appointment=True,
         missing_fields=[],
         confidence=95,
-        cargo_items=[
-            ExtractedCargoItem(
-                quantity=3,
-                length_cm=Decimal("120"),
-                width_cm=Decimal("100"),
-                height_cm=Decimal("116.6666667"),
-                weight_kg=Decimal("283.3333333"),
-                cbm=Decimal("1.4"),
-                contained_customer_pieces=10,
-                total_weight_kg=Decimal("850"),
-                total_cbm=Decimal("4.2"),
-                source_span="3 standard handling units",
-            )
-        ],
     )
-
-
-def _audit_result(client: TestClient, quote_id: str) -> dict[str, object]:
-    response = client.get(f"/quotes/audit/{quote_id}")
-    assert response.status_code == 200
-    body = response.json()
-    result = body.get("result_json")
-    assert isinstance(result, dict)
-    return result
 
 
 class FakeSalesNoteClient:
@@ -293,18 +270,16 @@ def test_ai_provider_failure_uses_complete_deterministic_fallback(monkeypatch: p
     assert response.status_code == 200
     body = response.json()
     assert body["missing_fields"] == []
-    assert body["manual_review_required"] is True
+    assert body["manual_review_required"] is False
     assert body["extraction"]["city"] == "Concord"
     assert body["extraction"]["address_type"] == "commercial"
-    assert body["quote_result"]["billing_pallets"] is None
-    assert body["quote_result"]["total_price_usd"] is None
-    audit = _audit_result(client, body["quote_result"]["quote_id"])
-    assert audit["source_type"] == "manual_required"
-    assert "handling_unit_dimensions_missing" in audit["risk_tags"]
+    assert body["quote_result"]["source_type"] == "zone_matrix"
+    assert body["quote_result"]["billing_pallets"] == 3
+    assert body["quote_result"]["total_price_usd"] == "212.00"
     assert body["address_validation"]["status"] == "verified"
     assert body["address_validation"]["preferred_city"] == "Concord"
     assert body["address_validation"]["province"] == "ON"
-    assert audit["internal_trace"]["handling_units"][0]["length_cm"] is None
+    assert "deterministic parser generated" in body["internal_note"]
 
 
 def test_ai_extraction_complete_calls_zone_quote_engine(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -319,8 +294,8 @@ def test_ai_extraction_complete_calls_zone_quote_engine(monkeypatch: pytest.Monk
 
     assert response.status_code == 200
     body = response.json()
+    assert body["quote_result"]["source_type"] == "zone_matrix"
     assert body["quote_result"]["total_price_usd"] == "212.00"
-    assert body["quote_result"]["billing_pallets"] == 3
     assert body["manual_review_required"] is False
     assert body["address_validation"]["matched"] is True
     assert body["address_validation"]["postal_code"] == "L4K 2N2"
@@ -367,14 +342,12 @@ def test_ai_auto_quote_blocks_cross_origin_zone_matrix(monkeypatch: pytest.Monke
     response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
 
     body = response.json()
-    assert body["quote_result"]["billing_pallets"] is None
+    assert body["quote_result"]["source_type"] == "manual_required"
+    assert body["quote_result"]["matched_by"] == "origin_matrix_guard"
+    assert body["quote_result"]["origin"] is None
+    assert body["quote_result"]["zone"] is None
     assert body["quote_result"]["total_price_usd"] is None
     assert body["manual_review_required"] is True
-    audit = _audit_result(client, body["quote_result"]["quote_id"])
-    assert audit["source_type"] == "manual_required"
-    assert audit["matched_by"] == "origin_matrix_guard"
-    assert audit["origin"] is None
-    assert audit["zone"] is None
 
 
 def test_ai_optional_missing_fields_still_calls_zone_quote_engine(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -429,8 +402,7 @@ def test_ai_optional_missing_fields_still_calls_zone_quote_engine(monkeypatch: p
     assert response.status_code == 200
     body = response.json()
     assert body["missing_fields"] == []
-    assert body["quote_result"]["billing_pallets"] == 6
-    assert body["quote_result"]["total_price_usd"] == "162.00"
+    assert body["quote_result"]["source_type"] == "zone_matrix"
     assert body["manual_review_required"] is False
 
 
@@ -462,12 +434,11 @@ def test_ai_aggregate_manual_required_still_returns_billing_pallet_estimate(monk
     assert response.status_code == 200
     body = response.json()
     assert body["missing_fields"] == []
-    assert body["quote_result"]["billing_pallets"] is None
+    assert body["quote_result"]["source_type"] == "manual_required"
+    assert body["quote_result"]["billing_pallets"] == 6
+    assert body["quote_result"]["pallet_breakdown"]["volume_pallets"] == 6
+    assert body["quote_result"]["pallet_breakdown"]["weight_pallets"] == 3
     assert body["quote_result"]["total_price_usd"] is None
-    audit = _audit_result(client, body["quote_result"]["quote_id"])
-    assert audit["source_type"] == "manual_required"
-    assert "handling_units_missing" in audit["risk_tags"]
-    assert audit["internal_trace"]["calculator"]["reconciliation"]["declared_total_volume_cbm"] == "11.7"
 
 
 def test_ai_auto_quote_manual_required_creates_manual_task(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -479,8 +450,7 @@ def test_ai_auto_quote_manual_required_creates_manual_task(monkeypatch: pytest.M
 
     assert response.status_code == 200
     body = response.json()
-    assert body["quote_result"]["billing_pallets"] is None
+    assert body["quote_result"]["source_type"] == "manual_required"
     assert body["manual_review_required"] is True
     assert len(tasks) == 1
     assert tasks[0]["quote_id"] == body["quote_result"]["quote_id"]
-    assert tasks[0]["result_json"]["source_type"] == "manual_required"

@@ -1,16 +1,8 @@
-from collections.abc import Mapping
 from decimal import Decimal
 from typing import Protocol
 
 from packages.address_normalizer import extract_fsa
-from packages.quote_engine.oversize_config import (
-    OversizePalletRuleConfig,
-    default_oversize_pallet_rule,
-)
-from packages.quote_engine.pallet_calculator import (
-    PalletCalculationResult,
-    calculate_billing_pallets,
-)
+from packages.quote_engine.pallet_calculator import calculate_billing_pallets
 from packages.quote_engine.pricing import money
 from packages.quote_engine.risk_tags import RURAL_FSA_SECONDARY_CONFIRMATION_TAG, rural_fsa_risk_tags
 from packages.quote_engine.zone_config import ZonePricingConfig
@@ -56,32 +48,11 @@ class ZoneDataProvider(Protocol):
 
 
 class ZoneQuoteEngine:
-    def __init__(
-        self,
-        provider: ZoneDataProvider,
-        pricing_config: ZonePricingConfig | None = None,
-        oversize_rule: OversizePalletRuleConfig | Mapping[str, object] | None = None,
-        oversize_rule_version: str | None = None,
-    ):
+    def __init__(self, provider: ZoneDataProvider, pricing_config: ZonePricingConfig | None = None):
         self.provider = provider
         self.pricing_config = pricing_config or ZonePricingConfig()
-        self.oversize_rule = (
-            default_oversize_pallet_rule() if oversize_rule is None else oversize_rule
-        )
-        self.oversize_rule_version = oversize_rule_version
-        self.oversize_rule_id = _rule_id(self.oversize_rule)
-        self.oversize_rule_snapshot = _rule_snapshot(self.oversize_rule)
 
     def quote(self, request: ZoneQuoteRequest) -> ZoneQuoteResult:
-        pallet_result = calculate_billing_pallets(
-            handling_units=request.handling_units,
-            rule=self.oversize_rule,
-            declared_customer_piece_count=request.piece_count,
-            declared_total_weight_kg=request.weight_kg,
-            declared_total_volume_cbm=request.cbm,
-            explicit_pallet_count=request.explicit_pallet_count,
-        )
-        pallet_trace = _build_pallet_trace(request, pallet_result, self)
         postal_prefix = extract_fsa(request.postal_code)
         if not postal_prefix:
             return self._manual(
@@ -91,10 +62,6 @@ class ZoneQuoteEngine:
                 matched_by="postal_prefix_missing",
                 candidate_count=0,
                 match_trace={"postal_code": request.postal_code, "matched_by": "postal_prefix_missing"},
-                billing_pallets=pallet_result.billing_pallets,
-                pallet_breakdown=pallet_result.components,
-                pallet_result=pallet_result,
-                internal_trace=pallet_trace,
             )
 
         preferred_record = self.provider.get_preferred_city(request.postal_code)
@@ -103,6 +70,15 @@ class ZoneQuoteEngine:
         province = province or (preferred_record.province if preferred_record else None) or request.province
         city = preferred_city or request.city
 
+        pallet_result = calculate_billing_pallets(
+            cbm=request.cbm,
+            weight_kg=request.weight_kg,
+            piece_count=request.piece_count,
+            packaging_type=request.packaging_type,
+            longest_side_cm=request.longest_side_cm,
+            explicit_pallet_count=request.explicit_pallet_count,
+            is_stackable=request.is_stackable,
+        )
         zone_rules = self.provider.list_zone_rules(postal_prefix)
         zone_decision = lookup_zone(
             postal_code=request.postal_code,
@@ -174,8 +150,6 @@ class ZoneQuoteEngine:
                     "rejected_matched_by": zone_decision.matched_by,
                     "matched_by": "origin_matrix_guard",
                 },
-                pallet_result=pallet_result,
-                internal_trace=pallet_trace,
                 internal_note="已在价格矩阵查询前阻止跨始发仓复用 Zone，需人工确认正确分区。",
             )
         # FSA character order is not geographic distance. If neither the exact
@@ -192,8 +166,6 @@ class ZoneQuoteEngine:
                 province=province,
                 billing_pallets=pallet_result.billing_pallets,
                 pallet_breakdown=pallet_result.components,
-                pallet_result=pallet_result,
-                internal_trace=pallet_trace,
                 internal_note=_manual_note_with_pallets(pallet_result.billing_pallets),
                 zone_decision=zone_decision,
             )
@@ -209,10 +181,7 @@ class ZoneQuoteEngine:
                 province=province,
                 origin=zone_decision.origin,
                 zone=zone_decision.zone,
-                billing_pallets=pallet_result.billing_pallets,
                 pallet_breakdown=pallet_result.components,
-                pallet_result=pallet_result,
-                internal_trace=pallet_trace,
                 zone_decision=zone_decision,
             )
 
@@ -242,8 +211,6 @@ class ZoneQuoteEngine:
                     "matched_by": "zone_price_disabled",
                     "zone_price_enabled": False,
                 },
-                pallet_result=pallet_result,
-                internal_trace=pallet_trace,
                 internal_note="该始发仓 + Zone 已在价格配置中关闭，保留矩阵数据但禁止自动放价。",
             )
 
@@ -268,8 +235,6 @@ class ZoneQuoteEngine:
                 zone=zone_decision.zone,
                 billing_pallets=pallet_result.billing_pallets,
                 pallet_breakdown=pallet_result.components,
-                pallet_result=pallet_result,
-                internal_trace=pallet_trace,
                 internal_note=_manual_note_with_pallets(pallet_result.billing_pallets),
                 zone_decision=zone_decision,
             )
@@ -283,16 +248,7 @@ class ZoneQuoteEngine:
             requires_pallet_jack=request.requires_pallet_jack,
             requires_appointment=request.requires_appointment,
             detention_minutes=request.detention_minutes,
-            additional_accessorials=_oversize_accessorials(pallet_result.surcharges),
             config=self.pricing_config,
-        )
-        pallet_trace["pricing"] = _json_safe(
-            {
-                "base_price_usd": price_record.base_price_usd,
-                "fuel_usd": pricing.fuel_usd,
-                "accessorials": pricing.accessorials,
-                "total_price_usd": pricing.total_price_usd,
-            }
         )
         risk_tags = list(zone_decision.risk_tags)
         risk_tags.extend(_request_risk_tags(request))
@@ -323,11 +279,6 @@ class ZoneQuoteEngine:
             candidate_count=zone_decision.candidate_count,
             match_trace=zone_decision.match_trace,
             internal_note="Base price came from zone_price_matrix. AI may explain but must not change price.",
-            internal_trace=pallet_trace,
-            oversize_rule_id=self.oversize_rule_id,
-            oversize_rule_version=self.oversize_rule_version,
-            oversize_rule_snapshot=self.oversize_rule_snapshot,
-            oversize_accessorials=_oversize_accessorials(pallet_result.surcharges),
         )
         result.sales_note = build_zone_sales_note(request, result)
         return result
@@ -345,9 +296,7 @@ class ZoneQuoteEngine:
         origin: str | None = None,
         zone: int | None = None,
         billing_pallets: int | None = None,
-        pallet_breakdown: dict[str, object] | None = None,
-        pallet_result: PalletCalculationResult | None = None,
-        internal_trace: dict[str, object] | None = None,
+        pallet_breakdown: dict[str, int] | None = None,
         internal_note: str | None = None,
         matched_by: str | None = None,
         candidate_count: int = 0,
@@ -358,12 +307,6 @@ class ZoneQuoteEngine:
             matched_by = getattr(zone_decision, "matched_by", matched_by)
             candidate_count = getattr(zone_decision, "candidate_count", candidate_count)
             match_trace = getattr(zone_decision, "match_trace", match_trace)
-        trace = dict(internal_trace or {})
-        if pallet_result is not None and not trace:
-            trace = _build_pallet_trace(request, pallet_result, self)
-        oversize_accessorials = _oversize_accessorials(
-            pallet_result.surcharges if pallet_result is not None else {}
-        )
         return ZoneQuoteResult(
             source_type=ZoneQuoteSourceType.MANUAL_REQUIRED,
             confidence=0,
@@ -384,136 +327,7 @@ class ZoneQuoteEngine:
             match_trace=match_trace or {},
             sales_note="需要人工复核后才能向客户发送报价。",
             internal_note=internal_note or "确定性 Zone 查表报价未能完成，不能自动生成价格。",
-            internal_trace=trace,
-            oversize_rule_id=self.oversize_rule_id,
-            oversize_rule_version=self.oversize_rule_version,
-            oversize_rule_snapshot=self.oversize_rule_snapshot,
-            oversize_accessorials=oversize_accessorials,
         )
-
-
-def _rule_id(rule: OversizePalletRuleConfig | Mapping[str, object] | object) -> str | None:
-    if isinstance(rule, OversizePalletRuleConfig):
-        return rule.rule_id
-    if isinstance(rule, Mapping):
-        value = rule.get("rule_id")
-        return str(value) if value is not None else None
-    return None
-
-
-def _rule_snapshot(rule: OversizePalletRuleConfig | Mapping[str, object] | object) -> dict[str, object]:
-    if isinstance(rule, OversizePalletRuleConfig):
-        return _json_safe(rule.model_dump(mode="json"))
-    if isinstance(rule, Mapping):
-        return _json_safe(rule)
-    return {}
-
-
-def _oversize_accessorials(values: Mapping[str, Decimal] | None) -> dict[str, Decimal]:
-    """Map calculator categories to stable internal pricing categories."""
-
-    if not values:
-        return {}
-    category_names = {
-        "footprint_surcharge": "oversize_footprint_fee_usd",
-        "high_board_surcharge": "oversize_height_fee_usd",
-        "heavy_surcharge": "oversize_heavy_fee_usd",
-    }
-    result: dict[str, Decimal] = {}
-    for source_key, target_key in category_names.items():
-        amount = values.get(source_key)
-        if amount is not None and amount != 0:
-            result[target_key] = money(amount)
-    return result
-
-
-def _build_pallet_trace(
-    request: ZoneQuoteRequest,
-    pallet_result: PalletCalculationResult,
-    engine: ZoneQuoteEngine,
-) -> dict[str, object]:
-    calculator_trace = dict(pallet_result.internal_trace or {})
-    calculator = {
-        "billing_pallets": pallet_result.billing_pallets,
-        "components": pallet_result.components,
-        "manual_review_required": pallet_result.manual_review_required,
-        "risk_tags": list(pallet_result.risk_tags),
-        "internal_note": pallet_result.internal_note,
-        "surcharges": pallet_result.surcharges,
-        # Keep the calculator's replayable totals/reconciliation next to the
-        # Zone trace.  The old shape only exposed aggregate components, which
-        # made the published-rule audit unable to explain the chosen pallet
-        # count (and dropped vehicle validation details for manual tasks).
-        "totals": calculator_trace.get("totals", {}),
-        "reconciliation": calculator_trace.get("reconciliation", {}),
-        "lines": calculator_trace.get("lines", []),
-        "internal_trace": calculator_trace,
-    }
-    trace: dict[str, object] = {
-        "oversize_rule_id": engine.oversize_rule_id,
-        "oversize_rule_version": engine.oversize_rule_version,
-        "oversize_rule_snapshot": engine.oversize_rule_snapshot,
-        # Short aliases make the trace easy to consume from audit tooling
-        # without changing the public DTO boundary.
-        "rule_id": engine.oversize_rule_id,
-        # ``oversize_rule_version`` is the canonical string snapshot value.
-        # Keep the historical numeric alias for audit consumers that persisted
-        # this key before published versions were threaded through services.
-        "rule_version": _legacy_rule_version(engine.oversize_rule_version),
-        "rule_snapshot": engine.oversize_rule_snapshot,
-        # Preserve valid Pydantic rows and incomplete aggregate mappings.  The
-        # latter are intentionally retained for audit so the calculator can
-        # emit handling_unit_dimensions_missing/weight_missing rather than
-        # silently deleting the source line before manual review.
-        "handling_units": [
-            unit.model_dump(mode="json") if hasattr(unit, "model_dump") else _json_safe(unit)
-            for unit in request.handling_units
-        ],
-        "calculator": calculator,
-        # Keep a named alias for audit consumers that use the more explicit
-        # term while retaining the short key used by the quote engine tests.
-        "calculator_result": calculator,
-        "oversize_accessorials": _oversize_accessorials(pallet_result.surcharges),
-        "oversize_fees": _oversize_accessorials(pallet_result.surcharges),
-    }
-    vehicle = pallet_result.internal_trace.get("vehicle")
-    if vehicle is not None:
-        trace["vehicle"] = vehicle
-        if isinstance(vehicle, Mapping):
-            trace["vehicle_status"] = vehicle.get("status")
-    return _json_safe(trace)
-
-
-def _legacy_rule_version(value: str | None) -> int | str | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return value
-
-
-def _json_safe(value: object) -> object:
-    """Convert Decimal/enum/model containers into JSON-safe primitives."""
-
-    if isinstance(value, Decimal):
-        return str(value)
-    if isinstance(value, Mapping):
-        return {str(key): _json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    model_dump = getattr(value, "model_dump", None)
-    if callable(model_dump):
-        try:
-            return _json_safe(model_dump(mode="json"))
-        except TypeError:
-            return _json_safe(model_dump())
-    enum_value = getattr(value, "value", None)
-    if enum_value is not None and enum_value is not value:
-        return _json_safe(enum_value)
-    return str(value)
 
 
 def build_zone_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult) -> str:

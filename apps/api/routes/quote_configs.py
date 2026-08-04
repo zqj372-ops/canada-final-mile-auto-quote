@@ -5,15 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
-from apps.api.auth import ADMIN_ROLES, CurrentActor, require_roles
-from apps.api.db.repositories.oversize_pallet_rule_repository import OversizePalletRuleRepository
+from apps.api.auth import ADMIN_ROLES, require_roles
 from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
 from apps.api.db.repositories.zone_city_rule_repository import ZoneCityRuleRepository
 from apps.api.db.repositories.zone_price_matrix_repository import ZonePriceMatrixRepository
 from apps.api.db.session import get_db
 from packages.quote_engine.workbench_config import QuoteWorkbenchConfig
 from packages.quote_engine.zone_config import ZonePricingConfig
-from packages.quote_engine.oversize_config import OversizePalletRuleConfig
 
 
 CONFIG_READ_ROLES = ("admin", "operator", "sales", "viewer")
@@ -139,17 +137,6 @@ class ZoneCityRuleGroupSaveResponse(BaseModel):
     created_count: int
     updated_count: int
     deactivated_count: int
-
-
-class OversizePalletRuleAdminResponse(BaseModel):
-    draft: OversizePalletRuleConfig
-    published: OversizePalletRuleConfig | None
-    published_version: int
-
-
-class OversizePalletRulePublishResponse(BaseModel):
-    config: OversizePalletRuleConfig
-    published_version: int
 
 
 @router.get(
@@ -349,54 +336,3 @@ def save_zone_city_rule_group(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.get(
-    "/oversize-pallet-rule",
-    response_model=OversizePalletRuleAdminResponse,
-    dependencies=[Depends(require_roles(*CONFIG_READ_ROLES))],
-)
-def get_oversize_pallet_rule_config(db: Session = Depends(get_db)) -> dict[str, object]:
-    return OversizePalletRuleRepository(db).admin_snapshot()
-
-
-@router.put(
-    "/oversize-pallet-rule/draft",
-    response_model=OversizePalletRuleAdminResponse,
-    dependencies=[Depends(require_roles(*ADMIN_ROLES))],
-)
-def save_oversize_pallet_rule_draft(
-    payload: OversizePalletRuleConfig,
-    db: Session = Depends(get_db),
-) -> dict[str, object]:
-    repository = OversizePalletRuleRepository(db)
-    try:
-        repository.save_draft(payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return repository.admin_snapshot()
-
-
-@router.post(
-    "/oversize-pallet-rule/validate",
-    response_model=dict[str, object],
-    dependencies=[Depends(require_roles(*ADMIN_ROLES))],
-)
-def validate_oversize_pallet_rule_draft(db: Session = Depends(get_db)) -> dict[str, object]:
-    errors = OversizePalletRuleRepository(db).validate_draft()
-    return {"valid": not errors, "errors": errors}
-
-
-@router.post(
-    "/oversize-pallet-rule/publish",
-    response_model=OversizePalletRulePublishResponse,
-)
-def publish_oversize_pallet_rule_draft(
-    db: Session = Depends(get_db),
-    actor: CurrentActor = Depends(require_roles(*ADMIN_ROLES)),
-) -> dict[str, object]:
-    try:
-        config, version = OversizePalletRuleRepository(db).publish_draft(actor)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"config": config, "published_version": version}

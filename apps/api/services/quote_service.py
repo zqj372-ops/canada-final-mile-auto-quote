@@ -8,7 +8,6 @@ from apps.api.db.repositories.learned_quote_rule_repository import LearnedQuoteR
 from sqlalchemy.orm import Session
 
 from apps.api.db.repositories.manual_quote_task_repository import ManualQuoteTaskRepository
-from apps.api.db.repositories.oversize_pallet_rule_repository import OversizePalletRuleRepository
 from apps.api.db.repositories.quote_audit_repository import QuoteAuditRepository
 from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
 from apps.api.db.repositories.rate_rule_repository import RateRuleRepository
@@ -53,13 +52,7 @@ def calculate_zone_quote(
     wecom_bot_id: int | None = None,
 ) -> ZoneQuoteResult:
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
-    oversize_rule, oversize_rule_version = OversizePalletRuleRepository(db).get_published()
-    result = ZoneQuoteEngine(
-        ZoneRepository(db),
-        pricing_config=pricing_config,
-        oversize_rule=oversize_rule,
-        oversize_rule_version=str(oversize_rule_version),
-    ).quote(payload)
+    result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
     result = apply_learned_quote_if_available(db, payload, result)
     result = enforce_origin_matrix_safety(payload, result)
     result = enforce_zone_price_switch(pricing_config, result)
@@ -321,23 +314,6 @@ def _result_from_learned_rule(
             if is_corrective_override
             else "报价来自人工确认后的学习库，不是 AI 计算；建议运营定期复核并转入正式 Zone 价格表。"
         ),
-        # Learned rules may change the commercial amount, but they must not
-        # erase the deterministic evidence that led to the original result.
-        # Keep the published oversize snapshot, vehicle/calculator trace and
-        # matching trace available to audit, manual tasks and diagnostics.
-        match_trace=dict(original.match_trace),
-        internal_trace={
-            **original.internal_trace,
-            "learned_reuse": {
-                "source_task_id": rule.source_task_id,
-                "match_score": match_score,
-                "corrective_override": is_corrective_override,
-            },
-        },
-        oversize_rule_id=original.oversize_rule_id,
-        oversize_rule_version=original.oversize_rule_version,
-        oversize_rule_snapshot=dict(original.oversize_rule_snapshot),
-        oversize_accessorials=dict(original.oversize_accessorials),
     )
     result.sales_note = _build_learned_sales_note(request, result)
     return result
@@ -367,50 +343,12 @@ def _build_learned_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult
 
 
 def _should_apply_learned_rule(result: ZoneQuoteResult, rule: LearnedQuoteRule, match_score: int) -> bool:
-    # A learned pallet/price rule must never turn a currently unsafe
-    # oversize result into an automatic quote.  Ordinary Zone lookup manual
-    # results retain the historical learning behavior below; only the
-    # deterministic oversize hard-block tags are fail-closed here.
-    if _has_oversize_manual_risk(result):
-        return False
     if result.manual_review_required:
         return True
     if match_score >= 100:
         return True
     if match_score >= 90 and _has_correctable_zone_risk(result) and _learned_rule_differs_from_zone_result(result, rule):
         return True
-    return False
-
-
-def _has_oversize_manual_risk(result: ZoneQuoteResult) -> bool:
-    """Return whether the result contains an oversize hard-review risk.
-
-    These tags are emitted by the deterministic handling-unit/pallet and
-    vehicle calculators.  Prefix matching intentionally covers future
-    ``declared_*_out_of_tolerance`` and ``oversize_vehicle_*`` risk codes while
-    leaving ordinary postal/Zone lookup risks eligible for learned correction.
-    """
-
-    # The calculator deliberately treats a missing optional contained-piece
-    # declaration as a soft check when all physical handling units are valid.
-    # That tag must not disable ordinary Zone learning corrections; only a
-    # result that is already manual and carries a hard oversize risk is blocked.
-    if not result.manual_review_required:
-        return False
-    for tag in result.risk_tags:
-        if (
-            tag in {"handling_units_missing", "handling_unit_invalid"}
-            or tag.startswith("handling_unit_")
-            or tag.startswith("oversize_vehicle_")
-            or tag.startswith("oversize_rule_")
-            or tag.startswith("declared_")
-            or tag.startswith("explicit_pallet_count")
-            or (
-                tag.startswith("customer_piece_count_")
-                and tag != "customer_piece_count_check_skipped"
-            )
-        ):
-            return True
     return False
 
 

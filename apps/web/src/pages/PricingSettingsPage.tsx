@@ -10,22 +10,15 @@ import {
 import {
   createZoneCityRule,
   deactivateZoneCityRule,
-  getOversizePalletRule,
   getZonePricingConfig,
   importZonePriceMatrixSpreadsheet,
   listZoneCityRules,
   listZonePriceMatrix,
   previewZonePriceMatrixImport,
-  publishOversizePalletRule,
-  saveOversizePalletRuleDraft,
   updateZoneCityRule,
   updateZonePricingConfig,
   upsertZonePriceMatrix,
-  validateOversizePalletRule,
   type MoneyValue,
-  type OversizePalletRuleConfig,
-  type OversizePalletRuleAdminSnapshot,
-  type OversizeVehicleProfile,
   type ZoneCityRuleListResponse,
   type ZoneCityRulePayload,
   type ZoneCityRuleRecord,
@@ -51,7 +44,7 @@ type NewPriceDraft = {
   source: string;
 };
 
-type PricingSettingsSection = "fees" | "new-price" | "matrix" | "cities" | "oversize";
+type PricingSettingsSection = "fees" | "new-price" | "matrix" | "cities";
 type ZoneCityEditorTarget = {
   origin: string;
   zone: number;
@@ -347,7 +340,7 @@ export default function PricingSettingsPage({ cityOnly = false }: { cityOnly?: b
           <p>
             {cityOnly
               ? "按始发仓和 Zone 维护城市、FSA 邮编前缀及标准城市名，保存后下一票报价立即使用。"
-              : "维护 Zone 基础派送费、分区开关、燃油比例和附加费。超大件规则单独标记为可配置的暂行默认值，前台只读取报价结果。"}
+              : "维护 Zone 基础派送费、分区开关、燃油比例和附加费。前台只读取报价结果，不在浏览器计算价格。"}
           </p>
         </div>
         <div className="pricing-page-actions">
@@ -377,7 +370,6 @@ export default function PricingSettingsPage({ cityOnly = false }: { cityOnly?: b
             ["fees", "附加费规则", "全局规则"],
             ["new-price", "新增价格", "单条覆盖"],
             ["matrix", "价格矩阵", "Zone 管理"],
-            ["oversize", "超大件规则", "暂行默认值"],
           ] as Array<[PricingSettingsSection, string, string]>).map(([section, label, meta]) => (
             <button
               key={section}
@@ -449,8 +441,6 @@ export default function PricingSettingsPage({ cityOnly = false }: { cityOnly?: b
           </div>
         </form>
       )}
-
-      {activeSection === "oversize" && <OversizeRuleSection />}
 
       {activeSection === "new-price" && (
         <form className="pricing-panel pricing-new-price-panel" onSubmit={addOrUpdatePrice}>
@@ -782,368 +772,6 @@ export default function PricingSettingsPage({ cityOnly = false }: { cityOnly?: b
       />
     </div>
   );
-}
-
-type OversizeRuleScalarKey = Exclude<keyof OversizePalletRuleConfig, "vehicle_profiles">;
-type OversizeVehicleFieldKey = Exclude<keyof OversizeVehicleProfile, "code">;
-
-const oversizeRuleFields: Array<{
-  key: Exclude<OversizeRuleScalarKey, "rule_id">;
-  label: string;
-  suffix: string;
-  hint: string;
-  integer?: boolean;
-}> = [
-  { key: "standard_pallet_length_cm", label: "标准托长度", suffix: "cm", hint: "暂行默认标准托长边。" },
-  { key: "standard_pallet_width_cm", label: "标准托宽度", suffix: "cm", hint: "暂行默认标准托短边。" },
-  { key: "standard_pallet_area_cm2", label: "标准托面积", suffix: "cm²", hint: "必须等于标准托长 × 宽。" },
-  { key: "mild_oversize_length_cm", label: "首次分档长度", suffix: "cm", hint: "超过标准托且不超过此值时使用轻度超大。" },
-  { key: "mild_oversize_width_cm", label: "首次分档宽度", suffix: "cm", hint: "超过标准托且不超过此值时使用轻度超大。" },
-  { key: "expansion_trigger_length_cm", label: "扩托触发长度", suffix: "cm", hint: "超过此长边后进入扩托计算。" },
-  { key: "expansion_trigger_width_cm", label: "扩托触发宽度", suffix: "cm", hint: "超过此短边后进入扩托计算。" },
-  { key: "expansion_grace_cm", label: "扩托边界容差", suffix: "cm", hint: "重复边界判断允许的暂行容差。" },
-  { key: "area_tolerance_ratio", label: "面积容差", suffix: "比例", hint: "0 到 1 之间，例如 0.02。" },
-  { key: "weight_basis_kg", label: "托重基准", suffix: "kg", hint: "用于重量托数比较的基准。" },
-  { key: "normal_board_height_cm", label: "普通车板高", suffix: "cm", hint: "不超过此高度时使用普通车板。" },
-  { key: "high_board_height_cm", label: "高板阈值", suffix: "cm", hint: "超过普通车板高度时进入高板规则。" },
-  { key: "unit_auto_weight_max_kg", label: "单件自动重量上限", suffix: "kg", hint: "超过后转人工确认。" },
-  { key: "footprint_surcharge", label: "占地附加费", suffix: "USD", hint: "超大件占地类别的暂行费用。" },
-  { key: "medium_oversize_surcharge", label: "中度超大附加费", suffix: "USD", hint: "中度超大类别的暂行费用。" },
-  { key: "high_board_surcharge", label: "高板附加费", suffix: "USD", hint: "高板类别的暂行费用。" },
-  { key: "heavy_surcharge", label: "超重附加费", suffix: "USD", hint: "超重类别的暂行费用。" },
-  { key: "customer_piece_tolerance_absolute", label: "客户件数绝对容差", suffix: "件", hint: "仅用于结果核对，不替代实际搬运单元。", integer: true },
-  { key: "customer_piece_tolerance_ratio", label: "客户件数比例容差", suffix: "比例", hint: "0 到 1 之间，例如 0.05。" },
-  { key: "weight_tolerance_absolute_kg", label: "重量绝对容差", suffix: "kg", hint: "客户汇总重量与搬运单元的核对范围。" },
-  { key: "weight_tolerance_ratio", label: "重量比例容差", suffix: "比例", hint: "0 到 1 之间，例如 0.05。" },
-  { key: "volume_tolerance_absolute_cbm", label: "体积绝对容差", suffix: "CBM", hint: "客户汇总体积与搬运单元的核对范围。" },
-  { key: "volume_tolerance_ratio", label: "体积比例容差", suffix: "比例", hint: "0 到 1 之间，例如 0.10。" },
-  { key: "max_auto_vehicles", label: "自动车辆数上限", suffix: "辆", hint: "暂行默认最多自动给出 3 辆候选。", integer: true },
-  { key: "packing_node_limit", label: "装载搜索节点上限", suffix: "节点", hint: "确定性装载搜索的保护上限。", integer: true },
-];
-
-const oversizeVehicleFields: Array<{
-  key: OversizeVehicleFieldKey;
-  label: string;
-  suffix: string;
-  integer?: boolean;
-}> = [
-  { key: "label", label: "车辆名称", suffix: "" },
-  { key: "length_cm", label: "车厢长度", suffix: "cm" },
-  { key: "width_cm", label: "车厢宽度", suffix: "cm" },
-  { key: "height_cm", label: "车厢高度", suffix: "cm" },
-  { key: "volume_cbm", label: "有效体积", suffix: "CBM" },
-  { key: "payload_kg", label: "载重上限", suffix: "kg" },
-  { key: "common_pallet_limit", label: "常规托数上限", suffix: "托", integer: true },
-  { key: "tight_pallet_limit", label: "紧密托数上限", suffix: "托", integer: true },
-  { key: "comparable_base_price", label: "可比基础价", suffix: "USD" },
-];
-
-function OversizeRuleSection() {
-  const [snapshot, setSnapshot] = useState<OversizePalletRuleAdminSnapshot | null>(null);
-  const [draft, setDraft] = useState<OversizePalletRuleConfig | null>(null);
-  const [validation, setValidation] = useState<"unknown" | "valid" | "invalid">("unknown");
-  const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [localError, setLocalError] = useState<string | null>(null);
-  const [localNotice, setLocalNotice] = useState<string | null>(null);
-  const [lastPublishedAt, setLastPublishedAt] = useState<string | null>(null);
-
-  useEffect(() => {
-    void loadSnapshot();
-  }, []);
-
-  const hasUnsavedChanges = Boolean(
-    draft && snapshot && JSON.stringify(draft) !== JSON.stringify(snapshot.draft),
-  );
-
-  async function loadSnapshot() {
-    setIsLoading(true);
-    setLocalError(null);
-    try {
-      const next = await getOversizePalletRule();
-      setSnapshot(next);
-      setDraft(cloneOversizeRule(next.draft));
-      setValidation("unknown");
-      setValidationErrors([]);
-      if (next.published_at) {
-        setLastPublishedAt(next.published_at);
-      }
-    } catch (caught) {
-      setLocalError(caught instanceof Error ? caught.message : "超大件规则读取失败");
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  function markDraftChanged() {
-    setValidation("unknown");
-    setValidationErrors([]);
-    setLocalNotice(null);
-  }
-
-  function updateRuleField(key: OversizeRuleScalarKey, value: string) {
-    setDraft((current) => current ? { ...current, [key]: value } : current);
-    markDraftChanged();
-  }
-
-  function updateVehicleField(code: string, key: OversizeVehicleFieldKey, value: string) {
-    setDraft((current) => current ? {
-      ...current,
-      vehicle_profiles: current.vehicle_profiles.map((profile) =>
-        profile.code === code ? { ...profile, [key]: value } : profile,
-      ),
-    } : current);
-    markDraftChanged();
-  }
-
-  async function saveDraft() {
-    if (!draft) {
-      return;
-    }
-    setIsSaving(true);
-    setLocalError(null);
-    setLocalNotice(null);
-    try {
-      const next = await saveOversizePalletRuleDraft(draft);
-      setSnapshot(next);
-      setDraft(cloneOversizeRule(next.draft));
-      setValidation("unknown");
-      setValidationErrors([]);
-      setLocalNotice("超大件规则草稿已保存；它仍需校验并发布后才会成为生效版本。");
-    } catch (caught) {
-      setLocalError(caught instanceof Error ? caught.message : "超大件规则草稿保存失败");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function validateDraft() {
-    if (!draft || hasUnsavedChanges) {
-      setLocalError("请先保存当前草稿，再进行服务端校验。");
-      return;
-    }
-    setIsSaving(true);
-    setLocalError(null);
-    setLocalNotice(null);
-    try {
-      const result = await validateOversizePalletRule();
-      setValidation(result.valid ? "valid" : "invalid");
-      setValidationErrors(result.errors);
-      if (result.valid) {
-        setLocalNotice("服务端校验通过，可以发布当前草稿。");
-      } else {
-        setLocalError("服务端校验未通过，请按提示修正草稿。");
-      }
-    } catch (caught) {
-      setValidation("invalid");
-      setLocalError(caught instanceof Error ? caught.message : "超大件规则校验失败");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  async function publishDraft() {
-    if (!draft || hasUnsavedChanges || validation !== "valid") {
-      setLocalError("发布前必须先保存草稿并通过服务端校验。");
-      return;
-    }
-    setIsSaving(true);
-    setLocalError(null);
-    setLocalNotice(null);
-    try {
-      const result = await publishOversizePalletRule();
-      setLastPublishedAt(new Date().toISOString());
-      setValidation("unknown");
-      setValidationErrors([]);
-      await loadSnapshot();
-      setLocalNotice(`超大件规则已发布，当前版本 ${result.published_version}。`);
-    } catch (caught) {
-      setLocalError(caught instanceof Error ? caught.message : "超大件规则发布失败");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  if (isLoading && !draft) {
-    return <section className="pricing-panel pricing-oversize-panel"><div className="pricing-oversize-empty">正在读取超大件规则…</div></section>;
-  }
-
-  if (!draft || !snapshot) {
-    return <section className="pricing-panel pricing-oversize-panel"><div className="pricing-oversize-empty">{localError || "暂时无法读取超大件规则。"}</div></section>;
-  }
-
-  return (
-    <section className="pricing-panel pricing-oversize-panel">
-      <div className="pricing-panel-heading">
-        <div>
-          <span className="pricing-eyebrow">超大件规则维护</span>
-          <h2>可配置的暂行默认值</h2>
-          <p>这些参数用于北美超大件托数与车辆计算，不代表任何承运商正式标准。保存草稿、服务端校验、发布三个步骤均会留下版本边界。</p>
-        </div>
-        <div className="pricing-oversize-actions">
-          <button className="btn-secondary" type="button" onClick={() => void loadSnapshot()} disabled={isSaving || isLoading}>
-            <PricingIcon name="refresh" />
-            重新读取
-          </button>
-          <button className="btn-primary" type="button" onClick={() => void saveDraft()} disabled={isSaving}>
-            <PricingIcon name="save" />
-            {isSaving ? "处理中…" : "保存草稿"}
-          </button>
-        </div>
-      </div>
-
-      {(localError || localNotice) && (
-        <div className={`pricing-oversize-feedback ${localError ? "is-error" : "is-success"}`} role={localError ? "alert" : "status"}>
-          <PricingIcon name={localError ? "alert" : "check"} />
-          <span>{localError || localNotice}</span>
-        </div>
-      )}
-
-      <div className="pricing-oversize-status">
-        <div><span>草稿规则 ID</span><strong>{draft.rule_id}</strong></div>
-        <div><span>已发布规则 ID</span><strong>{snapshot.published?.rule_id || "尚未发布"}</strong></div>
-        <div><span>已发布版本</span><strong>{snapshot.published_version || "—"}</strong></div>
-        <div><span>最近发布</span><strong>{formatPublishedAt(snapshot.published_at || lastPublishedAt)}</strong></div>
-        <div className={`pricing-oversize-validation is-${validation}`}>
-          <span>草稿状态</span>
-          <strong>{validation === "valid" ? "校验通过" : validation === "invalid" ? "需要修正" : hasUnsavedChanges ? "有未保存修改" : "待校验"}</strong>
-        </div>
-      </div>
-
-      <div className="pricing-oversize-body">
-        <section className="pricing-oversize-block">
-          <div className="pricing-panel-heading compact">
-            <div><span className="pricing-eyebrow">基础参数</span><h3>托尺寸、分档与阈值</h3></div>
-          </div>
-          <div className="pricing-form-grid pricing-oversize-fields">
-            <TextInput label="规则 ID" value={String(draft.rule_id)} onChange={(value) => updateRuleField("rule_id", value)} />
-            {oversizeRuleFields.slice(0, 13).map((field) => <OversizeRuleField key={field.key} field={field} value={draft[field.key]} onChange={(value) => updateRuleField(field.key, value)} />)}
-          </div>
-        </section>
-
-        <section className="pricing-oversize-block">
-          <div className="pricing-panel-heading compact">
-            <div><span className="pricing-eyebrow">费用与核对</span><h3>附加费、重量高度与数据容差</h3></div>
-          </div>
-          <div className="pricing-form-grid pricing-oversize-fields">
-            {oversizeRuleFields.slice(13).map((field) => <OversizeRuleField key={field.key} field={field} value={draft[field.key]} onChange={(value) => updateRuleField(field.key, value)} />)}
-          </div>
-        </section>
-
-        <section className="pricing-oversize-block">
-          <div className="pricing-panel-heading compact">
-            <div><span className="pricing-eyebrow">车辆画像</span><h3>可配置车辆能力边界</h3><p>车辆代码由系统维护；这里只编辑尺寸、容量、托数上限和可比基础价。</p></div>
-          </div>
-          <div className="pricing-oversize-vehicle-list">
-            {draft.vehicle_profiles.map((profile) => (
-              <article className="pricing-oversize-vehicle" key={profile.code}>
-                <div className="pricing-oversize-vehicle-heading">
-                  <div><span className="pricing-eyebrow">{profile.code}</span><strong>{profile.label}</strong></div>
-                  <span className="pricing-help-chip">暂行默认值</span>
-                </div>
-                <div className="pricing-oversize-vehicle-fields">
-                  {oversizeVehicleFields.map((field) => (
-                    <OversizeVehicleField
-                      key={field.key}
-                      field={field}
-                      value={profile[field.key]}
-                      onChange={(value) => updateVehicleField(profile.code, field.key, value)}
-                    />
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      {validationErrors.length > 0 && (
-        <div className="pricing-oversize-errors" role="alert">
-          <strong>校验提示</strong>
-          <ul>{validationErrors.map((message, index) => <li key={`${message}-${index}`}>{message}</li>)}</ul>
-        </div>
-      )}
-
-      <footer className="pricing-oversize-footer">
-        <span><PricingIcon name="info" />发布前必须完成服务端校验；发布后新版本才会用于后续超大件报价。</span>
-        <div>
-          <button className="btn-secondary" type="button" onClick={() => void validateDraft()} disabled={isSaving || Boolean(hasUnsavedChanges)}>
-            {isSaving ? "校验中…" : "校验草稿"}
-          </button>
-          <button className="btn-primary" type="button" onClick={() => void publishDraft()} disabled={isSaving || validation !== "valid" || Boolean(hasUnsavedChanges)}>
-            {isSaving ? "发布中…" : "发布规则"}
-          </button>
-        </div>
-      </footer>
-    </section>
-  );
-}
-
-function OversizeRuleField({
-  field,
-  value,
-  onChange,
-}: {
-  field: (typeof oversizeRuleFields)[number];
-  value: MoneyValue | number | string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="pricing-field-card">
-      <span className="pricing-card-label">{field.label}</span>
-      <div className="pricing-input-with-unit">
-        <input
-          type={field.integer ? "number" : "text"}
-          inputMode={field.integer ? "numeric" : "decimal"}
-          value={value === null || value === undefined ? "" : String(value)}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        {field.suffix && <span>{field.suffix}</span>}
-      </div>
-      <small>{field.hint}</small>
-    </label>
-  );
-}
-
-function OversizeVehicleField({
-  field,
-  value,
-  onChange,
-}: {
-  field: (typeof oversizeVehicleFields)[number];
-  value: MoneyValue | number | string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="pricing-field-card">
-      <span className="pricing-card-label">{field.label}</span>
-      <div className="pricing-input-with-unit">
-        <input
-          type={field.integer ? "number" : field.key === "label" ? "text" : "text"}
-          inputMode={field.integer ? "numeric" : field.key === "label" ? "text" : "decimal"}
-          value={value === null || value === undefined ? "" : String(value)}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        {field.suffix && <span>{field.suffix}</span>}
-      </div>
-    </label>
-  );
-}
-
-function cloneOversizeRule(config: OversizePalletRuleConfig): OversizePalletRuleConfig {
-  return {
-    ...config,
-    vehicle_profiles: config.vehicle_profiles.map((profile) => ({ ...profile })),
-  };
-}
-
-function formatPublishedAt(value: string | null | undefined): string {
-  if (!value) {
-    return "接口未返回";
-  }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
 }
 
 function ZoneCityConfigDialog({
