@@ -26,13 +26,10 @@ export function formatZoneMatch(result: PublicZoneMatch | null): string {
   if (!result) {
     return "待匹配";
   }
-  if (result.manual_review_required) {
-    return "待人工确认";
+  if (result.origin && result.zone !== null && result.zone !== undefined) {
+    return `${formatOrigin(result.origin)} / Zone ${result.zone}`;
   }
-  if (!result.origin || result.zone === null || result.zone === undefined) {
-    return "待匹配";
-  }
-  return `${formatOrigin(result.origin)} / Zone ${result.zone}`;
+  return result.manual_review_required ? "待人工确认" : "待匹配";
 }
 
 function formatOrigin(origin: string): string {

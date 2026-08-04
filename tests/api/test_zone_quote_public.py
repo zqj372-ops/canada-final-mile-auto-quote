@@ -62,7 +62,7 @@ def test_zone_http_success_returns_public_allowlist_only() -> None:
         assert hidden_field not in body
 
 
-def test_zone_http_manual_returns_no_candidate_pallet_count() -> None:
+def test_zone_http_manual_keeps_confirmed_zone_but_returns_no_candidate_pallet_count() -> None:
     client = build_client()
 
     response = client.post(
@@ -92,6 +92,30 @@ def test_zone_http_manual_returns_no_candidate_pallet_count() -> None:
     assert body["manual_review_required"] is True
     assert body["billing_pallets"] is None
     assert body["total_price_usd"] is None
+    assert body["origin"] == "toronto"
+    assert body["zone"] == 2
+    assert body["public_flags"] == ["manual_review_required"]
+
+
+def test_zone_http_manual_without_resolved_zone_keeps_zone_empty() -> None:
+    client = build_client(
+        zone_rules=[
+            {
+                "postal_prefix": "T1X",
+                "city": "CALGARY",
+                "province": "AB",
+                "origin": "calgary",
+                "zone": 1,
+                "match_level": "test",
+                "note": "",
+            }
+        ]
+    )
+
+    response = client.post("/quotes/zone-calculate", json=base_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["manual_review_required"] is True
     assert body["origin"] is None
     assert body["zone"] is None
-    assert body["public_flags"] == ["manual_review_required"]
