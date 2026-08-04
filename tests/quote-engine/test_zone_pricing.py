@@ -97,3 +97,18 @@ def test_custom_residential_fee_is_applied() -> None:
 
     assert result.accessorials["residential_fee_usd"] == Decimal("75.00")
     assert result.total_price_usd == Decimal("237.00")
+
+
+def test_additional_accessorials_are_added_without_recomputing_pallets() -> None:
+    result = calculate_zone_price(
+        base_price_usd=Decimal("120.00"),
+        address_type=AddressType.COMMERCIAL,
+        additional_accessorials={
+            "oversize_footprint_fee_usd": Decimal("25"),
+            "oversize_heavy_fee_usd": Decimal("75"),
+        },
+    )
+
+    assert result.accessorials["oversize_footprint_fee_usd"] == Decimal("25.00")
+    assert result.accessorials["oversize_heavy_fee_usd"] == Decimal("75.00")
+    assert result.total_price_usd == Decimal("262.00")

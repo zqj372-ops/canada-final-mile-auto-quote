@@ -14,6 +14,27 @@ export type AddressType =
 
 export type MoneyValue = string | number | null;
 
+export type Stackability = "stackable" | "non_stackable" | "unknown";
+
+/** Physical handling-unit input. Null dimensions/weight are retained for an
+ * aggregate reconciliation row and intentionally route the quote to manual
+ * review; the browser must never fill them from customer piece counts. */
+export interface HandlingUnitInput {
+  quantity: number;
+  packaging_type: PackagingType | string;
+  length_cm: MoneyValue;
+  width_cm: MoneyValue;
+  height_cm: MoneyValue;
+  unit_weight_kg: MoneyValue;
+  cbm?: MoneyValue;
+  contained_customer_pieces?: number | null;
+  stackability?: Stackability;
+  max_stack_layers?: number | null;
+  max_top_load_kg?: MoneyValue;
+  floor_rotation_allowed?: boolean | null;
+  source_span?: string | null;
+}
+
 export type JsonValue =
   | string
   | number
@@ -27,6 +48,7 @@ export interface ZoneQuoteRequest {
   postal_code: string;
   city: string | null;
   province: string | null;
+  handling_units: HandlingUnitInput[];
   cbm: number;
   weight_kg: number;
   piece_count: number;
@@ -51,29 +73,66 @@ export interface ZoneQuoteWithNotifyRequest {
 
 export interface ZoneQuoteResult {
   quote_id: string;
-  source_type: "zone_matrix" | "manual_required" | string;
-  confidence: number;
-  postal_code: string | null;
-  preferred_city: string | null;
-  postal_prefix: string | null;
-  city: string | null;
-  province: string | null;
-  origin: string | null;
-  zone: number | null;
   billing_pallets: number | null;
-  pallet_breakdown: Record<string, number>;
-  base_price_usd: MoneyValue;
-  fuel_usd: MoneyValue;
-  accessorials: Record<string, MoneyValue>;
   total_price_usd: MoneyValue;
-  risk_tags: string[];
   manual_review_required: boolean;
-  matched_rule: string;
-  matched_by: string | null;
-  candidate_count: number;
-  match_trace: Record<string, JsonValue>;
   sales_note: string | null;
-  internal_note: string | null;
+  public_flags: string[];
+}
+
+/**
+ * Editable oversize-rule values are intentionally represented as strings (or
+ * the exact JSON value returned by the API). Decimal fields must not be
+ * round-tripped through Number in the admin form.
+ */
+export interface OversizeVehicleProfile {
+  code: string;
+  label: string;
+  length_cm: MoneyValue;
+  width_cm: MoneyValue;
+  height_cm: MoneyValue;
+  volume_cbm: MoneyValue;
+  payload_kg: MoneyValue;
+  common_pallet_limit: number | string;
+  tight_pallet_limit: number | string;
+  comparable_base_price: MoneyValue;
+}
+
+export interface OversizePalletRuleConfig {
+  rule_id: string;
+  standard_pallet_length_cm: MoneyValue;
+  standard_pallet_width_cm: MoneyValue;
+  standard_pallet_area_cm2: MoneyValue;
+  mild_oversize_length_cm: MoneyValue;
+  mild_oversize_width_cm: MoneyValue;
+  expansion_trigger_length_cm: MoneyValue;
+  expansion_trigger_width_cm: MoneyValue;
+  expansion_grace_cm: MoneyValue;
+  area_tolerance_ratio: MoneyValue;
+  weight_basis_kg: MoneyValue;
+  normal_board_height_cm: MoneyValue;
+  high_board_height_cm: MoneyValue;
+  unit_auto_weight_max_kg: MoneyValue;
+  footprint_surcharge: MoneyValue;
+  medium_oversize_surcharge: MoneyValue;
+  high_board_surcharge: MoneyValue;
+  heavy_surcharge: MoneyValue;
+  customer_piece_tolerance_absolute: number | string;
+  customer_piece_tolerance_ratio: MoneyValue;
+  weight_tolerance_absolute_kg: MoneyValue;
+  weight_tolerance_ratio: MoneyValue;
+  volume_tolerance_absolute_cbm: MoneyValue;
+  volume_tolerance_ratio: MoneyValue;
+  max_auto_vehicles: number | string;
+  packing_node_limit: number | string;
+  vehicle_profiles: OversizeVehicleProfile[];
+}
+
+export interface OversizePalletRuleAdminSnapshot {
+  draft: OversizePalletRuleConfig;
+  published: OversizePalletRuleConfig | null;
+  published_version: number;
+  published_at?: string | null;
 }
 
 export interface CurrentActor {
@@ -151,6 +210,11 @@ export interface AIExtractedCargoItem {
   cbm: MoneyValue;
   total_weight_kg: MoneyValue;
   total_cbm: MoneyValue;
+  contained_customer_pieces?: number | null;
+  stackability?: Stackability | null;
+  max_stack_layers?: number | null;
+  max_top_load_kg?: MoneyValue;
+  floor_rotation_allowed?: boolean | null;
   source_span: string | null;
 }
 
@@ -1262,6 +1326,36 @@ export function updateZonePricingConfig(
     method: "PUT",
     body: JSON.stringify(payload),
   });
+}
+
+export function getOversizePalletRule(): Promise<OversizePalletRuleAdminSnapshot> {
+  return request<OversizePalletRuleAdminSnapshot>("/quote-configs/oversize-pallet-rule");
+}
+
+export function saveOversizePalletRuleDraft(
+  payload: OversizePalletRuleConfig,
+): Promise<OversizePalletRuleAdminSnapshot> {
+  return request<OversizePalletRuleAdminSnapshot>("/quote-configs/oversize-pallet-rule/draft", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function validateOversizePalletRule(): Promise<{ valid: boolean; errors: string[] }> {
+  return request<{ valid: boolean; errors: string[] }>(
+    "/quote-configs/oversize-pallet-rule/validate",
+    { method: "POST" },
+  );
+}
+
+export function publishOversizePalletRule(): Promise<{
+  config: OversizePalletRuleConfig;
+  published_version: number;
+}> {
+  return request<{ config: OversizePalletRuleConfig; published_version: number }>(
+    "/quote-configs/oversize-pallet-rule/publish",
+    { method: "POST" },
+  );
 }
 
 export function listZonePriceMatrix(params: {

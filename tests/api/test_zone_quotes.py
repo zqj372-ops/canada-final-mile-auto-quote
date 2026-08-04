@@ -19,6 +19,64 @@ from apps.api.db.session import get_db
 from apps.api.main import app
 
 
+class _LegacyQuoteBody(dict[str, object]):
+    """Keep old internal-field assertions readable while preserving the HTTP DTO.
+
+    The zone endpoint intentionally returns only the public allowlist.  These
+    legacy tests still exercise matching details, so missing keys are resolved
+    from the persisted audit snapshot; keys present in the public response
+    (notably ``billing_pallets`` on manual results) always win.
+    """
+
+    def __init__(self, public_body: dict[str, object], internal_body: dict[str, object]):
+        super().__init__(public_body)
+        self._internal_body = internal_body
+
+    def __getitem__(self, key: str) -> object:
+        if key in self:
+            return super().__getitem__(key)
+        return self._internal_body[key]
+
+    def get(self, key: str, default: object = None) -> object:
+        if key in self:
+            return super().get(key, default)
+        return self._internal_body.get(key, default)
+
+
+class _LegacyQuoteResponse:
+    def __init__(self, response: object, internal_body: dict[str, object]):
+        self._response = response
+        self._internal_body = internal_body
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._response, name)
+
+    def json(self, *args: object, **kwargs: object) -> _LegacyQuoteBody:
+        public_body = self._response.json(*args, **kwargs)  # type: ignore[attr-defined]
+        return _LegacyQuoteBody(public_body, self._internal_body)
+
+
+class _LegacyZoneTestClient(TestClient):
+    """Test-only compatibility client for pre-public-DTO zone assertions."""
+
+    def post(self, url: str, *args: object, **kwargs: object) -> object:
+        response = super().post(url, *args, **kwargs)
+        if url.rstrip("/") != "/quotes/zone-calculate" or response.status_code != 200:
+            return response
+        public_body = response.json()
+        quote_id = public_body.get("quote_id") if isinstance(public_body, dict) else None
+        if not isinstance(quote_id, str) or not quote_id:
+            return response
+        audit_response = super().get(f"/quotes/audit/{quote_id}")
+        if audit_response.status_code != 200:
+            return response
+        audit_body = audit_response.json()
+        internal_body = audit_body.get("result_json", {}) if isinstance(audit_body, dict) else {}
+        if not isinstance(internal_body, dict):
+            internal_body = {}
+        return _LegacyQuoteResponse(response, internal_body)
+
+
 def build_client(
     *,
     postal_records: list[dict[str, object]] | None = None,
@@ -56,7 +114,7 @@ def build_client(
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
-    return TestClient(app)
+    return _LegacyZoneTestClient(app)
 
 
 def teardown_function() -> None:
@@ -165,7 +223,46 @@ def default_prices() -> list[dict[str, object]]:
     ]
 
 
-def base_payload(**overrides: object) -> dict[str, object]:
+CALGARY_LATEST_FSA_RULES = (
+    "T1Y",
+    "T2A",
+    "T2B",
+    "T2C",
+    "T2E",
+    "T2G",
+    "T2H",
+    "T2J",
+    "T2K",
+    "T2L",
+    "T2M",
+    "T2N",
+    "T2P",
+    "T2R",
+    "T2S",
+    "T2T",
+    "T2V",
+    "T2W",
+    "T2X",
+    "T2Y",
+    "T2Z",
+    "T3A",
+    "T3B",
+    "T3C",
+    "T3E",
+    "T3G",
+    "T3H",
+    "T3J",
+    "T3K",
+    "T3L",
+    "T3M",
+    "T3N",
+    "T3P",
+    "T3R",
+    "T3S",
+)
+
+
+def base_payload(*, fixture_billing_pallets: int = 3, **overrides: object) -> dict[str, object]:
     payload: dict[str, object] = {
         "address_line": "8888 Keele St",
         "postal_code": "L4K 2N2",
@@ -183,6 +280,34 @@ def base_payload(**overrides: object) -> dict[str, object]:
         "explicit_pallet_count": None,
     }
     payload.update(overrides)
+    # Most historical cases describe an order using aggregate fields.  The
+    # expected physical pallet count is declared by each test instead of being
+    # reverse-engineered from CBM/weight.  This keeps the fixture explicit and
+    # prevents a legacy aggregate formula from becoming a hidden test oracle.
+    if "handling_units" not in payload:
+        longest = payload.get("longest_side_cm")
+        longest_value = Decimal(str(longest)) if longest is not None else Decimal("100")
+        if longest_value < Decimal("240"):
+            cbm = Decimal(str(payload.get("cbm") or "0"))
+            weight = Decimal(str(payload.get("weight_kg") or "0"))
+            target = max(1, fixture_billing_pallets)
+            explicit = payload.get("explicit_pallet_count")
+            if isinstance(explicit, int) and explicit > target:
+                target = explicit
+            length = Decimal("120")
+            width = Decimal("100")
+            height = (cbm * Decimal("1000000") / (Decimal(target) * length * width)) if cbm > 0 else Decimal("100")
+            payload["handling_units"] = [
+                {
+                    "quantity": target,
+                    "packaging_type": str(payload.get("packaging_type") or "carton"),
+                    "length_cm": str(length),
+                    "width_cm": str(width),
+                    "height_cm": str(height),
+                    "unit_weight_kg": str(weight / Decimal(target) if weight > 0 else Decimal("1")),
+                    "contained_customer_pieces": int(payload.get("piece_count") or 1),
+                }
+            ]
     return payload
 
 
@@ -662,11 +787,14 @@ def test_stale_exact_zone_uses_same_city_expected_origin_anchor() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["source_type"] == "manual_required"
+    assert body["matched_by"] == "origin_matrix_guard"
     assert body["origin"] is None
     assert body["zone"] is None
     assert body["base_price_usd"] is None
     assert body["total_price_usd"] is None
     assert body["manual_review_required"] is True
+    assert "stale_origin_overridden" in body["risk_tags"]
+    assert "origin_matrix_mismatch" in body["risk_tags"]
 
 
 def test_city_fallback_ignores_cross_province_legacy_anchor() -> None:
@@ -900,6 +1028,17 @@ def test_hard_long_piece_over_240cm_counts_two_pallets_per_piece() -> None:
             piece_count=2,
             longest_side_cm=240,
             requires_appointment=False,
+            handling_units=[
+                {
+                    "quantity": 2,
+                    "packaging_type": "carton",
+                    "length_cm": 240,
+                    "width_cm": 100,
+                    "height_cm": "20.8333333",
+                    "unit_weight_kg": 50,
+                    "contained_customer_pieces": 2,
+                }
+            ],
         ),
     )
 
@@ -955,10 +1094,9 @@ def test_suspicious_long_piece_count_requires_manual_before_price_lookup() -> No
     assert body["source_type"] == "manual_required"
     assert body["manual_review_required"] is True
     assert body["billing_pallets"] is None
-    assert body["pallet_breakdown"]["long_piece_pallets"] == 4500
-    assert body["pallet_breakdown"]["normal_basis_pallets"] == 3
-    assert "long_piece_count_suspicious" in body["risk_tags"]
-    assert not body["matched_rule"].startswith("Zone 价格矩阵缺少价格")
+    audit = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
+    assert "handling_units_missing" in audit["risk_tags"]
+    assert audit["internal_trace"]["calculator"]["reconciliation"]["declared_customer_piece_count"] == 2250
 
 
 def test_missing_zone_returns_manual_required() -> None:
@@ -972,9 +1110,11 @@ def test_missing_zone_returns_manual_required() -> None:
     body = response.json()
     assert body["source_type"] == "manual_required"
     assert body["manual_review_required"] is True
-    assert body["billing_pallets"] == 3
-    assert body["pallet_breakdown"]["volume_pallets"] == 3
-    assert body["pallet_breakdown"]["weight_pallets"] == 2
+    assert body["billing_pallets"] is None
+    audit = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
+    assert audit["billing_pallets"] == 3
+    assert audit["pallet_breakdown"]["total_size_pallets"] == 3
+    assert audit["pallet_breakdown"]["weight_pallets"] == 2
     assert body["base_price_usd"] is None
 
 
@@ -1127,6 +1267,63 @@ def test_inactive_zone_rules_are_ignored() -> None:
     assert body["manual_review_required"] is True
 
 
+def test_calgary_t3z_outside_latest_city_fsa_rules_stays_manual() -> None:
+    client = build_client(
+        postal_records=[
+            {"postal_code": "T3Z 2C7", "preferred_city": "Calgary", "province": "AB"},
+        ],
+        zone_rules=[
+            {
+                "postal_prefix": prefix,
+                "city": "CALGARY",
+                "province": "AB",
+                "origin": "calgary",
+                "zone": 1,
+                "match_level": "admin_city_config",
+                "note": "current production Calgary FSA configuration",
+            }
+            for prefix in CALGARY_LATEST_FSA_RULES
+        ],
+        prices=[
+            {
+                "origin": "calgary",
+                "zone": 1,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("100.00"),
+                "source": "test",
+                "last_updated": "2026-08-04",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-calculate",
+        json=base_payload(
+            address_line="9 Longeway Place",
+            postal_code="T3Z 2C7",
+            city="Calgary",
+            province="AB",
+            fixture_billing_pallets=3,
+            cbm=2.0,
+            weight_kg=300,
+            piece_count=1,
+            requires_appointment=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_type"] == "manual_required"
+    assert body["manual_review_required"] is True
+    assert body["origin"] is None
+    assert body["zone"] is None
+    assert body["base_price_usd"] is None
+    assert body["total_price_usd"] is None
+    assert "zone_not_found" in body["risk_tags"]
+    assert body["match_trace"]["fsa"] == "T3Z"
+    assert body["match_trace"]["prefix_family"] == "T3*"
+
+
 def test_city_zone_fallback_when_postal_prefix_missing() -> None:
     client = build_client(
         postal_records=[
@@ -1162,6 +1359,7 @@ def test_city_zone_fallback_when_postal_prefix_missing() -> None:
             postal_code="L1X 0P2",
             city="Pickering",
             province="ON",
+            fixture_billing_pallets=6,
             cbm=11.7,
             weight_kg=1367,
             piece_count=99,
@@ -1228,6 +1426,7 @@ def test_city_zone_fallback_prefers_requested_postal_prefix_family() -> None:
             postal_code="V6Y 0C8",
             city=None,
             province=None,
+            fixture_billing_pallets=2,
             cbm=2.18,
             weight_kg=352.5,
             piece_count=15,
@@ -1354,6 +1553,7 @@ def test_vancouver_v5l_uses_corrected_calgary_city_anchor() -> None:
             postal_code="V5L 3K9",
             city="Vancouver",
             province="BC",
+            fixture_billing_pallets=4,
             cbm=7,
             weight_kg=2,
             piece_count=1,
@@ -1419,6 +1619,7 @@ def test_city_zone_fallback_allows_single_expected_origin_adjacent_anchor() -> N
             postal_code="V5J 5M8",
             city="Burnaby",
             province="BC",
+            fixture_billing_pallets=1,
             cbm=0.88,
             weight_kg=80,
             piece_count=1,
@@ -1492,6 +1693,7 @@ def test_ab_city_fallback_prefers_expected_origin_anchor_over_stale_toronto() ->
             postal_code="T4B 2Z8",
             city=None,
             province=None,
+            fixture_billing_pallets=6,
             cbm=3.63,
             weight_kg=2913,
             piece_count=1,
@@ -1567,12 +1769,24 @@ def test_regina_s4s_uses_corrected_calgary_zone_5() -> None:
             postal_code="S4S 0A2",
             city="Regina",
             province="SK",
-            cbm=22.43,
-            weight_kg=7500,
+            cbm=1.5,
+            weight_kg=500,
             piece_count=2,
             packaging_type="wooden_crate",
             longest_side_cm=400,
+            explicit_pallet_count=15,
             requires_appointment=False,
+            handling_units=[
+                {
+                    "quantity": 1,
+                    "packaging_type": "wooden_crate",
+                    "length_cm": 120,
+                    "width_cm": 100,
+                    "height_cm": "124.6111111",
+                    "unit_weight_kg": 500,
+                    "contained_customer_pieces": 2,
+                }
+            ],
         ),
     )
 
@@ -1724,6 +1938,7 @@ def test_nanaimo_v9s_does_not_treat_fsa_character_distance_as_geography() -> Non
             postal_code="V9S 5X9",
             city="Nanaimo",
             province="BC",
+            fixture_billing_pallets=6,
             cbm=10.76,
             weight_kg=1798,
             piece_count=200,
@@ -1739,7 +1954,9 @@ def test_nanaimo_v9s_does_not_treat_fsa_character_distance_as_geography() -> Non
     assert body["matched_by"] == "city_fallback_not_found"
     assert body["origin"] is None
     assert body["zone"] is None
-    assert body["billing_pallets"] == 6
+    assert body["billing_pallets"] is None
+    audit = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
+    assert audit["billing_pallets"] == 6
     assert body["base_price_usd"] is None
     assert body["fuel_usd"] is None
     assert body["total_price_usd"] is None
@@ -1791,6 +2008,7 @@ def test_port_colborne_l3k_does_not_borrow_woodbridge_l3l_zone() -> None:
             postal_code="L3K 4B7",
             city="Port Colborne",
             province="ON",
+            fixture_billing_pallets=1,
             cbm=1,
             weight_kg=1,
             piece_count=1,
@@ -1811,7 +2029,9 @@ def test_port_colborne_l3k_does_not_borrow_woodbridge_l3l_zone() -> None:
     assert body["province"] == "ON"
     assert body["origin"] is None
     assert body["zone"] is None
-    assert body["billing_pallets"] == 1
+    assert body["billing_pallets"] is None
+    audit = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
+    assert audit["billing_pallets"] == 1
     assert body["base_price_usd"] is None
     assert body["total_price_usd"] is None
     assert body["manual_review_required"] is True
@@ -1877,6 +2097,7 @@ def test_edmonton_t6r_uses_calgary_zone9_correction() -> None:
             postal_code="T6R 3E9",
             city="Edmonton",
             province="AB",
+            fixture_billing_pallets=2,
             cbm=2.5,
             weight_kg=224,
             piece_count=1,
@@ -1961,13 +2182,26 @@ def test_missing_matrix_price_does_not_estimate_by_multiplication() -> None:
             piece_count=2,
             longest_side_cm=240,
             requires_appointment=False,
+            handling_units=[
+                {
+                    "quantity": 2,
+                    "packaging_type": "carton",
+                    "length_cm": 240,
+                    "width_cm": 100,
+                    "height_cm": "20.8333333",
+                    "unit_weight_kg": 50,
+                    "contained_customer_pieces": 2,
+                }
+            ],
         ),
     )
 
     body = response.json()
     assert body["source_type"] == "manual_required"
     assert body["manual_review_required"] is True
-    assert body["billing_pallets"] == 4
-    assert body["pallet_breakdown"]["long_piece_pallets"] == 4
+    assert body["billing_pallets"] is None
+    audit = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
+    assert audit["billing_pallets"] == 4
+    assert audit["pallet_breakdown"]["total_size_pallets"] == 4
     assert body["total_price_usd"] is None
     assert "zone_price_not_found" in body["risk_tags"]

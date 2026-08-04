@@ -11,6 +11,7 @@ from apps.api.db.models import Base, LearnedQuoteRule, PostalCodeCityLookup, Quo
 from apps.api.db.session import get_db
 from apps.api.main import app
 from packages.ai_assistant.model_client import AIResponse
+from tests.api.test_zone_quotes import _LegacyZoneTestClient
 
 
 def build_client(
@@ -68,7 +69,7 @@ def build_client(
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
-    return TestClient(app)
+    return _LegacyZoneTestClient(app)
 
 
 def teardown_function() -> None:
@@ -93,6 +94,31 @@ def payload(**overrides: object) -> dict[str, object]:
         "explicit_pallet_count": None,
     }
     data.update(overrides)
+    if "handling_units" not in data:
+        longest = data.get("longest_side_cm")
+        longest_value = Decimal(str(longest)) if longest is not None else Decimal("100")
+        if longest_value < Decimal("240"):
+            cbm = Decimal(str(data.get("cbm") or "0"))
+            weight = Decimal(str(data.get("weight_kg") or "0"))
+            target = max(
+                1,
+                int((cbm / Decimal("2")).to_integral_value(rounding="ROUND_CEILING")),
+                int((weight / Decimal("500")).to_integral_value(rounding="ROUND_CEILING")),
+            )
+            explicit = data.get("explicit_pallet_count")
+            if isinstance(explicit, int) and explicit > target:
+                target = explicit
+            data["handling_units"] = [
+                {
+                    "quantity": target,
+                    "packaging_type": str(data.get("packaging_type") or "carton"),
+                    "length_cm": "120",
+                    "width_cm": "100",
+                    "height_cm": str(cbm * Decimal("1000000") / (Decimal(target) * Decimal("12000")) if cbm > 0 else Decimal("100")),
+                    "unit_weight_kg": str(weight / Decimal(target) if weight > 0 else Decimal("1")),
+                    "contained_customer_pieces": int(data.get("piece_count") or 1),
+                }
+            ]
     return data
 
 
@@ -110,6 +136,8 @@ def test_zone_calculate_success_writes_audit_log() -> None:
     assert body["postal_prefix"] == "L4K"
     assert body["total_price_usd"] == "212.00"
     assert body["manual_review_required"] is False
+    assert body["result_json"]["internal_trace"]["calculator"]["totals"]["billing_pallets"] == 3
+    assert body["result_json"]["internal_trace"]["handling_units"][0]["length_cm"] == "120"
     assert body["quote_logic"]["status"] == "quoted"
     assert "Zone 价格矩阵" in body["quote_logic"]["price_source"]
 
@@ -148,6 +176,7 @@ def test_manual_required_creates_manual_quote_task() -> None:
     assert tasks[0]["quote_id"] == quote["quote_id"]
     assert tasks[0]["status"] == "pending"
     assert tasks[0]["reason"] == quote["matched_rule"]
+    assert tasks[0]["result_json"]["internal_trace"]["calculator"]["risk_tags"] == []
 
 
 def test_error_summary_reports_manual_required_and_recent_tasks() -> None:
@@ -269,7 +298,9 @@ def test_resolved_manual_task_learning_respects_billing_pallets() -> None:
 
     body = response.json()
     assert body["source_type"] == "manual_required"
-    assert body["billing_pallets"] == 1
+    assert body["billing_pallets"] is None
+    audit = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
+    assert audit["billing_pallets"] == 1
 
 
 def test_zone_gap_creates_hermes_diagnostic_without_changing_quote() -> None:
@@ -308,7 +339,9 @@ def test_zone_gap_creates_hermes_diagnostic_without_changing_quote() -> None:
     assert body["manual_review_required"] is True
     assert body["origin"] is None
     assert body["zone"] is None
-    assert body["billing_pallets"] == 1
+    assert body["billing_pallets"] is None
+    audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
+    assert audit_result["billing_pallets"] == 1
     assert body["total_price_usd"] is None
 
     diagnostics = client.get(f"/quotes/hermes-diagnostics?quote_id={body['quote_id']}").json()

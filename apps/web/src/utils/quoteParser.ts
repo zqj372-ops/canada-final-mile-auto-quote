@@ -10,6 +10,11 @@ export interface ParsedCargoItem {
   cbm: number | null;
   total_weight_kg: number | null;
   total_cbm: number | null;
+  contained_customer_pieces?: number | null;
+  stackability?: "stackable" | "non_stackable" | "unknown" | null;
+  max_stack_layers?: number | null;
+  max_top_load_kg?: number | null;
+  floor_rotation_allowed?: boolean | null;
   source_span: string | null;
 }
 

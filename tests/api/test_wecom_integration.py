@@ -11,7 +11,7 @@ from apps.api.db.models import AIModelConfig, Base, PostalCodeCityLookup, WeComB
 from apps.api.db.session import get_db
 from apps.api.main import app
 from apps.api.security.secrets import encrypt_secret
-from packages.ai_assistant.quote_extractor import AIExtractedQuoteDraft
+from packages.ai_assistant.quote_extractor import AIExtractedQuoteDraft, ExtractedCargoItem
 from packages.wecom.bot_client import WeComBotClient, WeComSendResult
 
 
@@ -111,6 +111,17 @@ def quote_payload(**overrides: object) -> dict[str, object]:
         "requires_pallet_jack": False,
         "requires_appointment": True,
         "explicit_pallet_count": None,
+        "handling_units": [
+            {
+                "quantity": 3,
+                "packaging_type": "carton",
+                "length_cm": "120",
+                "width_cm": "100",
+                "height_cm": "116.6666667",
+                "unit_weight_kg": "283.3333333",
+                "contained_customer_pieces": 10,
+            }
+        ],
     }
     data.update(overrides)
     return data
@@ -131,7 +142,30 @@ def complete_extraction() -> AIExtractedQuoteDraft:
         requires_appointment=True,
         missing_fields=[],
         confidence=95,
+        cargo_items=[
+            ExtractedCargoItem(
+                quantity=3,
+                length_cm=Decimal("120"),
+                width_cm=Decimal("100"),
+                height_cm=Decimal("116.6666667"),
+                weight_kg=Decimal("283.3333333"),
+                cbm=Decimal("1.4"),
+                contained_customer_pieces=10,
+                total_weight_kg=Decimal("850"),
+                total_cbm=Decimal("4.2"),
+                source_span="3 standard handling units",
+            )
+        ],
     )
+
+
+def _audit_result(client: TestClient, quote_id: str) -> dict[str, object]:
+    response = client.get(f"/quotes/audit/{quote_id}")
+    assert response.status_code == 200
+    body = response.json()
+    result = body.get("result_json")
+    assert isinstance(result, dict)
+    return result
 
 
 def test_create_bot_config_does_not_return_plain_webhook_url() -> None:
@@ -298,7 +332,10 @@ def test_disabled_bot_does_not_send(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["source_type"] == "zone_matrix"
+    public = response.json()
+    assert public["manual_review_required"] is False
+    assert public["billing_pallets"] == 3
+    assert _audit_result(client, public["quote_id"])["source_type"] == "zone_matrix"
 
 
 def test_zone_calculate_success_notify_sends_quote_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -314,6 +351,10 @@ def test_zone_calculate_success_notify_sends_quote_success(monkeypatch: pytest.M
     response = client.post("/quotes/zone-calculate", json={"quote": quote_payload(), "notify_wecom": True})
 
     assert response.status_code == 200
+    public = response.json()
+    assert public["manual_review_required"] is False
+    assert public["billing_pallets"] == 3
+    assert _audit_result(client, public["quote_id"])["source_type"] == "zone_matrix"
     assert len(sent) == 1
     assert "加拿大尾程报价成功" in sent[0]
 
@@ -342,7 +383,10 @@ def test_zone_calculate_manual_required_auto_sends_with_at_all(monkeypatch: pyte
     response = client.post("/quotes/zone-calculate", json=quote_payload())
 
     assert response.status_code == 200
-    assert response.json()["source_type"] == "manual_required"
+    public = response.json()
+    assert public["manual_review_required"] is True
+    assert public["billing_pallets"] is None
+    assert _audit_result(client, public["quote_id"])["source_type"] == "manual_required"
     assert len(markdowns) == 1
     assert "需人工确认" in markdowns[0]
     assert text_messages == ["@all 有新的加拿大尾程报价需人工确认，请查看上一条详情。"]
@@ -369,7 +413,10 @@ def test_manual_required_markdown_failure_still_sends_at_all_and_returns_quote(m
     response = client.post("/quotes/zone-calculate", json=quote_payload())
 
     assert response.status_code == 200
-    assert response.json()["source_type"] == "manual_required"
+    public = response.json()
+    assert public["manual_review_required"] is True
+    assert public["billing_pallets"] is None
+    assert _audit_result(client, public["quote_id"])["source_type"] == "manual_required"
     assert mentions == [["@all"]]
 
 
@@ -392,7 +439,10 @@ def test_manual_required_at_all_exception_does_not_affect_quote(monkeypatch: pyt
     response = client.post("/quotes/zone-calculate", json=quote_payload())
 
     assert response.status_code == 200
-    assert response.json()["source_type"] == "manual_required"
+    public = response.json()
+    assert public["manual_review_required"] is True
+    assert public["billing_pallets"] is None
+    assert _audit_result(client, public["quote_id"])["source_type"] == "manual_required"
 
 
 def test_wecom_failure_does_not_affect_quote_return(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -406,7 +456,10 @@ def test_wecom_failure_does_not_affect_quote_return(monkeypatch: pytest.MonkeyPa
     response = client.post("/quotes/zone-calculate", json={"quote": quote_payload(), "notify_wecom": True})
 
     assert response.status_code == 200
-    assert response.json()["source_type"] == "zone_matrix"
+    public = response.json()
+    assert public["manual_review_required"] is False
+    assert public["billing_pallets"] == 3
+    assert _audit_result(client, public["quote_id"])["source_type"] == "zone_matrix"
 
 
 def test_ai_auto_quote_success_notify_sends_ai_quote(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -426,7 +479,10 @@ def test_ai_auto_quote_success_notify_sends_ai_quote(monkeypatch: pytest.MonkeyP
     )
 
     assert response.status_code == 200
-    assert response.json()["quote_result"]["source_type"] == "zone_matrix"
+    public = response.json()
+    assert public["quote_result"]["manual_review_required"] is False
+    assert public["quote_result"]["billing_pallets"] == 3
+    assert _audit_result(client, public["quote_result"]["quote_id"])["source_type"] == "zone_matrix"
     assert len(sent) == 1
     assert "AI 自动报价成功" in sent[0]
 
@@ -444,7 +500,10 @@ def test_ai_auto_quote_manual_required_auto_sends_manual_required(monkeypatch: p
     response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
 
     assert response.status_code == 200
-    assert response.json()["manual_review_required"] is True
+    public = response.json()
+    assert public["manual_review_required"] is True
+    assert public["quote_result"]["billing_pallets"] is None
+    assert _audit_result(client, public["quote_result"]["quote_id"])["source_type"] == "manual_required"
     assert len(sent) == 1
     assert "需人工确认" in sent[0]
 

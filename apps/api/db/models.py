@@ -1,7 +1,22 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -220,6 +235,63 @@ class QuoteRuleConfig(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class OversizePalletRuleVersion(Base):
+    """Immutable, published snapshots of the oversize pallet rule."""
+
+    __tablename__ = "oversize_pallet_rule_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "rule_id",
+            "version",
+            name="uq_oversize_pallet_rule_versions_rule_version",
+        ),
+        Index(
+            "ix_oversize_pallet_rule_versions_rule_id_version",
+            "rule_id",
+            "version",
+            unique=True,
+        ),
+        CheckConstraint(
+            "status = 'published'",
+            name="ck_oversize_pallet_rule_versions_published_status",
+        ),
+        CheckConstraint(
+            "config_json IS NOT NULL",
+            name="ck_oversize_pallet_rule_versions_config_not_null",
+        ),
+        CheckConstraint(
+            "length(CAST(config_json AS TEXT)) > 2 AND CAST(config_json AS TEXT) <> 'null'",
+            name="ck_oversize_pallet_rule_versions_config_not_empty",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rule_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    config_json: Mapped[dict[str, object]] = mapped_column(
+        JSON(none_as_null=True),
+        nullable=False,
+    )
+    published_by: Mapped[str | None] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="published",
+        server_default="published",
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
     )
 
 
