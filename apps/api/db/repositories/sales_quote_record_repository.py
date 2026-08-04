@@ -17,14 +17,17 @@ class SalesQuoteRecordRepository:
         self,
         *,
         actor: CurrentActor,
+        quote_type: str = "final_mile",
         quote_id: str | None,
         status: str,
         customer_message: str,
         customer_reply: str | None,
         request_json: dict[str, object],
         result_json: dict[str, object],
+        snapshot_json: dict[str, object] | None = None,
     ) -> SalesQuoteRecord:
         record = SalesQuoteRecord(
+            quote_type=quote_type,
             quote_id=quote_id,
             actor_user_id=actor.user_id,
             actor_api_key_id=actor.api_key_id,
@@ -35,6 +38,7 @@ class SalesQuoteRecordRepository:
             customer_reply=customer_reply,
             request_json=request_json,
             result_json=result_json,
+            snapshot_json=snapshot_json,
         )
         self.session.add(record)
         self.session.commit()
@@ -95,11 +99,19 @@ class SalesQuoteRecordRepository:
                 "source_type": "manual_override",
                 "manual_review_required": False,
                 "total_price_usd": price_text,
+                "converted_total": price_text,
                 "confidence": max(int(quote_result.get("confidence") or 0), 100),
                 "matched_rule": "manual_override",
                 "internal_note": f"Manual price override by {actor.name}: {override_note}",
             }
         )
+        if getattr(record, "quote_type", None) == "fcl":
+            settlement_currency = quote_result.get("settlement_currency") or "USD"
+            quote_result["settlement_currency"] = settlement_currency
+            quote_result["totals_by_currency"] = {settlement_currency: price_text}
+            quote_result["manual_reasons"] = []
+            quote_result["manual_review_required"] = False
+            result_json["missing_fields"] = []
         risk_tags = _string_list(quote_result.get("risk_tags"))
         if "manual_price_override" not in risk_tags:
             risk_tags.append("manual_price_override")
@@ -128,13 +140,17 @@ class SalesQuoteRecordRepository:
 
 
 def sales_quote_record_to_dict(record: SalesQuoteRecord) -> dict[str, object]:
-    result_json = record.result_json or {}
+    result_json = _public_json(record.result_json or {})
     quote_result = _object_or_empty(result_json.get("quote_result"))
     extraction = _object_or_empty(result_json.get("extraction"))
     missing_fields = _string_list(result_json.get("missing_fields"))
     risk_tags = _string_list(quote_result.get("risk_tags"))
+    quote_type = getattr(record, "quote_type", None) or "final_mile"
+    if quote_type == "fcl":
+        return _fcl_record_to_dict(record, result_json)
     return {
         "id": record.id,
+        "quote_type": quote_type,
         "quote_id": record.quote_id,
         "actor_user_id": record.actor_user_id,
         "actor_api_key_id": record.actor_api_key_id,
@@ -159,13 +175,93 @@ def sales_quote_record_to_dict(record: SalesQuoteRecord) -> dict[str, object]:
         "missing_fields": missing_fields,
         "manual_reason": _manual_reason(record.status, quote_result, missing_fields),
         "created_at": record.created_at.isoformat() if record.created_at else None,
-        "request_json": record.request_json,
+        "request_json": _public_json(record.request_json or {}),
+        "result_json": result_json,
+    }
+
+
+def _fcl_record_to_dict(record: SalesQuoteRecord, result_json: dict[str, object]) -> dict[str, object]:
+    quote_result = _object_or_empty(result_json.get("quote_result"))
+    extraction = _object_or_empty(result_json.get("extraction"))
+    cargo = _object_or_empty(quote_result.get("cargo_calculation"))
+    totals = _object_or_empty(quote_result.get("totals_by_currency"))
+    settlement_currency = quote_result.get("settlement_currency")
+    converted_total = quote_result.get("converted_total")
+    manual_reasons = _string_list(quote_result.get("manual_reasons"))
+    return {
+        "id": record.id,
+        "quote_type": "fcl",
+        "quote_id": record.quote_id,
+        "actor_user_id": record.actor_user_id,
+        "actor_api_key_id": record.actor_api_key_id,
+        "actor_name": record.actor_name,
+        "actor_role": record.actor_role,
+        "status": record.status,
+        "customer_message": record.customer_message,
+        "customer_reply": record.customer_reply,
+        "destination": f"POL {quote_result.get('normalized_input', {}).get('pol') or extraction.get('pol') or '待确认'} → POD {quote_result.get('normalized_input', {}).get('pod') or extraction.get('pod') or '待确认'}",
+        "cargo_summary": _fcl_cargo_summary(cargo),
+        "total_price_usd": converted_total if settlement_currency else None,
+        "currency_code": settlement_currency or "MULTI",
+        "totals_by_currency": totals,
+        "zone": None,
+        "billing_pallets": None,
+        "confidence": quote_result.get("normalized_input", {}).get("confidence") or extraction.get("confidence") or 0,
+        "source_type": quote_result.get("source_type") or "manual_required",
+        "postal_code": None,
+        "city": None,
+        "province": None,
+        "risk_tags": ["fcl", *manual_reasons] if manual_reasons else ["fcl"],
+        "risk_tag_labels": [],
+        "missing_fields": _string_list(result_json.get("missing_fields")),
+        "manual_reason": "；".join(manual_reasons) if record.status == "manual_required" else None,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+        "request_json": _public_json(record.request_json or {}),
         "result_json": result_json,
     }
 
 
 def _object_or_empty(value: object) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
+
+
+_INTERNAL_KEYS = {
+    "cost_price",
+    "cost_unit_price",
+    "vendor",
+    "supplier",
+    "internal_note",
+    "internal_notes",
+    "api_key",
+    "password",
+    "secret",
+    "token",
+}
+
+
+def _public_json(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            str(key): _public_json(item)
+            for key, item in value.items()
+            if str(key).lower() not in _INTERNAL_KEYS
+        }
+    if isinstance(value, list):
+        return [_public_json(item) for item in value]
+    return value
+
+
+def _fcl_cargo_summary(cargo: dict[str, object]) -> str:
+    pieces = cargo.get("piece_count")
+    weight = cargo.get("total_weight_kg")
+    volume = cargo.get("total_volume_cbm")
+    return " / ".join(
+        [
+            f"{pieces} 件" if pieces is not None else "件数待确认",
+            f"{weight} KG" if weight is not None else "重量待确认",
+            f"{volume} CBM" if volume is not None else "体积待确认",
+        ]
+    )
 
 
 def _string_list(value: object) -> list[str]:

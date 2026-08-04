@@ -1,0 +1,3 @@
+export default function CustomerNameField({ value, onChange, onCreate }: { value: string; onChange: (value: string) => void; onCreate: () => void }) {
+  return <div className="grid gap-2"><label className="text-sm font-semibold text-slate-700" htmlFor="customer-name">客户名称</label><div className="flex gap-2"><input className="min-h-11 flex-1 rounded-md border border-slate-300 bg-white px-3" id="customer-name" value={value} onChange={(event) => onChange(event.target.value)} /><button className="min-h-11 rounded-md bg-blue-700 px-4 text-sm font-semibold text-white" onClick={onCreate} type="button">新建客户</button></div></div>;
+}
