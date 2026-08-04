@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+import pytest
+
 from apps.api.services.ai_quote_service import _zone_request_from_extraction
 from packages.ai_assistant.quote_extractor import (
     AIExtractedQuoteDraft,
@@ -153,6 +155,201 @@ def test_deterministic_parser_keeps_aggregate_summary_without_inventing_dimensio
     )
     assert isinstance(request.handling_units[0], dict)
     assert request.handling_units[0]["length_cm"] is None
+
+
+def test_customer_carton_quantities_do_not_become_physical_handling_units() -> None:
+    extraction = AIExtractedQuoteDraft(
+        postal_code="V5K 0A1",
+        city="Vancouver",
+        province="BC",
+        cbm=Decimal("1.50576"),
+        weight_kg=Decimal("133.32"),
+        piece_count=7,
+        packaging_type="unknown",
+        address_type="commercial",
+        cargo_items=[
+            ExtractedCargoItem(
+                quantity=4,
+                length_cm=Decimal("140"),
+                width_cm=Decimal("20"),
+                height_cm=Decimal("75"),
+                weight_kg=Decimal("19.08"),
+                source_span="纸箱尺寸：140*20*75 4件 19.08KG/件",
+            ),
+            ExtractedCargoItem(
+                quantity=3,
+                length_cm=Decimal("146"),
+                width_cm=Decimal("20"),
+                height_cm=Decimal("76"),
+                weight_kg=Decimal("19"),
+                source_span="146*20*76 3件 19KG/件",
+            ),
+        ],
+        missing_fields=[],
+    )
+
+    request = _zone_request_from_extraction(extraction)
+    result = calculate_billing_pallets(
+        request.handling_units,
+        default_oversize_pallet_rule(),
+        declared_customer_piece_count=request.piece_count,
+        declared_total_weight_kg=request.weight_kg,
+        declared_total_volume_cbm=request.cbm,
+    )
+
+    assert result.manual_review_required
+    assert result.billing_pallets is None
+    assert result.components["total_size_pallets"] == 0
+    assert "handling_unit_quantity_missing" in result.risk_tags
+
+
+@pytest.mark.parametrize(
+    ("packaging_type", "source_span"),
+    [
+        ("carton", "4 cartons 140x20x75cm"),
+        ("woven_bag", "4 woven bags 140x20x75cm"),
+        ("flexible_packaging", "4 flexible packages 140x20x75cm"),
+        ("unknown", "4 pieces 140x20x75cm"),
+    ],
+)
+def test_unconfirmed_customer_package_types_all_fail_closed(
+    packaging_type: str,
+    source_span: str,
+) -> None:
+    extraction = _draft(
+        ExtractedCargoItem(
+            quantity=4,
+            packaging_type=packaging_type,
+            length_cm=Decimal("140"),
+            width_cm=Decimal("20"),
+            height_cm=Decimal("75"),
+            weight_kg=Decimal("19"),
+            source_span=source_span,
+        )
+    ).model_copy(update={"packaging_type": packaging_type})
+
+    request = _zone_request_from_extraction(extraction)
+    result = calculate_billing_pallets(
+        request.handling_units,
+        default_oversize_pallet_rule(),
+        declared_customer_piece_count=request.piece_count,
+        declared_total_weight_kg=request.weight_kg,
+        declared_total_volume_cbm=request.cbm,
+    )
+
+    assert result.manual_review_required
+    assert result.billing_pallets is None
+    assert result.components["total_size_pallets"] == 0
+
+
+def test_mixed_packaging_uses_each_line_type_before_top_level_type() -> None:
+    extraction = _draft(
+        ExtractedCargoItem(
+            quantity=1,
+            packaging_type="wooden_crate",
+            length_cm=Decimal("200"),
+            width_cm=Decimal("130"),
+            height_cm=Decimal("100"),
+            weight_kg=Decimal("900"),
+            source_span="cargo line 1",
+        ),
+        ExtractedCargoItem(
+            quantity=4,
+            packaging_type="carton",
+            length_cm=Decimal("140"),
+            width_cm=Decimal("20"),
+            height_cm=Decimal("75"),
+            weight_kg=Decimal("19.08"),
+            source_span="cargo line 2",
+        ),
+        piece_count=5,
+    )
+
+    request = _zone_request_from_extraction(extraction)
+
+    assert isinstance(request.handling_units[0], HandlingUnitInput)
+    assert isinstance(request.handling_units[1], dict)
+    assert request.handling_units[1]["quantity"] is None
+    assert request.handling_units[1]["contained_customer_pieces"] == 4
+    result = calculate_billing_pallets(
+        request.handling_units,
+        default_oversize_pallet_rule(),
+        declared_customer_piece_count=request.piece_count,
+        declared_total_weight_kg=request.weight_kg,
+        declared_total_volume_cbm=request.cbm,
+    )
+    assert result.manual_review_required
+    assert result.components["total_size_pallets"] == 3
+
+
+def test_mixed_carton_and_pallet_counts_in_one_line_fail_closed() -> None:
+    extraction = AIExtractedQuoteDraft(
+        postal_code="L4K 2N2",
+        city="Concord",
+        province="ON",
+        cbm=Decimal("12"),
+        weight_kg=Decimal("1800"),
+        piece_count=100,
+        packaging_type="pallet",
+        explicit_pallet_count=2,
+        address_type="commercial",
+        cargo_items=[
+            ExtractedCargoItem(
+                quantity=100,
+                packaging_type="pallet",
+                length_cm=Decimal("120"),
+                width_cm=Decimal("100"),
+                height_cm=Decimal("150"),
+                weight_kg=Decimal("18"),
+                source_span="100 cartons packed on 2 pallets, 120x100x150cm",
+            )
+        ],
+        missing_fields=[],
+    )
+
+    request = _zone_request_from_extraction(extraction)
+
+    assert isinstance(request.handling_units[0], dict)
+    assert request.handling_units[0]["quantity"] is None
+    assert request.handling_units[0]["contained_customer_pieces"] == 100
+    result = calculate_billing_pallets(
+        request.handling_units,
+        default_oversize_pallet_rule(),
+        declared_customer_piece_count=request.piece_count,
+        declared_total_weight_kg=request.weight_kg,
+        declared_total_volume_cbm=request.cbm,
+        explicit_pallet_count=request.explicit_pallet_count,
+    )
+    assert result.manual_review_required
+    assert result.billing_pallets is None
+
+
+def test_explicit_carton_source_overrides_model_pallet_label() -> None:
+    extraction = _draft(
+        ExtractedCargoItem(
+            quantity=4,
+            packaging_type="pallet",
+            length_cm=Decimal("140"),
+            width_cm=Decimal("20"),
+            height_cm=Decimal("75"),
+            weight_kg=Decimal("19"),
+            source_span="4 cartons 140x20x75cm 19kg each",
+        )
+    ).model_copy(update={"packaging_type": "pallet"})
+
+    request = _zone_request_from_extraction(extraction)
+
+    assert isinstance(request.handling_units[0], dict)
+    assert request.handling_units[0]["quantity"] is None
+    result = calculate_billing_pallets(
+        request.handling_units,
+        default_oversize_pallet_rule(),
+        declared_customer_piece_count=request.piece_count,
+        declared_total_weight_kg=request.weight_kg,
+        declared_total_volume_cbm=request.cbm,
+    )
+    assert result.manual_review_required
+    assert result.billing_pallets is None
 
 
 def test_explicit_total_boxes_and_long_subset_keep_long_quantity_separate() -> None:

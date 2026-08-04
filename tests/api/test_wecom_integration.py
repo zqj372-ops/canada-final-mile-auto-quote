@@ -145,6 +145,7 @@ def complete_extraction() -> AIExtractedQuoteDraft:
         cargo_items=[
             ExtractedCargoItem(
                 quantity=3,
+                packaging_type="pallet",
                 length_cm=Decimal("120"),
                 width_cm=Decimal("100"),
                 height_cm=Decimal("116.6666667"),

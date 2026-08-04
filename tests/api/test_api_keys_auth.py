@@ -252,12 +252,16 @@ def test_sales_can_create_quote_but_cannot_manage_ai_config(monkeypatch: pytest.
     public = quote_response.json()
     assert set(public) == {
         "quote_id",
+        "origin",
+        "zone",
         "billing_pallets",
         "total_price_usd",
         "sales_note",
         "manual_review_required",
         "public_flags",
     }
+    assert public["origin"] == "toronto"
+    assert public["zone"] == 2
     assert public["billing_pallets"] == 3
     audit = client.get(f"/quotes/audit/{public['quote_id']}", headers=headers(ADMIN_KEY))
     assert audit.status_code == 200

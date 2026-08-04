@@ -144,6 +144,7 @@ class QuoteWorkbenchConfig(BaseModel):
             WorkbenchOption(value="carton", label="纸箱"),
             WorkbenchOption(value="wooden_crate", label="木箱"),
             WorkbenchOption(value="pallet", label="托盘"),
+            WorkbenchOption(value="bare_piece", label="裸件"),
             WorkbenchOption(value="woven_bag", label="编织袋"),
             WorkbenchOption(value="flexible_packaging", label="软包装"),
             WorkbenchOption(value="unknown", label="待确认"),

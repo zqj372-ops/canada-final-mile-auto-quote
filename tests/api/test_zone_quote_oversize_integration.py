@@ -142,12 +142,16 @@ def test_zone_uses_published_rule_not_draft_and_audits_full_snapshot(client: Tes
     assert public["billing_pallets"] == 1
     assert set(public) == {
         "quote_id",
+        "origin",
+        "zone",
         "billing_pallets",
         "total_price_usd",
         "sales_note",
         "manual_review_required",
         "public_flags",
     }
+    assert public["origin"] == "toronto"
+    assert public["zone"] == 2
 
     audit = client.get(f"/quotes/audit/{public['quote_id']}").json()
     result = audit["result_json"]
@@ -247,12 +251,16 @@ def test_zone_and_ai_services_share_published_snapshot_and_ai_public_allowlist(
     assert body["quote_result"]["billing_pallets"] == 1
     assert set(body["quote_result"]) == {
         "quote_id",
+        "origin",
+        "zone",
         "billing_pallets",
         "total_price_usd",
         "sales_note",
         "manual_review_required",
         "public_flags",
     }
+    assert body["quote_result"]["origin"] == "toronto"
+    assert body["quote_result"]["zone"] == 2
 
     # The AI path writes a SalesQuoteRecord, while its deterministic internal
     # result is still available through the quote audit created by side effects.

@@ -1,6 +1,6 @@
 import type { QuoteWorkbenchConfig, ZoneQuoteResult } from "../api/client";
 import type { ParsedQuoteInput } from "../utils/quoteParser";
-import { formatBillingPalletSummary } from "../utils/quoteResultView";
+import { formatBillingPalletSummary, formatZoneMatch } from "../utils/quoteResultView";
 import QuoteCopyButton from "./QuoteCopyButton";
 
 export default function QuoteCalculationPanel({
@@ -37,6 +37,11 @@ export default function QuoteCalculationPanel({
       billing_pallets: null,
       manual_review_required: manualRequired,
     });
+  const zoneMatchSummary = waitingForAI ? "待匹配" : formatZoneMatch(result ?? {
+    origin: null,
+    zone: null,
+    manual_review_required: manualRequired,
+  });
 
   return (
     <section className="panel min-w-0 p-4">
@@ -85,6 +90,7 @@ export default function QuoteCalculationPanel({
       )}
 
       <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-3">
+        <Metric label="命中分区" value={zoneMatchSummary} />
         <Metric label="算托摘要" value={billingPalletSummary} />
         <Metric label="报价合计" value={totalPrice && !manualRequired ? formatMoney(totalPrice, currency) : manualRequired ? manualPriceText : "待计算"} />
         <Metric label="货物件数" value={parsed.piece_count ? `${parsed.piece_count} 件` : "待确认"} />

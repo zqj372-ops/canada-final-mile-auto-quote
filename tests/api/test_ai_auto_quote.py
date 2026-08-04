@@ -97,6 +97,7 @@ def complete_extraction() -> AIExtractedQuoteDraft:
         cargo_items=[
             ExtractedCargoItem(
                 quantity=3,
+                packaging_type="pallet",
                 length_cm=Decimal("120"),
                 width_cm=Decimal("100"),
                 height_cm=Decimal("116.6666667"),
@@ -324,6 +325,60 @@ def test_ai_extraction_complete_calls_zone_quote_engine(monkeypatch: pytest.Monk
     assert body["manual_review_required"] is False
     assert body["address_validation"]["matched"] is True
     assert body["address_validation"]["postal_code"] == "L4K 2N2"
+
+
+def test_ai_carton_details_without_handling_units_return_manual_without_price(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = build_client()
+    extraction = AIExtractedQuoteDraft(
+        address_line="8888 Keele St",
+        postal_code="L4K 2N2",
+        city="Concord",
+        province="ON",
+        cbm=Decimal("1.50576"),
+        weight_kg=Decimal("133.32"),
+        piece_count=7,
+        packaging_type="unknown",
+        address_type="commercial",
+        cargo_items=[
+            ExtractedCargoItem(
+                quantity=4,
+                packaging_type="carton",
+                length_cm=Decimal("140"),
+                width_cm=Decimal("20"),
+                height_cm=Decimal("75"),
+                weight_kg=Decimal("19.08"),
+                source_span="纸箱尺寸：140*20*75 4件 19.08KG/件",
+            ),
+            ExtractedCargoItem(
+                quantity=3,
+                packaging_type="carton",
+                length_cm=Decimal("146"),
+                width_cm=Decimal("20"),
+                height_cm=Decimal("76"),
+                weight_kg=Decimal("19"),
+                source_span="146*20*76 3件 19KG/件",
+            ),
+        ],
+        missing_fields=[],
+    )
+    monkeypatch.setattr(
+        "apps.api.services.ai_quote_service.extract_quote_draft",
+        lambda _message, _client: extraction,
+    )
+
+    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote cartons"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["manual_review_required"] is True
+    assert body["quote_result"]["manual_review_required"] is True
+    assert body["quote_result"]["billing_pallets"] is None
+    assert body["quote_result"]["total_price_usd"] is None
+    audit = _audit_result(client, body["quote_result"]["quote_id"])
+    assert audit["source_type"] == "manual_required"
+    assert "handling_unit_quantity_missing" in audit["risk_tags"]
 
 
 def test_ai_auto_quote_blocks_cross_origin_zone_matrix(monkeypatch: pytest.MonkeyPatch) -> None:

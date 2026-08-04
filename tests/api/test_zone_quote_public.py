@@ -38,6 +38,8 @@ def test_zone_http_success_returns_public_allowlist_only() -> None:
     body = response.json()
     assert set(body) == {
         "quote_id",
+        "origin",
+        "zone",
         "billing_pallets",
         "total_price_usd",
         "sales_note",
@@ -47,6 +49,8 @@ def test_zone_http_success_returns_public_allowlist_only() -> None:
     assert body["billing_pallets"] == 3
     assert body["total_price_usd"] == "237.00"
     assert body["manual_review_required"] is False
+    assert body["origin"] == "toronto"
+    assert body["zone"] == 2
     for hidden_field in (
         "pallet_breakdown",
         "accessorials",
@@ -54,8 +58,6 @@ def test_zone_http_success_returns_public_allowlist_only() -> None:
         "oversize_rule_snapshot",
         "match_trace",
         "risk_tags",
-        "origin",
-        "zone",
     ):
         assert hidden_field not in body
 
@@ -79,6 +81,8 @@ def test_zone_http_manual_returns_no_candidate_pallet_count() -> None:
     body = response.json()
     assert set(body) == {
         "quote_id",
+        "origin",
+        "zone",
         "billing_pallets",
         "total_price_usd",
         "sales_note",
@@ -88,4 +92,6 @@ def test_zone_http_manual_returns_no_candidate_pallet_count() -> None:
     assert body["manual_review_required"] is True
     assert body["billing_pallets"] is None
     assert body["total_price_usd"] is None
+    assert body["origin"] is None
+    assert body["zone"] is None
     assert body["public_flags"] == ["manual_review_required"]

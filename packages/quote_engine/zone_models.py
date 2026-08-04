@@ -114,13 +114,16 @@ class ZoneQuoteResult(BaseModel):
 
         Manual results can retain an internally useful candidate pallet count,
         but that candidate is never presented as a public quote.  The public
-        model deliberately has no address, Zone, supplier, risk, trace or
+        model exposes only the confirmed origin/Zone classification needed by
+        sales.  It has no address, supplier, risk, trace or
         accessorial-detail fields.
         """
 
         is_manual = self.manual_review_required
         return ZoneQuotePublicResult(
             quote_id=self.quote_id,
+            origin=None if is_manual else self.origin,
+            zone=None if is_manual else self.zone,
             billing_pallets=None if is_manual else self.billing_pallets,
             total_price_usd=None if is_manual else self.total_price_usd,
             sales_note=self.sales_note,
@@ -135,6 +138,8 @@ class ZoneQuotePublicResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     quote_id: str
+    origin: str | None = None
+    zone: int | None = None
     billing_pallets: int | None = None
     total_price_usd: Decimal | None = None
     sales_note: str | None = None

@@ -183,12 +183,16 @@ def test_zone_calculate_success_notify_sends_email(monkeypatch) -> None:
     public = response.json()
     assert set(public) == {
         "quote_id",
+        "origin",
+        "zone",
         "billing_pallets",
         "total_price_usd",
         "sales_note",
         "manual_review_required",
         "public_flags",
     }
+    assert public["origin"] == "toronto"
+    assert public["zone"] == 2
     assert public["billing_pallets"] == 3
     assert _audit_result(client, public["quote_id"])["source_type"] == "zone_matrix"
     assert len(sent) == 1
