@@ -497,8 +497,8 @@ def test_zone_8_price_is_disabled_by_default_even_when_matrix_has_a_price() -> N
     body = response.json()
     assert body["source_type"] == "manual_required"
     assert body["matched_by"] == "zone_price_disabled"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 8
+    assert body["origin"] is None
+    assert body["zone"] is None
     audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
     assert audit_result["origin"] == "calgary"
     assert audit_result["zone"] == 8
@@ -554,8 +554,8 @@ def test_disabled_zone_price_reason_separates_destination_from_origin() -> None:
     assert body["matched_by"] == "zone_price_disabled"
     assert body["city"] == "Edmonton"
     assert body["province"] == "AB"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 9
+    assert body["origin"] is None
+    assert body["zone"] is None
     audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
     assert audit_result["origin"] == "calgary"
     assert audit_result["zone"] == 9
@@ -647,8 +647,8 @@ def test_zone_1_price_can_be_explicitly_disabled() -> None:
     body = response.json()
     assert body["source_type"] == "manual_required"
     assert body["matched_by"] == "zone_price_disabled"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 1
+    assert body["origin"] is None
+    assert body["zone"] is None
     audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
     assert audit_result["origin"] == "calgary"
     assert audit_result["zone"] == 1
@@ -682,8 +682,8 @@ def test_global_zone_price_switch_disables_an_enabled_low_zone() -> None:
     body = response.json()
     assert body["source_type"] == "manual_required"
     assert body["matched_by"] == "zone_price_disabled"
-    assert body["origin"] == "calgary"
-    assert body["zone"] == 1
+    assert body["origin"] is None
+    assert body["zone"] is None
     audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
     assert audit_result["origin"] == "calgary"
     assert audit_result["zone"] == 1

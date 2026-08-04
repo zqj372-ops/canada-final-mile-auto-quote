@@ -59,9 +59,8 @@ describe("quote result public summary", () => {
       "Toronto / Zone 2",
     );
     expect(formatZoneMatch({ origin: "calgary", zone: 5, manual_review_required: true })).toBe(
-      "Calgary / Zone 5",
+      "待人工确认",
     );
-    expect(formatZoneMatch({ origin: null, zone: null, manual_review_required: true })).toBe("待人工确认");
     expect(formatZoneMatch(null)).toBe("待匹配");
   });
 });

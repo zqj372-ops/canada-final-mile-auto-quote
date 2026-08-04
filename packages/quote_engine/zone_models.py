@@ -122,10 +122,8 @@ class ZoneQuoteResult(BaseModel):
         is_manual = self.manual_review_required
         return ZoneQuotePublicResult(
             quote_id=self.quote_id,
-            # Pricing/manual-review state must not erase a destination Zone
-            # that the deterministic postal lookup already confirmed.
-            origin=self.origin,
-            zone=self.zone,
+            origin=None if is_manual else self.origin,
+            zone=None if is_manual else self.zone,
             billing_pallets=None if is_manual else self.billing_pallets,
             total_price_usd=None if is_manual else self.total_price_usd,
             sales_note=self.sales_note,
