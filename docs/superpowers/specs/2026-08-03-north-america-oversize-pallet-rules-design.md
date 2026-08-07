@@ -1,12 +1,18 @@
 # 北美超大件双层算托规则设计规格
 
-**状态：** 已批准，待编写实施计划
+> **⚠ 已废弃(2026-08-07)**: 本版设计(规则标识 `NA_OVERSIZE_TEMP_V1`)已被
+> [`2026-08-07-north-america-oversize-pallet-rules-redesign.md`](./2026-08-07-north-america-oversize-pallet-rules-redesign.md) 取代。
+> 废弃原因: 计费口径(150/122 分档、25/50/50/75 附加费、车辆 DFS 硬门禁等)与
+> `reference/canada-final-mile/` 真实业务规则及北美行业惯例不符。本文件仅作历史归档,
+> 不再作为实施依据。对应实现(oversize 模块)将在 v2 设计确认后重做。
+
+**状态：** 已废弃(曾被批准,待编写实施计划)
 
 **批准日期：** 2026-08-03
 
 **适用仓库：** `zqj372-ops/canada-final-mile-auto-quote`
 
-**规则标识：** `NA_OVERSIZE_TEMP_V1`
+**规则标识：** `NA_OVERSIZE_TEMP_V1`(已被 v2 取代)
 
 **实施基线：** `codex/fcl-quote-form-alignment`
 
