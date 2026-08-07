@@ -91,6 +91,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   const [recordQuery, setRecordQuery] = useState("");
   const [selectedRecordId, setSelectedRecordId] = useState<number | null>(null);
   const [isLogoutConfirmationOpen, setIsLogoutConfirmationOpen] = useState(false);
+  const [isResultModalOpen, setIsResultModalOpen] = useState(false);
 
   useEffect(() => {
     void restoreSession();
@@ -152,6 +153,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     setStatus("idle");
     setRuralAcknowledgedKey(null);
     setControlsDirty(false);
+    setIsResultModalOpen(false);
   }
 
   function requestLogout() {
@@ -271,6 +273,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     setError(null);
     setStatus("idle");
     setControlsDirty(false);
+    setIsResultModalOpen(false);
   }
 
   async function handleSmartQuote() {
@@ -312,6 +315,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
       });
       setResult(response.quote_result);
       setControlsDirty(false);
+      setIsResultModalOpen(true);
       const manual = response.manual_review_required || response.quote_result?.manual_review_required;
       setStatus(manual ? "manual_required" : "quoted");
       if (manual) {
@@ -348,6 +352,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     setNotice(null);
     setStatus("idle");
     setControlsDirty(false);
+    setIsResultModalOpen(false);
   }
 
   function handleImportText(value: string) {
@@ -513,6 +518,15 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
                   {statusLabel}
                 </span>
               )}
+              {quoteMode === "final_mile" && result && (
+                <button
+                  className="btn-primary min-h-10 px-3 py-1"
+                  type="button"
+                  onClick={() => setIsResultModalOpen(true)}
+                >
+                  查看报价结果
+                </button>
+              )}
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
@@ -609,28 +623,6 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
                     }}
                   />
                 </div>
-
-                <div className="sales-stage sales-stage-result grid min-w-0 content-start gap-3">
-                  <QuoteResultPanel
-                    config={config}
-                    parsed={displayParsed}
-                    result={result}
-                    aiParsed={Boolean(aiResult)}
-                    salesText={salesText}
-                    risks={riskMessages}
-                    manualRequired={manualRequired}
-                    searchContext={aiResult?.search_context ?? null}
-                    status={status}
-                    error={error}
-                    onExport={exportQuote}
-                    requiresRuralConfirmation={requiresRuralConfirmation}
-                    ruralConfirmed={ruralConfirmed}
-                    onAcknowledgeRural={() => setRuralAcknowledgedKey(ruralConfirmationKey)}
-                    onReturnToEdit={() => updateRawInput(rawInput)}
-                    controlsDirty={controlsDirty}
-                    onRequote={handleSmartQuote}
-                  />
-                </div>
               </div>
               <SalesQuoteRecordsPreview
                 isLoading={isLoadingRecords}
@@ -665,6 +657,28 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
         </section>
         </main>
       </div>
+      <QuoteResultDialog
+        isOpen={isResultModalOpen}
+        config={config}
+        parsed={displayParsed}
+        result={result}
+        aiParsed={Boolean(aiResult)}
+        salesText={salesText}
+        risks={riskMessages}
+        manualRequired={manualRequired}
+        searchContext={aiResult?.search_context ?? null}
+        onClose={() => setIsResultModalOpen(false)}
+        onExport={exportQuote}
+        requiresRuralConfirmation={requiresRuralConfirmation}
+        ruralConfirmed={ruralConfirmed}
+        onAcknowledgeRural={() => setRuralAcknowledgedKey(ruralConfirmationKey)}
+        onReturnToEdit={() => {
+          setIsResultModalOpen(false);
+          updateRawInput(rawInput);
+        }}
+        controlsDirty={controlsDirty}
+        onRequote={handleSmartQuote}
+      />
       <LogoutConfirmationDialog
         isOpen={isLogoutConfirmationOpen}
         onCancel={() => setIsLogoutConfirmationOpen(false)}
@@ -674,13 +688,14 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   );
 }
 
-function QuoteResultPanel({
+function QuoteResultDialog({
   aiParsed,
   config,
   controlsDirty,
-  error,
+  isOpen,
   manualRequired,
   onAcknowledgeRural,
+  onClose,
   onExport,
   onRequote,
   onReturnToEdit,
@@ -691,14 +706,14 @@ function QuoteResultPanel({
   ruralConfirmed,
   salesText,
   searchContext,
-  status,
 }: {
   aiParsed: boolean;
   config: QuoteWorkbenchConfig;
   controlsDirty: boolean;
-  error: string | null;
+  isOpen: boolean;
   manualRequired: boolean;
   onAcknowledgeRural: () => void;
+  onClose: () => void;
   onExport: () => void;
   onRequote: () => void;
   onReturnToEdit: () => void;
@@ -709,133 +724,123 @@ function QuoteResultPanel({
   ruralConfirmed: boolean;
   salesText: string;
   searchContext: QuoteSearchContext | null;
-  status: WorkbenchStatus;
 }) {
-  if (status === "idle") {
-    return (
-      <section className="panel sales-result-empty grid min-h-72 place-items-center p-6 text-center">
-        <div>
-          <p className="text-xs font-semibold uppercase text-slate-500">报价结果</p>
-          <h2 className="mt-1 text-lg font-semibold text-slate-900">等待报价</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            粘贴客户询价并点击“{config.primary_button_label || "生成 AI 报价"}”后，报价结果会显示在这里。
-          </p>
-        </div>
-      </section>
-    );
-  }
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    const previousOverflow = document.body.style.overflow;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen, onClose]);
 
-  if (status === "quoting") {
-    return (
-      <section className="panel grid min-h-72 place-items-center p-6 text-center" role="status">
-        <div>
-          <p className="text-xs font-semibold uppercase text-slate-500">报价结果</p>
-          <h2 className="mt-1 text-lg font-semibold text-slate-900">正在报价</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">
-            后台正在解析货物信息并查表计算，请稍候…
-          </p>
-        </div>
-      </section>
-    );
-  }
-
-  if (status === "error") {
-    return (
-      <section className="panel p-4" role="alert">
-        <p className="text-xs font-semibold uppercase text-slate-500">报价结果</p>
-        <h2 className="mt-1 text-lg font-semibold text-rose-700">报价未完成</h2>
-        <p className="mt-2 text-sm leading-6 text-rose-900">{error || "报价请求失败。"}</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button className="btn-primary" type="button" onClick={onRequote}>
-            重试报价
-          </button>
-          <button className="btn-secondary" type="button" onClick={onReturnToEdit}>
-            返回修改询价
-          </button>
-        </div>
-      </section>
-    );
+  if (!isOpen) {
+    return null;
   }
 
   const ruralPostalPrefix = extractPostalPrefix(parsed.address.postal_code);
 
   return (
-    <section className="grid min-w-0 content-start gap-3">
-      <section className="panel p-4">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <div>
+    <div
+      className="quote-result-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section
+        className="quote-result-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="quote-result-modal-title"
+      >
+        <header className="quote-result-modal-header">
+          <div className="min-w-0">
             <p className="text-xs font-semibold uppercase text-teal-700">AI 报价结果</p>
-            <h2 className="mt-1 text-lg font-semibold text-slate-950">
+            <h2 id="quote-result-modal-title" className="mt-1 text-xl font-semibold text-slate-950">
               {manualRequired ? "报价待人工复核" : "报价已完成"}
             </h2>
           </div>
-          <span
-            className={`shrink-0 rounded-full border px-2.5 py-1 text-xs font-semibold ${
-              manualRequired
-                ? "border-amber-200 bg-amber-50 text-amber-700"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700"
-            }`}
+          <button
+            className="quote-result-modal-close"
+            type="button"
+            onClick={onClose}
+            aria-label="关闭报价结果"
+            autoFocus
           >
-            {manualRequired ? "需人工确认" : "已报价"}
-          </span>
-        </div>
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
 
-        {controlsDirty && (
-          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-700" role="status">
-            已修改包装、地址类型或附加服务，当前结果基于修改前的字段。
-            <button className="ml-2 underline" type="button" onClick={onRequote}>
-              重新报价
-            </button>
+        <div className="quote-result-modal-content">
+          <div className="quote-result-modal-summary grid min-w-0 content-start gap-3">
+            {controlsDirty && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-700" role="status">
+                已修改包装、地址类型或附加服务，当前结果基于修改前的字段。
+                <button className="ml-2 underline" type="button" onClick={onRequote}>
+                  重新报价
+                </button>
+              </div>
+            )}
+
+            {requiresRuralConfirmation && !ruralConfirmed && (
+              <div className="rounded-md border-2 border-amber-400 bg-amber-50 p-3" role="status">
+                <p className="text-sm font-bold text-amber-900">乡村邮编二次确认</p>
+                <p className="mt-1 text-sm leading-6 text-amber-800">
+                  邮编前缀 <strong>{ruralPostalPrefix || "待确认"}</strong> 第二位为 0，属于乡村 FSA。
+                  {manualRequired
+                    ? "该票同时存在人工复核原因，地址确认不代表价格已审核。"
+                    : "报价已计算完成，但复制或导出前必须核对派送条件。"}
+                </p>
+                <ul className="mt-2 grid gap-1">
+                  {RURAL_CONFIRMATION_CHECKS.map((item, index) => (
+                    <li key={item} className="flex gap-2 text-sm leading-5 text-amber-800">
+                      <span className="font-semibold">{index + 1}.</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs leading-5 text-amber-700">
+                  点击确认仅表示已完成地址与派送条件核对；最终价格仍以供应商实测地址为准。
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button className="btn-secondary" type="button" onClick={onReturnToEdit}>
+                    返回修改地址
+                  </button>
+                  <button className="btn-primary" type="button" onClick={onAcknowledgeRural}>
+                    我已核对，允许复制与导出
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <QuoteCalculationPanel
+              config={config}
+              parsed={parsed}
+              result={result}
+              aiParsed={aiParsed}
+              salesText={salesText}
+              onExport={onExport}
+              ruralConfirmationRequired={requiresRuralConfirmation}
+              ruralConfirmationAcknowledged={ruralConfirmed}
+            />
+            <QuoteRiskPanel risks={risks} manualRequired={manualRequired} />
+            {searchContext ? <SearchVerificationPanel searchContext={searchContext} /> : null}
           </div>
-        )}
-
-        {requiresRuralConfirmation && !ruralConfirmed && (
-          <div className="mt-3 rounded-md border-2 border-amber-400 bg-amber-50 p-3" role="status">
-            <p className="text-sm font-bold text-amber-900">乡村邮编二次确认</p>
-            <p className="mt-1 text-sm leading-6 text-amber-800">
-              邮编前缀 <strong>{ruralPostalPrefix || "待确认"}</strong> 第二位为 0，属于乡村 FSA。
-              {manualRequired
-                ? "该票同时存在人工复核原因，地址确认不代表价格已审核。"
-                : "报价已计算完成，但复制或导出前必须核对派送条件。"}
-            </p>
-            <ul className="mt-2 grid gap-1">
-              {RURAL_CONFIRMATION_CHECKS.map((item, index) => (
-                <li key={item} className="flex gap-2 text-sm leading-5 text-amber-800">
-                  <span className="font-semibold">{index + 1}.</span>
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-xs leading-5 text-amber-700">
-              点击确认仅表示已完成地址与派送条件核对；最终价格仍以供应商实测地址为准。
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button className="btn-secondary" type="button" onClick={onReturnToEdit}>
-                返回修改地址
-              </button>
-              <button className="btn-primary" type="button" onClick={onAcknowledgeRural}>
-                我已核对，允许复制与导出
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="mt-3">
-          <QuoteCalculationPanel
-            config={config}
-            parsed={parsed}
-            result={result}
-            aiParsed={aiParsed}
-            salesText={salesText}
-            onExport={onExport}
-            ruralConfirmationRequired={requiresRuralConfirmation}
-            ruralConfirmationAcknowledged={ruralConfirmed}
-          />
         </div>
       </section>
-      <QuoteRiskPanel risks={risks} manualRequired={manualRequired} />
-      {searchContext ? <SearchVerificationPanel searchContext={searchContext} /> : null}
-    </section>
+    </div>
   );
 }
 

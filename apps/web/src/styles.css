@@ -1551,12 +1551,11 @@ body {
 
 @media (min-width: 1024px) {
   .sales-workbench-grid {
-    grid-template-columns: minmax(19rem, 22.5rem) minmax(0, 1fr) minmax(17rem, 1.05fr) !important;
+    grid-template-columns: minmax(19rem, 22.5rem) minmax(0, 1fr) !important;
   }
 
   .sales-stage-input,
-  .sales-stage-parsed,
-  .sales-stage-result {
+  .sales-stage-parsed {
     display: grid !important;
   }
 }
@@ -6875,4 +6874,96 @@ body {
 }
 .sales-frontdesk .sales-page-heading p {
   font-size: 1.05rem;
+}
+
+
+/* 报价结果弹窗 */
+.quote-result-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: clamp(0.75rem, 2vw, 1.5rem);
+  background: rgba(15, 42, 68, 0.58);
+  backdrop-filter: blur(4px);
+}
+
+.quote-result-modal {
+  display: grid;
+  width: min(100%, 88rem);
+  max-height: calc(100dvh - clamp(1.5rem, 4vw, 3rem));
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 0.875rem;
+  background: #f8fafc;
+  box-shadow: 0 24px 70px rgba(15, 42, 68, 0.28);
+}
+
+.quote-result-modal-header {
+  display: flex;
+  min-height: 4.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--app-border);
+  background: #ffffff;
+  padding: 0.85rem 1rem 0.85rem 1.25rem;
+}
+
+.quote-result-modal-close {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--app-border);
+  border-radius: 0.5rem;
+  background: #ffffff;
+  color: var(--app-muted);
+  font-size: 1.5rem;
+  line-height: 1;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+
+.quote-result-modal-close:hover {
+  border-color: #99f6e4;
+  background: #f0fdfa;
+  color: var(--app-primary);
+}
+
+.quote-result-modal-content {
+  display: grid;
+  min-height: 0;
+  gap: 0.85rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.85rem;
+}
+
+.quote-result-modal-summary {
+  max-width: 58rem;
+}
+
+@media (max-width: 639px) {
+  .quote-result-modal-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .quote-result-modal {
+    width: 100%;
+    max-height: 94dvh;
+    border-radius: 0.875rem 0.875rem 0 0;
+  }
+
+  .quote-result-modal-header {
+    min-height: 4rem;
+    padding: 0.7rem 0.75rem 0.7rem 1rem;
+  }
+
+  .quote-result-modal-content {
+    padding: 0.7rem;
+  }
 }
