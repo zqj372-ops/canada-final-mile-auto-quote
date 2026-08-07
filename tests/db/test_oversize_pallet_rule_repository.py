@@ -33,9 +33,9 @@ def test_missing_records_use_default_rule_and_zero_published_version() -> None:
     published, version = repository.get_published()
 
     assert draft.model_dump(mode="json") == default_oversize_pallet_rule().model_dump(mode="json")
-    assert draft.rule_id == "NA_OVERSIZE_TEMP_V1"
+    assert draft.rule_id == "NA_OVERSIZE_RULE_V2"
     assert published is not None
-    assert published.rule_id == "NA_OVERSIZE_TEMP_V1"
+    assert published.rule_id == "NA_OVERSIZE_RULE_V2"
     assert version == 0
 
 
@@ -130,7 +130,7 @@ def test_draft_is_stored_as_quote_rule_config_json() -> None:
     record = session.get(QuoteRuleConfig, OVERSIZE_PALLET_RULE_DRAFT_KEY)
     assert record is not None
     assert record.value
-    assert repository.get_draft().rule_id == "NA_OVERSIZE_TEMP_V1"
+    assert repository.get_draft().rule_id == "NA_OVERSIZE_RULE_V2"
 
 
 def test_validate_draft_reports_invalid_pallet_rule_data() -> None:
@@ -138,7 +138,7 @@ def test_validate_draft_reports_invalid_pallet_rule_data() -> None:
     session.add(
         QuoteRuleConfig(
             key=OVERSIZE_PALLET_RULE_DRAFT_KEY,
-            value='{"rule_id":"NA_OVERSIZE_TEMP_V1","max_auto_vehicles":4}',
+            value='{"rule_id":"NA_OVERSIZE_RULE_V2","max_auto_vehicles":4}',
             description="Oversize pallet draft configuration",
         )
     )
@@ -188,7 +188,7 @@ def test_published_snapshot_rejects_empty_config_json(config_json: object) -> No
     session = make_session()
     session.add(
         OversizePalletRuleVersion(
-            rule_id="NA_OVERSIZE_TEMP_V1",
+            rule_id="NA_OVERSIZE_RULE_V2",
             version=1,
             config_json=config_json,
             status="published",

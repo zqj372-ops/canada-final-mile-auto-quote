@@ -1,6 +1,7 @@
 # 北美超大件算托规则重设计 v2
 
 > **状态**: 参数已用 493 条历史订单数据验证(见 8.2 与附录 C),待实施
+> **规则标识**: `NA_OVERSIZE_RULE_V2`(正式;替代已废弃的 `NA_OVERSIZE_TEMP_V1`)
 > **取代**: `2026-08-03-north-america-oversize-pallet-rules-design.md`(该版规则标识 `NA_OVERSIZE_TEMP_V1` 被本版取代)
 > **本文档范围**: 只描述设计。代码、测试、迁移的重做按本文档另行排期,不包含在本文档内。
 
@@ -400,7 +401,22 @@ OversizePalletRuleConfig v2:
 
 - 旧发布快照 `NA_OVERSIZE_TEMP_V1` 与新结构不兼容:实施时新增 v2 快照表结构(或新表),
   旧快照归档只读;运行期读取缺失时使用 v2 默认值。
+- 规则标识正式化:`NA_OVERSIZE_TEMP_V1`(已废弃,保留为历史名)→ `NA_OVERSIZE_RULE_V2`。
+  migration 0022 已应用的 `NA_OVERSIZE_TEMP_V1` seed 快照**不可修改**(历史记录);新规则
+  以 `NA_OVERSIZE_RULE_V2` 作为默认 rule_id 发布新版本。
 - 发布流程(草稿→校验→发布→不可变快照)不变。
+
+## 8.4 版本号方案(2026-08-07 设定)
+
+| 项 | 版本号 | 说明 |
+|---|---|---|
+| 设计文档 | v2(2026-08-07) | 本文档;v1 = `2026-08-03-...-design.md`(已废弃标注) |
+| 规则标识 | `NA_OVERSIZE_RULE_V2` | 正式规则 ID,替代已废弃的 `NA_OVERSIZE_TEMP_V1`;发布快照版本号从 1 重新递增 |
+| 应用版本 | 0.2.0 | `pyproject.toml` 与 `apps/web/package.json`(oversize v2 设计验证完成里程碑) |
+| 数据库迁移 | 0023(规划) | 生产 schema 修复:补 `status` 索引、删除重复唯一索引(生产已应用旧版 0022,不能直接改 0022) |
+| 代码重做 | 待实施 | 按本文档重做 oversize 模块时统一使用 `NA_OVERSIZE_RULE_V2` |
+
+版本演进:0.1.0(初始 MVP)→ 0.2.0(oversize v2 规则设计验证 + Zone 覆盖补全)。
 
 ## 9. 审计与输出边界
 

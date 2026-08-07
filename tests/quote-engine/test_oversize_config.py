@@ -14,7 +14,7 @@ from packages.quote_engine.oversize_models import HandlingUnitInput
 def test_default_rule_matches_na_oversize_temp_v1_contract() -> None:
     rule = default_oversize_pallet_rule()
 
-    assert rule.rule_id == "NA_OVERSIZE_TEMP_V1"
+    assert rule.rule_id == "NA_OVERSIZE_RULE_V2"
     assert rule.standard_pallet_length_cm == Decimal("121.92")
     assert rule.standard_pallet_width_cm == Decimal("101.60")
     assert rule.standard_pallet_area_cm2 == Decimal("12387.072")

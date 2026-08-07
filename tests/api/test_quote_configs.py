@@ -617,7 +617,7 @@ def test_admin_can_manage_oversize_pallet_rule_versions(monkeypatch: pytest.Monk
     )
 
     assert initial.status_code == 200
-    assert initial.json()["draft"]["rule_id"] == "NA_OVERSIZE_TEMP_V1"
+    assert initial.json()["draft"]["rule_id"] == "NA_OVERSIZE_RULE_V2"
     assert saved.status_code == 200
     assert validated.status_code == 200
     assert validated.json() == {"valid": True, "errors": []}

@@ -105,7 +105,7 @@ class OversizePalletRuleConfig(BaseModel):
         {"26_non_cdl", "26_cdl", "53_dry_van"}
     )
 
-    rule_id: str = Field(default="NA_OVERSIZE_TEMP_V1", min_length=1)
+    rule_id: str = Field(default="NA_OVERSIZE_RULE_V2", min_length=1)
     standard_pallet_length_cm: Decimal = Field(
         default=Decimal("121.92"),
         gt=0,
