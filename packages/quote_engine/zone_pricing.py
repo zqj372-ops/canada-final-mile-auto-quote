@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from decimal import Decimal
 from math import ceil
+from collections.abc import Mapping
 
 from packages.quote_engine.pricing import money
 from packages.quote_engine.zone_config import ZonePricingConfig
@@ -24,6 +25,7 @@ def calculate_zone_price(
     requires_pallet_jack: bool = False,
     requires_appointment: bool = False,
     detention_minutes: int = 0,
+    additional_accessorials: Mapping[str, Decimal] | None = None,
     config: ZonePricingConfig | None = None,
 ) -> ZonePricingResult:
     pricing_config = config or ZonePricingConfig()
@@ -44,6 +46,13 @@ def calculate_zone_price(
     if billable_detention_minutes:
         half_hours = ceil(billable_detention_minutes / 30)
         accessorials["detention_fee_usd"] = money(pricing_config.detention_half_hour_fee_usd * half_hours)
+
+    # Oversize calculation is intentionally upstream.  This module only
+    # normalizes and totals already-determined fee categories; it never
+    # infers pallet counts or re-evaluates dimensions.
+    if additional_accessorials:
+        for key, value in additional_accessorials.items():
+            accessorials[str(key)] = money(value)
 
     total = money(base_price_usd + fuel_usd + sum(accessorials.values(), Decimal("0")))
     return ZonePricingResult(

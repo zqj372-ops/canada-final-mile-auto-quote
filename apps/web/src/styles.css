@@ -1964,12 +1964,6 @@ body {
   font-size: 0.95rem;
 }
 
-.rural-confirmation-address .rural-confirmation-city-change {
-  grid-column: 1 / -1;
-  border-color: #fdba74;
-  background: #fff7ed;
-}
-
 .rural-confirmation-checklist {
   display: grid;
   gap: 0.55rem;
@@ -2083,9 +2077,6 @@ body {
     grid-template-columns: 1fr;
   }
 
-  .rural-confirmation-address .rural-confirmation-city-change {
-    grid-column: auto;
-  }
 }
 
 .settings-section-tabs {
@@ -4328,6 +4319,177 @@ body {
   padding: 1.25rem 1.5rem;
 }
 
+.pricing-oversize-panel {
+  overflow: hidden;
+}
+
+.pricing-oversize-actions,
+.pricing-oversize-footer > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.pricing-oversize-feedback {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 1rem 1.5rem 0;
+  border: 1px solid;
+  border-radius: 0.6rem;
+  padding: 0.7rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.pricing-oversize-feedback.is-error,
+.pricing-oversize-errors {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #9f1239;
+}
+
+.pricing-oversize-feedback.is-success {
+  border-color: #b7ebe1;
+  background: #effcf9;
+  color: #08665f;
+}
+
+.pricing-oversize-status {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.7rem;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--pricing-border-soft);
+  background: #f7fafc;
+}
+
+.pricing-oversize-status > div {
+  min-width: 0;
+  border: 1px solid var(--pricing-border-soft);
+  border-radius: 0.55rem;
+  background: #fff;
+  padding: 0.7rem 0.8rem;
+}
+
+.pricing-oversize-status span {
+  display: block;
+  color: #8493a4;
+  font-size: 0.68rem;
+  font-weight: 750;
+}
+
+.pricing-oversize-status strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 0.25rem;
+  color: var(--pricing-ink);
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pricing-oversize-validation.is-valid strong {
+  color: var(--pricing-teal-dark);
+}
+
+.pricing-oversize-validation.is-invalid strong {
+  color: #b42318;
+}
+
+.pricing-oversize-body {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.pricing-oversize-block {
+  overflow: hidden;
+  border: 1px solid var(--pricing-border-soft);
+  border-radius: 0.65rem;
+  background: #fff;
+}
+
+.pricing-oversize-fields {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 1rem 1.1rem;
+}
+
+.pricing-oversize-vehicle-list {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem 1.1rem;
+}
+
+.pricing-oversize-vehicle {
+  border: 1px solid #dfe7ef;
+  border-radius: 0.6rem;
+  background: #fbfcfd;
+}
+
+.pricing-oversize-vehicle-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  border-bottom: 1px solid var(--pricing-border-soft);
+  padding: 0.7rem 0.8rem;
+}
+
+.pricing-oversize-vehicle-heading strong {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--pricing-ink);
+  font-size: 0.9rem;
+}
+
+.pricing-oversize-vehicle-fields {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.65rem;
+  padding: 0.8rem;
+}
+
+.pricing-oversize-errors {
+  margin: 0 1.25rem 1rem;
+  border: 1px solid;
+  border-radius: 0.6rem;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+.pricing-oversize-errors ul {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.45rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.pricing-oversize-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid var(--pricing-border-soft);
+  padding: 0.9rem 1.25rem;
+  color: #8291a0;
+  font-size: 0.76rem;
+}
+
+.pricing-oversize-footer > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.pricing-oversize-empty {
+  padding: 3rem 1.5rem;
+  color: var(--pricing-muted);
+  text-align: center;
+}
+
 .pricing-page-v2 .field-input {
   min-height: 2.75rem;
   margin-top: 0.45rem;
@@ -5919,6 +6081,15 @@ body {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .pricing-oversize-status {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .pricing-oversize-fields,
+  .pricing-oversize-vehicle-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .pricing-city-toolbar {
     align-items: stretch;
     flex-direction: column;
@@ -5958,7 +6129,8 @@ body {
   .pricing-panel-heading,
   .pricing-panel-heading.compact,
   .pricing-form-footer,
-  .pricing-table-footer {
+  .pricing-table-footer,
+  .pricing-oversize-footer {
     align-items: flex-start;
     flex-direction: column;
     padding: 1rem;
@@ -5971,8 +6143,19 @@ body {
 
   .pricing-accessorial-grid,
   .pricing-form-grid,
-  .pricing-summary-strip {
+  .pricing-summary-strip,
+  .pricing-oversize-status,
+  .pricing-oversize-fields,
+  .pricing-oversize-vehicle-fields {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .pricing-oversize-feedback {
+    margin-inline: 1rem;
+  }
+
+  .pricing-oversize-body {
+    padding-inline: 0.75rem;
   }
 
   .pricing-zone-rail {

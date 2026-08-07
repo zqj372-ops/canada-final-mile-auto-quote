@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from packages.address_normalizer import normalize_city, normalize_postal_code, normalize_province
 from packages.quote_engine.quote_id import generate_quote_id
+from packages.quote_engine.oversize_models import HandlingUnitInput
 
 
 class ZoneQuoteSourceType(StrEnum):
@@ -30,6 +31,14 @@ class ZoneQuoteRequest(BaseModel):
     postal_code: str
     city: str | None = None
     province: str | None = None
+    # Valid rows are parsed as HandlingUnitInput.  Incomplete AI aggregate
+    # rows are intentionally retained as plain mappings so the calculator can
+    # classify their missing dimensions/weight and fail closed to manual
+    # review instead of dropping the audit evidence or fabricating values.
+    handling_units: list[HandlingUnitInput | dict[str, object]] = Field(default_factory=list)
+    # Legacy aggregate fields are retained as order-level reconciliation
+    # values.  The Zone engine never derives a pallet basis from them when
+    # handling_units is empty.
     cbm: Decimal = Field(ge=0)
     weight_kg: Decimal = Field(ge=0)
     piece_count: int = Field(ge=1)
@@ -79,7 +88,9 @@ class ZoneQuoteResult(BaseModel):
     origin: str | None = None
     zone: int | None = None
     billing_pallets: int | None = None
-    pallet_breakdown: dict[str, int] = Field(default_factory=dict)
+    # The following fields are intentionally internal.  The API route must
+    # call ``to_public`` before serializing a normal sales response.
+    pallet_breakdown: dict[str, object] = Field(default_factory=dict)
     base_price_usd: Decimal | None = None
     fuel_usd: Decimal | None = None
     accessorials: dict[str, Decimal] = Field(default_factory=dict)
@@ -92,6 +103,49 @@ class ZoneQuoteResult(BaseModel):
     match_trace: dict[str, object] = Field(default_factory=dict)
     sales_note: str | None = None
     internal_note: str | None = None
+    internal_trace: dict[str, object] = Field(default_factory=dict)
+    oversize_rule_id: str | None = None
+    oversize_rule_version: str | None = None
+    oversize_rule_snapshot: dict[str, object] = Field(default_factory=dict)
+    oversize_accessorials: dict[str, Decimal] = Field(default_factory=dict)
+
+    def to_public(self) -> "ZoneQuotePublicResult":
+        """Return the explicit allowlist DTO for ordinary quote consumers.
+
+        Manual results can retain an internally useful candidate pallet count,
+        but that candidate is never presented as a public quote.  The public
+        model deliberately has no address, Zone, supplier, risk, trace or
+        accessorial-detail fields.
+        """
+
+        is_manual = self.manual_review_required
+        return ZoneQuotePublicResult(
+            quote_id=self.quote_id,
+            billing_pallets=None if is_manual else self.billing_pallets,
+            total_price_usd=None if is_manual else self.total_price_usd,
+            sales_note=self.sales_note,
+            manual_review_required=is_manual,
+            public_flags=["manual_review_required"] if is_manual else [],
+        )
+
+
+class ZoneQuotePublicResult(BaseModel):
+    """Minimal allowlist returned to sales/public API consumers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    quote_id: str
+    billing_pallets: int | None = None
+    total_price_usd: Decimal | None = None
+    sales_note: str | None = None
+    manual_review_required: bool
+    public_flags: list[str] = Field(default_factory=list)
+
+
+def to_public_zone_quote_result(result: ZoneQuoteResult) -> ZoneQuotePublicResult:
+    """Functional alias useful at API boundaries and in integrations."""
+
+    return result.to_public()
 
 
 @dataclass(frozen=True)

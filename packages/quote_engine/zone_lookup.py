@@ -421,6 +421,42 @@ def lookup_zone_by_city_province(
             },
         )
 
+    if prefix:
+        exact_prefix_rules = [
+            rule for rule in filtered if _normalize_prefix(rule.postal_prefix) == prefix
+        ]
+        if not exact_prefix_rules:
+            prefix_family = f"{prefix[:2]}*" if len(prefix) >= 2 else prefix
+            family_rules = [
+                rule
+                for rule in filtered
+                if _normalize_prefix(rule.postal_prefix).startswith(prefix[:2])
+            ]
+            return ZoneLookupDecision(
+                manual_required=True,
+                matched_rule=(
+                    f"邮编前缀 {prefix} 未在城市 {city} + {province} 的当前有效 FSA 配置中，"
+                    f"不能按同邮编族 {prefix_family} 回退匹配 Zone，需要人工确认。"
+                ),
+                risk_tags=("zone_not_found", "city_zone_prefix_family_low_support"),
+                matched_by="city_zone_prefix_not_configured",
+                candidate_count=len(family_rules),
+                match_trace={
+                    "fsa": prefix,
+                    "input_city": city,
+                    "province": normalized_province,
+                    "candidate_count": len(family_rules),
+                    "city_filtered_count": len(filtered),
+                    "exact_prefix_count": 0,
+                    "prefix_family": prefix_family,
+                    "prefix_family_count": len(family_rules),
+                    "matched_by": "city_zone_prefix_not_configured",
+                },
+            )
+        # A configured city group is authoritative for the supplied FSA. Do
+        # not let an origin preference or another city anchor re-expand it.
+        filtered = exact_prefix_rules
+
     expected_origin = ORIGIN_BY_PROVINCE.get(normalized_province)
     if expected_origin and not any(normalize_origin(rule.origin) == expected_origin for rule in filtered):
         return ZoneLookupDecision(
@@ -453,12 +489,6 @@ def lookup_zone_by_city_province(
         # Keep the existing diagnostic signal when a stale cross-province
         # candidate was discarded before the expected-origin rule was chosen.
         origin_preference_applied = True
-    prefix_family_label: str | None = None
-    narrowed = _select_unique_prefix_family_rules(match_rules, prefix)
-    if narrowed is not None:
-        narrowed_rules, prefix_family_label = narrowed
-        if prefix_family_label or len(narrowed_rules) < len(match_rules):
-            match_rules = narrowed_rules
     groups = _unique_groups(match_rules)
     if len(groups) != 1:
         return ZoneLookupDecision(
@@ -482,55 +512,10 @@ def lookup_zone_by_city_province(
         )
 
     original = _choose_best_rule(match_rules)
-    is_trusted_city_anchor = (original.match_level or "").lower() == "trusted_city_anchor"
-    has_expected_origin_support = bool(
-        expected_origin
-        and match_rules
-        and all(normalize_origin(rule.origin) == expected_origin for rule in match_rules)
-    )
-    if (
-        prefix_family_label
-        and len(match_rules) == 1
-        and len(filtered) > len(match_rules)
-        and not is_trusted_city_anchor
-        and not has_expected_origin_support
-    ):
-        return ZoneLookupDecision(
-            manual_required=True,
-            matched_rule=(
-                f"邮编前缀 {prefix or '未知'} 未命中；城市 {city} + {normalized_province} "
-                f"只剩单个相邻邮编族锚点 {original.postal_prefix} -> {original.origin} Zone {original.zone}，"
-                "且存在被过滤的冲突锚点，需要人工确认。"
-            ),
-            risk_tags=("zone_not_found", "city_zone_prefix_family_low_support"),
-            matched_by="city_zone_prefix_family_low_support",
-            candidate_count=len(match_rules),
-            match_trace={
-                "fsa": prefix,
-                "input_city": city,
-                "province": normalized_province,
-                "candidate_count": len(match_rules),
-                "city_filtered_count": len(filtered),
-                "expected_origin": expected_origin,
-                "origin_preference_applied": origin_preference_applied,
-                "prefix_family": prefix_family_label,
-                "suggested_origin": original.origin,
-                "suggested_zone": original.zone,
-                "suggested_postal_prefix": original.postal_prefix,
-                "suggested_city": original.city,
-                "matched_by": "city_zone_prefix_family_low_support",
-            },
-        )
 
     rule, risk_tags = _apply_origin_overrides(original)
-    fallback_detail = (
-        f"，按同邮编族 {prefix_family_label} 缩小城市分区"
-        if prefix_family_label
-        else "，使用城市分区"
-    )
+    fallback_detail = "，使用城市分区"
     result_risk_tags = [*risk_tags, "city_zone_fallback"]
-    if prefix_family_label:
-        result_risk_tags.append("city_zone_prefix_family_fallback")
     if origin_preference_applied:
         result_risk_tags.append("expected_origin_preferred")
     return ZoneLookupDecision(
@@ -555,7 +540,6 @@ def lookup_zone_by_city_province(
             "expected_origin": expected_origin,
             "origin_preference_applied": origin_preference_applied,
             "invalid_rule_count": len(invalid_rules),
-            "prefix_family": prefix_family_label,
             "matched_by": "city_zone_fallback",
         },
     )
@@ -785,28 +769,6 @@ def _rule_city_for_lookup(
     city = _normalize_city_for_lookup(rule.city)
     if city:
         return alias_map.get(city, city)
-    return None
-
-
-def _select_unique_prefix_family_rules(
-    rules: Sequence[ZoneLookupRuleRecord],
-    requested_prefix: str,
-) -> tuple[list[ZoneLookupRuleRecord], str | None] | None:
-    if not requested_prefix:
-        return None
-
-    exact = [rule for rule in rules if _normalize_prefix(rule.postal_prefix) == requested_prefix]
-    if exact and len(_unique_groups(exact)) == 1:
-        return exact, None
-
-    for family_length in (2, 1):
-        if len(requested_prefix) < family_length:
-            continue
-        family = requested_prefix[:family_length]
-        narrowed = [rule for rule in rules if _normalize_prefix(rule.postal_prefix).startswith(family)]
-        if narrowed and len(_unique_groups(narrowed)) == 1:
-            return narrowed, f"{family}*"
-
     return None
 
 

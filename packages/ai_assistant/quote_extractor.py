@@ -5,7 +5,7 @@ from decimal import Decimal
 import json
 import re
 import unicodedata
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -28,6 +28,15 @@ class ExtractedCargoItem(BaseModel):
     cbm: Decimal | None = Field(default=None, ge=0)
     total_weight_kg: Decimal | None = Field(default=None, ge=0)
     total_cbm: Decimal | None = Field(default=None, ge=0)
+    # These fields are only populated when the customer message explicitly
+    # states the corresponding handling/stacking constraint.  ``None`` means
+    # unknown; the adapter must not infer carrier capabilities from packaging
+    # names, dimensions, or generic logistics conventions.
+    contained_customer_pieces: int | None = Field(default=None, ge=0)
+    stackability: Literal["stackable", "non_stackable", "unknown"] | None = None
+    max_stack_layers: int | None = Field(default=None, ge=2)
+    max_top_load_kg: Decimal | None = Field(default=None, gt=0)
+    floor_rotation_allowed: bool | None = None
     source_span: str | None = None
 
 
@@ -79,6 +88,15 @@ class CargoAgentExtraction(BaseModel):
     longest_side_cm: Decimal | None = Field(default=None, ge=0)
     explicit_pallet_count: int | None = Field(default=None, ge=1)
     is_stackable: bool | None = None
+    # Optional handling constraints may appear at agent level when the source
+    # describes one homogeneous cargo group.  They are copied to a row only
+    # when the row itself does not carry an explicit value; no inference is
+    # performed from packaging or dimensions.
+    contained_customer_pieces: int | None = Field(default=None, ge=0)
+    stackability: Literal["stackable", "non_stackable", "unknown"] | None = None
+    max_stack_layers: int | None = Field(default=None, ge=2)
+    max_top_load_kg: Decimal | None = Field(default=None, gt=0)
+    floor_rotation_allowed: bool | None = None
     cargo_items: list[ExtractedCargoItem] = Field(default_factory=list)
     missing_fields: list[str] = Field(default_factory=list)
     confidence: int = Field(default=0, ge=0, le=100)
@@ -331,11 +349,49 @@ def _draft_from_agent_outputs(
         missing_fields=sorted({*(cargo.missing_fields if cargo else []), *(address.missing_fields if address else [])}),
         confidence=int(sum(confidences) / len(confidences)) if confidences else 0,
         extraction_notes=" | ".join(notes) if notes else None,
-        cargo_items=cargo.cargo_items if cargo else [],
+        cargo_items=_apply_agent_level_cargo_constraints(cargo) if cargo else [],
         cargo_agent=cargo.model_dump(mode="json") if cargo else None,
         address_agent=address.model_dump(mode="json") if address else None,
         validation_notes=["dual_agent_extraction"],
     )
+
+
+def _apply_agent_level_cargo_constraints(cargo: CargoAgentExtraction) -> list[ExtractedCargoItem]:
+    """Copy explicitly stated homogeneous constraints onto missing row fields."""
+
+    if not cargo.cargo_items:
+        return []
+    stackability = cargo.stackability
+    if stackability is None and cargo.is_stackable is not None:
+        stackability = "stackable" if cargo.is_stackable else "non_stackable"
+    return [
+        item.model_copy(
+            update={
+                "contained_customer_pieces": (
+                    item.contained_customer_pieces
+                    if item.contained_customer_pieces is not None
+                    else cargo.contained_customer_pieces
+                ),
+                "stackability": item.stackability if item.stackability is not None else stackability,
+                "max_stack_layers": (
+                    item.max_stack_layers
+                    if item.max_stack_layers is not None
+                    else cargo.max_stack_layers
+                ),
+                "max_top_load_kg": (
+                    item.max_top_load_kg
+                    if item.max_top_load_kg is not None
+                    else cargo.max_top_load_kg
+                ),
+                "floor_rotation_allowed": (
+                    item.floor_rotation_allowed
+                    if item.floor_rotation_allowed is not None
+                    else cargo.floor_rotation_allowed
+                ),
+            }
+        )
+        for item in cargo.cargo_items
+    ]
 
 
 def _merge_agent_draft_with_fallback(
@@ -417,6 +473,7 @@ def _reconcile_with_explicit_facts(
             piece_count=explicit_piece_count,
             total_weight_kg=explicit_weight or draft.weight_kg,
             total_cbm=draft.cbm,
+            source_span=_find_aggregate_source_span(customer_message),
         )
 
     if explicit_weight is not None:
@@ -458,13 +515,29 @@ def _reconcile_cargo_item_quantities(
     piece_count: int,
     total_weight_kg: Decimal | None,
     total_cbm: Decimal | None,
+    source_span: str | None = None,
 ) -> list[ExtractedCargoItem]:
     if sum(item.quantity for item in cargo_items) == piece_count:
         return cargo_items
     if fallback_items and sum(item.quantity for item in fallback_items) == piece_count:
         return fallback_items
+    current_quantity = sum(item.quantity for item in cargo_items)
+    # A detailed row may describe only a subset of an explicitly declared
+    # shipment (for example, 36 cartons in total, of which 7 are long crates).
+    # Retain the detailed row and add an unresolved remainder rather than
+    # copying its dimensions/weight onto all 36 pieces.  The remainder is
+    # intentionally incomplete and therefore drives a fail-closed manual
+    # review in the Zone calculator.
+    if cargo_items and current_quantity < piece_count:
+        return [
+            *cargo_items,
+            _build_unresolved_cargo_item(
+                quantity=piece_count - current_quantity,
+                source_span=source_span,
+            ),
+        ]
     if len(cargo_items) != 1:
-        return []
+        return cargo_items
 
     item = cargo_items[0]
     updates: dict[str, Any] = {
@@ -797,6 +870,11 @@ def _sanitize_cargo_agent_data(data: dict[str, Any]) -> dict[str, Any]:
         "longest_side_cm": _coerce_optional_decimal(data.get("longest_side_cm")),
         "explicit_pallet_count": _coerce_optional_int(data.get("explicit_pallet_count")),
         "is_stackable": _coerce_optional_bool(data.get("is_stackable")),
+        "contained_customer_pieces": _coerce_optional_nonnegative_int(data.get("contained_customer_pieces")),
+        "stackability": _coerce_stackability(data.get("stackability")),
+        "max_stack_layers": _coerce_optional_int_at_least_two(data.get("max_stack_layers")),
+        "max_top_load_kg": _coerce_optional_decimal(data.get("max_top_load_kg")),
+        "floor_rotation_allowed": _coerce_optional_bool(data.get("floor_rotation_allowed")),
         "cargo_items": _sanitize_cargo_items(data.get("cargo_items")),
         "missing_fields": _coerce_string_list(data.get("missing_fields")),
         "confidence": _coerce_confidence(data.get("confidence")),
@@ -844,6 +922,13 @@ def _sanitize_cargo_items(value: Any) -> list[dict[str, Any]]:
                 "cbm": _coerce_optional_decimal(item.get("cbm")),
                 "total_weight_kg": _coerce_optional_decimal(item.get("total_weight_kg")),
                 "total_cbm": _coerce_optional_decimal(item.get("total_cbm")),
+                "contained_customer_pieces": _coerce_optional_nonnegative_int(
+                    item.get("contained_customer_pieces")
+                ),
+                "stackability": _coerce_stackability(item.get("stackability")),
+                "max_stack_layers": _coerce_optional_int_at_least_two(item.get("max_stack_layers")),
+                "max_top_load_kg": _coerce_optional_decimal(item.get("max_top_load_kg")),
+                "floor_rotation_allowed": _coerce_optional_bool(item.get("floor_rotation_allowed")),
                 "source_span": _none_if_placeholder(item.get("source_span")),
             }
         )
@@ -909,6 +994,51 @@ def _coerce_optional_int(value: Any) -> int | None:
     except Exception:
         return None
     return number if number >= 1 else None
+
+
+def _coerce_optional_nonnegative_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        number = int(Decimal(str(value)))
+    except Exception:
+        return None
+    return number if number >= 0 else None
+
+
+def _coerce_optional_int_at_least_two(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        number = int(Decimal(str(value)))
+    except Exception:
+        return None
+    return number if number >= 2 else None
+
+
+def _coerce_stackability(value: Any) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return "stackable" if value else "non_stackable"
+    normalized = str(value).strip().lower()
+    aliases = {
+        "stackable": "stackable",
+        "can_stack": "stackable",
+        "yes": "stackable",
+        "true": "stackable",
+        "可叠放": "stackable",
+        "non_stackable": "non_stackable",
+        "non-stackable": "non_stackable",
+        "cannot_stack": "non_stackable",
+        "no": "non_stackable",
+        "false": "non_stackable",
+        "不可叠放": "non_stackable",
+        "unknown": "unknown",
+        "不确定": "unknown",
+        "未知": "unknown",
+    }
+    return aliases.get(normalized)
 
 
 def _coerce_optional_decimal(value: Any) -> Decimal | None:
@@ -1040,13 +1170,66 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
         elif explicit_cbm is not None:
             explicit_weight = _find_any_weight(customer_message)
 
-    if explicit_piece_count is not None and explicit_piece_count >= piece_count:
-        cargo_items = _align_single_parsed_cargo_item_with_explicit_totals(
-            cargo_items,
-            explicit_piece_count=explicit_piece_count,
-            explicit_weight=None if per_piece_weight is not None else explicit_weight,
-            explicit_cbm=explicit_cbm,
+    subset_quantity = _find_detail_subset_quantity(customer_message)
+    subset_split = False
+    if (
+        explicit_piece_count is not None
+        and subset_quantity is not None
+        and subset_quantity < explicit_piece_count
+        and len(cargo_items) == 1
+        and piece_count <= explicit_piece_count
+        and cargo_items[0].quantity == piece_count
+    ):
+        # Text such as “36 boxes, of which 7 are long pieces, 273x100...”
+        # describes dimensions for the 7-piece subset, not all 36 pieces.
+        # Split the row before the aggregate remainder logic below.
+        item = cargo_items[0]
+        cargo_items[0] = item.model_copy(
+            update={
+                "quantity": subset_quantity,
+                "total_weight_kg": (
+                    _quantize(item.weight_kg * Decimal(subset_quantity), "0.1")
+                    if item.weight_kg is not None
+                    else None
+                ),
+                "total_cbm": (
+                    _quantize(item.cbm * Decimal(subset_quantity), "0.001")
+                    if item.cbm is not None
+                    else None
+                ),
+            }
         )
+        piece_count = subset_quantity
+        subset_split = True
+
+    if explicit_piece_count is not None and explicit_piece_count >= piece_count:
+        explicit_count_applies_to_detail = _explicit_count_applies_to_detailed_rows(customer_message)
+        if not cargo_items:
+            cargo_items = [
+                _build_aggregate_cargo_item(
+                    customer_message,
+                    piece_count=explicit_piece_count,
+                    total_cbm=explicit_cbm,
+                    total_weight_kg=explicit_weight,
+                )
+            ]
+        elif (explicit_piece_count == piece_count or explicit_count_applies_to_detail) and not subset_split:
+            cargo_items = _align_single_parsed_cargo_item_with_explicit_totals(
+                cargo_items,
+                explicit_piece_count=explicit_piece_count,
+                explicit_weight=None if per_piece_weight is not None else explicit_weight,
+                explicit_cbm=explicit_cbm,
+            )
+        elif explicit_piece_count > piece_count:
+            # Keep parsed handling-unit rows at their stated quantities.  The
+            # undeclared remainder is an aggregate row with no invented
+            # dimensions or unit weight and will be routed to manual review.
+            cargo_items.append(
+                _build_unresolved_cargo_item(
+                    quantity=explicit_piece_count - piece_count,
+                    source_span=_find_aggregate_source_span(customer_message),
+                )
+            )
         piece_count = explicit_piece_count
     elif len(cargo_items) == 1 and piece_count > 1 and explicit_weight is not None:
         cargo_items = _align_single_parsed_cargo_item_with_explicit_totals(
@@ -1148,6 +1331,61 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
     }
 
 
+def _explicit_count_applies_to_detailed_rows(customer_message: str) -> bool:
+    """Detect wording that explicitly makes dimensions/weight per unit.
+
+    A bare aggregate line such as ``36 boxes`` must not be copied onto a
+    separate 7-piece long-unit row.  Conversely, common freight notation such
+    as ``/箱``, ``单件``, ``each`` or a quantity and dimensions on the same
+    line clearly applies the declared count to that detailed row.
+    """
+
+    dimension_pattern = re.compile(
+        rf"{NUMBER_TOKEN_PATTERN}\s*(?:{DIMENSION_UNIT_PATTERN})?\s*(?:\*|x|×|by)\s*{NUMBER_TOKEN_PATTERN}",
+        re.IGNORECASE,
+    )
+    per_unit_pattern = re.compile(
+        r"(?:each|per\s*(?:carton|piece|pkg|unit|pallet)|每(?:件|箱|托|板)|单(?:件|箱|托|板)|/(?:件|箱|托|板))",
+        re.IGNORECASE,
+    )
+    labelled_dimension_pattern = re.compile(
+        r"(?:\b[lhw]\s*[:=]|\bl\s*/\s*w\s*/\s*h\b|尺寸|箱规|dimension)",
+        re.IGNORECASE,
+    )
+    dimension_lines = [
+        line.strip()
+        for line in customer_message.splitlines()
+        if dimension_pattern.search(line) or labelled_dimension_pattern.search(line)
+    ]
+    if not dimension_lines:
+        return False
+    return any(
+        (dimension_pattern.search(line) or labelled_dimension_pattern.search(line))
+        and (per_unit_pattern.search(line) or _find_explicit_piece_count(line) is not None)
+        for line in customer_message.splitlines()
+    ) or any(per_unit_pattern.search(line) for line in customer_message.splitlines())
+
+
+def _find_detail_subset_quantity(customer_message: str) -> int | None:
+    """Return an explicitly identified long/oversize subset quantity."""
+
+    patterns = (
+        r"(?:其中|其中有|其中为|含有|包括)\s*(\d+)\s*(?:个\s*)?(?:长件|超大件|大件|长箱|长货)",
+        r"(?:of\s+which|including|among(?:st)?|of)\s*(\d+)\s*(?:long|oversi(?:ze|zed)|large)\s*(?:pieces?|units?|cartons?|boxes?|crates?)",
+        r"(?:^|[\r\n,，;；])\s*(\d+)\s+(?:long|oversi(?:ze|zed)|large)\s+(?:pieces?|units?|cartons?|boxes?|crates?)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, customer_message, re.IGNORECASE)
+        if match:
+            try:
+                value = int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+            if value >= 1:
+                return value
+    return None
+
+
 def _apply_weight_components_to_cargo_items(
     cargo_items: list[ExtractedCargoItem],
     components: list[Decimal],
@@ -1217,12 +1455,39 @@ def _build_aggregate_cargo_item(
     )
 
 
+def _build_unresolved_cargo_item(
+    *,
+    quantity: int,
+    source_span: str | None,
+) -> ExtractedCargoItem:
+    """Retain a declared-but-undetailed remainder without fabricating values."""
+
+    return ExtractedCargoItem(
+        quantity=max(1, quantity),
+        length_cm=None,
+        width_cm=None,
+        height_cm=None,
+        weight_kg=None,
+        cbm=None,
+        total_weight_kg=None,
+        total_cbm=None,
+        source_span=source_span,
+    )
+
+
 def _find_aggregate_source_span(customer_message: str) -> str | None:
     candidates: list[tuple[int, str]] = []
     for line in customer_message.splitlines():
         cleaned = line.strip()
         if not cleaned or re.match(r"[a-zA-Z_][a-zA-Z0-9_]*\s*=", cleaned):
             continue
+        has_dimensions = bool(
+            re.search(
+                rf"{NUMBER_TOKEN_PATTERN}\s*(?:{DIMENSION_UNIT_PATTERN})?\s*(?:\*|x|×|by)\s*{NUMBER_TOKEN_PATTERN}",
+                cleaned,
+                re.IGNORECASE,
+            )
+        )
         score = sum(
             bool(re.search(pattern, cleaned, re.IGNORECASE))
             for pattern in (
@@ -1231,6 +1496,10 @@ def _find_aggregate_source_span(customer_message: str) -> str | None:
                 r"(?:kgs?|kg|lbs?|pounds?|gross\s*(?:weight|wt)|g\.?\s*w\.?|总重|重量|毛重)",
             )
         )
+        if score and not has_dimensions and re.search(PIECE_UNIT_PATTERN, cleaned, re.IGNORECASE):
+            # Prefer a standalone customer aggregate line over a detailed
+            # dimension row when retaining an unresolved remainder.
+            score += 2
         if score:
             candidates.append((score, cleaned[:240]))
     return max(candidates, key=lambda item: item[0])[1] if candidates else None

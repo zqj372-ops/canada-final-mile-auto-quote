@@ -303,11 +303,6 @@ export default function AIQuotePage() {
                     <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-800">
                       {result.customer_reply || "无客户回复"}
                     </p>
-                    {result.internal_note && (
-                      <p className="mt-3 text-sm font-medium text-slate-700">
-                        内部备注：{result.internal_note}
-                      </p>
-                    )}
                   </div>
                   {!result.manual_review_required && (
                     <button

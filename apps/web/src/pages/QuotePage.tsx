@@ -239,10 +239,10 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   const manualRequired = Boolean(result?.manual_review_required) || status === "manual_required";
   const riskMessages = useMemo(
     () =>
-      config && effectiveParsed
-        ? buildRiskMessages(config, effectiveParsed, result, manualRequired, aiResult)
+      effectiveParsed
+        ? buildRiskMessages(effectiveParsed, manualRequired, aiResult)
         : [],
-    [aiResult, config, effectiveParsed, result, manualRequired],
+    [aiResult, effectiveParsed, manualRequired],
   );
   const salesText = useMemo(
     () =>
@@ -705,13 +705,8 @@ function QuoteResultDialog({
   searchContext: QuoteSearchContext | null;
 }) {
   const [acknowledgedQuoteKey, setAcknowledgedQuoteKey] = useState<string | null>(null);
-  const ruralPostalPrefix = extractPostalPrefix(
-    result?.postal_prefix || result?.postal_code || parsed.address.postal_code,
-  );
-  const requiresRuralConfirmation = Boolean(
-    result?.risk_tags.includes("rural_fsa_secondary_confirmation") ||
-      (ruralPostalPrefix && ruralPostalPrefix[1] === "0"),
-  );
+  const ruralPostalPrefix = extractPostalPrefix(parsed.address.postal_code);
+  const requiresRuralConfirmation = Boolean(ruralPostalPrefix && ruralPostalPrefix[1] === "0");
   const confirmationKey =
     result?.quote_id ||
     [parsed.address.postal_code, parsed.address.city, parsed.address.address_line]
@@ -825,11 +820,10 @@ function QuoteResultDialog({
       </section>
       {showRuralConfirmation && (
         <RuralPostalConfirmationDialog
-          inputCity={parsed.address.city}
+          city={parsed.address.city}
           manualRequired={manualRequired}
-          postalCode={result?.postal_code || parsed.address.postal_code}
+          postalCode={parsed.address.postal_code}
           postalPrefix={ruralPostalPrefix}
-          systemCity={result?.preferred_city || result?.city || parsed.address.city}
           onAcknowledge={() => setAcknowledgedQuoteKey(confirmationKey)}
           onReturnToEdit={onClose}
         />
@@ -839,26 +833,20 @@ function QuoteResultDialog({
 }
 
 function RuralPostalConfirmationDialog({
-  inputCity,
+  city,
   manualRequired,
   onAcknowledge,
   onReturnToEdit,
   postalCode,
   postalPrefix,
-  systemCity,
 }: {
-  inputCity: string | null;
+  city: string | null;
   manualRequired: boolean;
   onAcknowledge: () => void;
   onReturnToEdit: () => void;
   postalCode: string | null;
   postalPrefix: string | null;
-  systemCity: string | null;
 }) {
-  const cityChanged = Boolean(
-    inputCity && systemCity && inputCity.trim().toLowerCase() !== systemCity.trim().toLowerCase(),
-  );
-
   return (
     <div className="rural-confirmation-backdrop" role="presentation">
       <section
@@ -915,15 +903,9 @@ function RuralPostalConfirmationDialog({
             <strong>{postalCode || "待确认"}</strong>
           </div>
           <div>
-            <span>系统城市</span>
-            <strong>{systemCity || "待确认"}</strong>
+            <span>询价城市</span>
+            <strong>{city || "待确认"}</strong>
           </div>
-          {cityChanged && (
-            <div className="rural-confirmation-city-change">
-              <span>原询价城市</span>
-              <strong>{inputCity}</strong>
-            </div>
-          )}
         </div>
 
         <div className="mt-4">
@@ -1662,18 +1644,19 @@ function extractPostalPrefix(value: string | null | undefined): string | null {
   return match?.[1] ?? null;
 }
 
+function formatQuoteAmount(value: string | number): string {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue.toFixed(2) : "待确认";
+}
+
 function buildRiskMessages(
-  config: QuoteWorkbenchConfig,
   parsed: ParsedQuoteInput,
-  result: ZoneQuoteResult | null,
   manualRequired: boolean,
   aiResult: AIAutoQuoteResponse | null,
 ): string[] {
   if (!aiResult) {
     return ["待提交给后台大模型解析；本地预览不再作为最终字段来源。"];
   }
-  const backendRisks =
-    result?.risk_tags.map((tag) => config.backend_risk_tag_labels[tag] || tag) ?? [];
   const manualRisk = manualRequired ? ["需要人工确认，不要直接发客户。"] : [];
   const aiMissingRisks =
     aiResult?.missing_fields.map((field) => `AI 解析缺少：${formatMissingField(field)}`) ?? [];
@@ -1682,7 +1665,6 @@ function buildRiskMessages(
   return Array.from(new Set([
     ...manualRisk,
     ...parsed.risk_hints,
-    ...backendRisks,
     ...aiMissingRisks,
     ...addressValidationRisks,
     ...searchRisks,
@@ -1707,12 +1689,14 @@ function buildSalesText(
     ? `${parsed.max_dimensions_cm.join(" × ")} cm`
     : "待确认";
   const totalPrice =
-    result?.total_price_usd && !result.manual_review_required
-      ? `${config.copy_template.currency_code} ${Number(result.total_price_usd).toFixed(2)}`
+    result?.total_price_usd !== null &&
+    result?.total_price_usd !== undefined &&
+    result.total_price_usd !== "" &&
+    !result.manual_review_required
+      ? `${config.copy_template.currency_code} ${formatQuoteAmount(result.total_price_usd)}`
       : config.copy_template.manual_price_text;
-  const ruralConfirmationLines = result?.risk_tags.includes(
-    "rural_fsa_secondary_confirmation",
-  )
+  const ruralPrefix = extractPostalPrefix(parsed.address.postal_code);
+  const ruralConfirmationLines = ruralPrefix && ruralPrefix[1] === "0"
     ? ["特别提醒：该地址为乡村邮编，完整地址、卡车准入及可能附加费需二次确认。"]
     : [];
 
@@ -1826,8 +1810,7 @@ function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoIt
   if (!Array.isArray(extraction.cargo_items)) {
     return [];
   }
-  return extraction.cargo_items
-    .map((item, index) => {
+  return extraction.cargo_items.flatMap((item, index): ParsedCargoItem[] => {
       const length = toNumber(item.length_cm);
       const width = toNumber(item.width_cm);
       const height = toNumber(item.height_cm);
@@ -1842,10 +1825,17 @@ function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoIt
           : totalCbm === null
             ? null
             : totalCbm / quantity);
-      if (!hasDimensions && weight === null && cbm === null && totalWeight === null && totalCbm === null) {
-        return null;
+      if (
+        !hasDimensions
+        && weight === null
+        && cbm === null
+        && totalWeight === null
+        && totalCbm === null
+        && !item.source_span
+      ) {
+        return [];
       }
-      return {
+      const normalized: ParsedCargoItem = {
         id: index + 1,
         quantity,
         length_cm: length,
@@ -1855,10 +1845,15 @@ function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoIt
         cbm,
         total_weight_kg: totalWeight ?? (weight === null ? null : weight * quantity),
         total_cbm: totalCbm ?? (cbm === null ? null : cbm * quantity),
+        contained_customer_pieces: item.contained_customer_pieces ?? null,
+        stackability: item.stackability ?? null,
+        max_stack_layers: item.max_stack_layers ?? null,
+        max_top_load_kg: toNumber(item.max_top_load_kg),
+        floor_rotation_allowed: item.floor_rotation_allowed ?? null,
         source_span: item.source_span,
       };
-    })
-    .filter((item): item is ParsedCargoItem => item !== null);
+      return [normalized];
+    });
 }
 
 function hasCargoDimensions(
