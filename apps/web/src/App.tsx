@@ -13,7 +13,6 @@ import {
 } from "./api/client";
 import AccountMenu from "./components/AccountMenu";
 import LogoutConfirmationDialog from "./components/LogoutConfirmationDialog";
-const AIQuotePage = lazy(() => import("./pages/AIQuotePage"));
 const AISettingsPage = lazy(() => import("./pages/AISettingsPage"));
 const CitySettingsPage = lazy(() => import("./pages/CitySettingsPage"));
 const EmailSettingsPage = lazy(() => import("./pages/EmailSettingsPage"));
@@ -28,7 +27,6 @@ const UserSettingsPage = lazy(() => import("./pages/UserSettingsPage"));
 type RoutePath =
   | "/quote"
   | "/admin"
-  | "/ai-quote"
   | "/ops"
   | "/manual-tasks"
   | "/hermes-diagnostics"
@@ -81,7 +79,6 @@ const adminRoutes: Array<{
   adminOnly?: boolean;
 }> = [
   { path: "/admin", label: "运营控制台", description: "总览", group: "overview", icon: "dashboard" },
-  { path: "/ai-quote", label: "AI 报价", description: "调试", group: "core", icon: "bot" },
   { path: "/quote", label: "销售前台", description: "报价", group: "core", icon: "truck" },
   { path: "/ops", label: "处理工作台", description: "复核/诊断/学习", group: "manual", icon: "user" },
   { path: "/settings/quote", label: "报价规则", description: "前台", group: "pricing", icon: "file" },
@@ -162,9 +159,6 @@ export default function App() {
   const page = useMemo(() => {
     if (path === "/admin") {
       return <AdminHomePage navigate={navigate} />;
-    }
-    if (path === "/ai-quote") {
-      return <AIQuotePage />;
     }
     if (path === "/ops") {
       return <OperationsWorkbenchPage initialTab="manual" />;
@@ -530,9 +524,6 @@ function normalizePath(pathname: string): RoutePath {
   }
   if (strippedPath === "/admin") {
     return "/admin";
-  }
-  if (strippedPath === "/ai-quote") {
-    return "/ai-quote";
   }
   if (strippedPath === "/audit") {
     return "/audit";

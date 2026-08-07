@@ -1149,8 +1149,6 @@ function buildRiskHints({
   if (!cargoItems.some(hasCompleteDimensions)) {
     risks.push("已识别汇总件数、体积和重量，但原文未提供单件尺寸。");
   }
-  risks.push("请确认是否有叉车 / dock / 尾板需求。");
-  risks.push("请确认派送地址是否商业地址；如为住宅，可能产生住宅、尾板、预约等附加费。");
 
   if (address.city && !isCoreCity(address.city, config.risks.core_city_names)) {
     risks.push("目的地可能属于偏远地区 / 非核心城市派送，需要匹配邮编分区或人工复核。");
