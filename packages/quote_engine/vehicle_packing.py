@@ -96,6 +96,116 @@ class _SearchOutcome:
     nodes: int
 
 
+@dataclass(frozen=True)
+class VehicleCapacityAssessment:
+    """Conservative capacity reference (design v2 section 5).
+
+    The result is pure audit/risk material.  It never gates automatic
+    quoting: each candidate records which conservative checks failed, and the
+    risk tags are soft risks.
+    """
+
+    candidates: tuple[dict[str, object], ...]
+    risk_tags: tuple[str, ...]
+
+
+def assess_vehicle_capacity(
+    handling_units: Sequence[HandlingUnitInput | Mapping[str, object]],
+    *,
+    rule: OversizePalletRuleConfig | Mapping[str, object] | None = None,
+    total_weight_kg: Decimal | int | float | str | None = None,
+    total_volume_cbm: Decimal | int | float | str | None = None,
+    longest_side_cm: Decimal | int | float | str | None = None,
+) -> VehicleCapacityAssessment:
+    """Simple per-profile capacity comparison without any packing search.
+
+    For every configured vehicle profile:
+
+    1. every handling unit must fit in at least one floor orientation
+       (90-degree rotation allowed) within the vehicle floor and height;
+    2. total weight must not exceed the profile payload;
+    3. total volume must not exceed the profile volume.
+
+    Failing checks produce risk tags only.  Loading/splitting decisions stay
+    with operations at the manual stage (design v2 5.2).
+    """
+
+    oversize_rule = _coerce_rule(rule)
+    weight = _coerce_decimal(total_weight_kg)
+    volume = _coerce_decimal(total_volume_cbm)
+    longest = _coerce_decimal(longest_side_cm)
+    rows = []
+    try:
+        rows = _coerce_units(handling_units)
+    except ValueError:
+        rows = []
+
+    candidates: list[dict[str, object]] = []
+    risk_tags: list[str] = []
+    for profile in oversize_rule.vehicle_profiles:
+        dimension_exceeded = False
+        if rows:
+            for unit in rows:
+                if not _unit_fits_vehicle(unit, profile):
+                    dimension_exceeded = True
+                    break
+        elif longest is not None:
+            dimension_exceeded = not (
+                _ZERO < longest <= profile.length_cm and _ZERO < longest <= profile.height_cm
+            )
+        payload_exceeded = weight is not None and weight > profile.payload_kg
+        volume_exceeded = volume is not None and volume > profile.volume_cbm
+        fits = not (dimension_exceeded or payload_exceeded or volume_exceeded)
+        if dimension_exceeded and "oversize_vehicle_dimension_exceeded" not in risk_tags:
+            risk_tags.append("oversize_vehicle_dimension_exceeded")
+        if payload_exceeded and "oversize_vehicle_payload_exceeded" not in risk_tags:
+            risk_tags.append("oversize_vehicle_payload_exceeded")
+        if volume_exceeded and "oversize_vehicle_volume_exceeded" not in risk_tags:
+            risk_tags.append("oversize_vehicle_volume_exceeded")
+        candidates.append(
+            {
+                "code": profile.code,
+                "label": profile.label,
+                "length_cm": profile.length_cm,
+                "width_cm": profile.width_cm,
+                "height_cm": profile.height_cm,
+                "volume_cbm": profile.volume_cbm,
+                "payload_kg": profile.payload_kg,
+                "dimension_exceeded": dimension_exceeded,
+                "payload_exceeded": payload_exceeded,
+                "volume_exceeded": volume_exceeded,
+                "fits": fits,
+            }
+        )
+    return VehicleCapacityAssessment(
+        candidates=tuple(candidates),
+        risk_tags=tuple(risk_tags),
+    )
+
+
+def _unit_fits_vehicle(unit: HandlingUnitInput, profile: VehicleProfile) -> bool:
+    """True when the unit fits in any floor orientation including 90 degrees."""
+
+    height = unit.height_cm
+    if height > profile.height_cm:
+        return False
+    length = unit.length_cm
+    width = unit.width_cm
+    if length <= profile.length_cm and width <= profile.width_cm:
+        return True
+    return width <= profile.length_cm and length <= profile.width_cm
+
+
+def _coerce_decimal(value: Decimal | int | float | str | None) -> Decimal | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        decimal_value = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    return decimal_value if decimal_value.is_finite() else None
+
+
 class _NodeLimitReached(RuntimeError):
     pass
 
@@ -234,7 +344,7 @@ def pack_vehicle(
             reasons=("vehicle_floor_area_exceeded",),
         )
 
-    limit = oversize_rule.packing_node_limit
+    limit = getattr(oversize_rule, "packing_node_limit", 10000)
     search = _search_layout(columns, profile, limit)
     if search.status is PackingStatus.FIT and search.layout is not None:
         placement_rows = _position_layout(search.layout, profile)
@@ -366,7 +476,7 @@ def select_vehicle(
     # candidate has been exhaustively proven impossible.  We try combinations
     # of configured profiles, allowing repeated vehicles, and keep at most the
     # configured maximum vehicle count.
-    for vehicle_count in range(2, oversize_rule.max_auto_vehicles + 1):
+    for vehicle_count in range(2, getattr(oversize_rule, "max_auto_vehicles", 3) + 1):
         plans: list[VehiclePackingResult] = []
         for profile_combo in combinations_with_replacement(profiles, vehicle_count):
             plan = _pack_multi_vehicle(
@@ -584,7 +694,7 @@ def _pack_multi_vehicle(
     # A bounded backtracking assignment calls pack_vehicle for each complete
     # candidate.  The package is deliberately conservative: if there is no
     # proof within the global node budget, return INCONCLUSIVE.
-    node_limit = rule.packing_node_limit
+    node_limit = getattr(rule, "packing_node_limit", 10000)
     nodes = 0
 
     def recurse(index: int) -> tuple[VehiclePackingResult, ...] | None:
@@ -897,7 +1007,7 @@ def _homogeneous_floor_capacity(
         layers = min(
             unit.max_stack_layers,
             int(profile.height_cm // unit.height_cm),
-            int(rule.high_board_height_cm // unit.height_cm),
+            int(getattr(rule, "high_board_height_cm", 210) // unit.height_cm),
         )
         while layers > 1 and (layers - 1) * unit.unit_weight_kg > unit.max_top_load_kg:
             layers -= 1
@@ -1203,7 +1313,7 @@ def _build_columns(
                 above_weight = exemplar.unit_weight_kg * (layers - 1)
                 if (
                     stack_height <= profile.height_cm
-                    and stack_height <= rule.high_board_height_cm
+                    and stack_height <= getattr(rule, "high_board_height_cm", 210)
                     and exemplar.max_top_load_kg is not None
                     and above_weight <= exemplar.max_top_load_kg
                 ):
@@ -1324,6 +1434,10 @@ def _coerce_rule(
         return default_oversize_pallet_rule()
     if isinstance(rule, OversizePalletRuleConfig):
         return rule
+    if isinstance(rule, Mapping) and rule.get("invalid_reason") is not None:
+        # Published invalid snapshot markers must fail closed, never silently
+        # fall back to v2 defaults (see pallet_calculator._coerce_rule).
+        raise ValueError("published_snapshot_invalid")
     return OversizePalletRuleConfig.model_validate(rule)
 
 

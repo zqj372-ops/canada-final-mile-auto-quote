@@ -732,6 +732,8 @@ def apply_deterministic_extraction(draft: AIExtractedQuoteDraft, customer_messag
     packaging = _infer_packaging_type(customer_message)
     if packaging and not draft.packaging_type:
         draft.packaging_type = packaging
+    if draft.is_stackable is None:
+        draft.is_stackable = _infer_stackable(customer_message)
     explicit_pallet_count = _find_explicit_pallet_count(customer_message)
     if explicit_pallet_count is not None:
         draft.explicit_pallet_count = explicit_pallet_count
@@ -2354,6 +2356,22 @@ def _infer_packaging_type(customer_message: str) -> str | None:
     if re.search(r"纸箱|carton|ctn|box|boxes|箱", lowered):
         return "carton"
     return "unknown"
+
+
+def _infer_stackable(customer_message: str) -> bool | None:
+    """Infer stackability from explicit wording only (design v2 2.8).
+
+    Only clear statements decide; anything ambiguous stays ``None`` so the
+    flexible-package deal falls back to manual review instead of silently
+    guessing a stack state.
+    """
+
+    lowered = customer_message.lower()
+    if re.search(r"不可堆叠|不能叠|不能堆|不宜叠|non[- ]?stackable|not\s*stackable|do\s*not\s*stack", lowered):
+        return False
+    if re.search(r"可堆叠|可叠放|可以叠|堆叠|stackable|can\s*be\s*stacked|stack\s*it", lowered):
+        return True
+    return None
 
 
 def _normalize_text(value: str) -> str:

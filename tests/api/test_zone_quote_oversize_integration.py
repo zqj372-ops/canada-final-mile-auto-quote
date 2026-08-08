@@ -106,10 +106,10 @@ def _published_and_draft_rules(client: TestClient) -> tuple[dict[str, object], d
     session = next(generator)
     try:
         published = default_oversize_pallet_rule().model_copy(
-            update={"weight_basis_kg": Decimal("1000")}
+            update={"weight_kg_per_pallet": Decimal("1000")}
         )
         draft = default_oversize_pallet_rule().model_copy(
-            update={"weight_basis_kg": Decimal("400")}
+            update={"weight_kg_per_pallet": Decimal("400")}
         )
         session.add(
             QuoteRuleConfig(
@@ -159,7 +159,7 @@ def test_zone_uses_published_rule_not_draft_and_audits_full_snapshot(client: Tes
     assert trace["rule_snapshot"] != draft
     assert trace["handling_units"][0]["length_cm"] == "100"
     assert trace["calculator"]["totals"]["weight_pallets"] == 1
-    assert trace["vehicle"]["status"] == "FIT"
+    assert trace["vehicle"]["status"] == "reference_only"
 
 
 def test_invalid_published_rule_fails_closed_without_default_fallback(client: TestClient) -> None:
@@ -168,7 +168,7 @@ def test_invalid_published_rule_fails_closed_without_default_fallback(client: Te
             OversizePalletRuleVersion(
                 rule_id="BROKEN_PUBLISHED_RULE",
                 version=9,
-                config_json={"rule_id": "BROKEN_PUBLISHED_RULE", "vehicle_profiles": []},
+                config_json={"rule_id": "", "volume_cbm_per_pallet": 0},
                 published_by="test",
                 status="published",
             )
@@ -322,13 +322,13 @@ def test_oversize_manual_keeps_candidate_internal_but_blocks_learning_and_reuse(
     audit = client.get(f"/quotes/audit/{quote_id}").json()
     result = audit["result_json"]
     assert result["billing_pallets"] == 3
-    assert "handling_unit_weight_over_auto_limit" in result["risk_tags"]
+    assert "unit_weight_over_mechanical_limit" in result["risk_tags"]
     assert "oversize_rule_id" in result["internal_trace"]
 
     tasks = client.get("/quotes/manual-tasks").json()
     assert len(tasks) == 1
     assert tasks[0]["result_json"]["billing_pallets"] == 3
-    assert "handling_unit_weight_over_auto_limit" in tasks[0]["risk_tags"]
+    assert "unit_weight_over_mechanical_limit" in tasks[0]["risk_tags"]
 
     resolved = client.patch(
         f"/quotes/manual-tasks/{tasks[0]['id']}",

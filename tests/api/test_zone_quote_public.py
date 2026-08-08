@@ -45,7 +45,8 @@ def test_zone_http_success_returns_public_allowlist_only() -> None:
         "public_flags",
     }
     assert body["billing_pallets"] == 3
-    assert body["total_price_usd"] == "237.00"
+    # v2 has no oversize surcharge: base 120 x 1.35 fuel.
+    assert body["total_price_usd"] == "162.00"
     assert body["manual_review_required"] is False
     for hidden_field in (
         "pallet_breakdown",

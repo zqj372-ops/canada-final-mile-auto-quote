@@ -293,14 +293,16 @@ def test_ai_provider_failure_uses_complete_deterministic_fallback(monkeypatch: p
     assert response.status_code == 200
     body = response.json()
     assert body["missing_fields"] == []
-    assert body["manual_review_required"] is True
+    # Deterministic aggregate fallback now quotes automatically with soft
+    # risks (design v2 6.1.2); no per-row dimensions are required.
+    assert body["manual_review_required"] is False
     assert body["extraction"]["city"] == "Concord"
     assert body["extraction"]["address_type"] == "commercial"
-    assert body["quote_result"]["billing_pallets"] is None
-    assert body["quote_result"]["total_price_usd"] is None
+    assert body["quote_result"]["billing_pallets"] == 3  # max(ceil(4.2/2), ceil(850/500))
+    assert body["quote_result"]["total_price_usd"] is not None
     audit = _audit_result(client, body["quote_result"]["quote_id"])
-    assert audit["source_type"] == "manual_required"
-    assert "handling_unit_dimensions_missing" in audit["risk_tags"]
+    assert audit["source_type"] == "zone_matrix"
+    assert "aggregate_based_quote" in audit["risk_tags"]
     assert body["address_validation"]["status"] == "verified"
     assert body["address_validation"]["preferred_city"] == "Concord"
     assert body["address_validation"]["province"] == "ON"
@@ -440,13 +442,13 @@ def test_ai_aggregate_manual_required_still_returns_billing_pallet_estimate(monk
     monkeypatch.setattr(
         "apps.api.services.ai_quote_service.extract_quote_draft",
         lambda _message, _client: AIExtractedQuoteDraft(
-            address_line="1055 Flagship Way, unit A",
-            postal_code="L1X 0P2",
-            city="Pickering",
+            address_line="8888 Keele St",
+            postal_code="L4K 2N2",
+            city="Concord",
             province="ON",
-            cbm=Decimal("11.7"),
-            weight_kg=Decimal("1367"),
-            piece_count=99,
+            cbm=Decimal("4.2"),
+            weight_kg=Decimal("850"),
+            piece_count=10,
             packaging_type="carton",
             longest_side_cm=None,
             explicit_pallet_count=None,
@@ -462,12 +464,14 @@ def test_ai_aggregate_manual_required_still_returns_billing_pallet_estimate(monk
     assert response.status_code == 200
     body = response.json()
     assert body["missing_fields"] == []
-    assert body["quote_result"]["billing_pallets"] is None
-    assert body["quote_result"]["total_price_usd"] is None
+    # Aggregate quotes run the whole-order formula automatically (design v2
+    # 6.1.2) and still surface the pallet estimate in the public result.
+    assert body["quote_result"]["billing_pallets"] == 3  # max(ceil(4.2/2), ceil(850/500))
+    assert body["quote_result"]["total_price_usd"] is not None
     audit = _audit_result(client, body["quote_result"]["quote_id"])
-    assert audit["source_type"] == "manual_required"
-    assert "handling_units_missing" in audit["risk_tags"]
-    assert audit["internal_trace"]["calculator"]["reconciliation"]["declared_total_volume_cbm"] == "11.7"
+    assert audit["source_type"] == "zone_matrix"
+    assert "aggregate_based_quote" in audit["risk_tags"]
+    assert audit["internal_trace"]["calculator"]["reconciliation"]["declared_total_volume_cbm"] == "4.2"
 
 
 def test_ai_auto_quote_manual_required_creates_manual_task(monkeypatch: pytest.MonkeyPatch) -> None:

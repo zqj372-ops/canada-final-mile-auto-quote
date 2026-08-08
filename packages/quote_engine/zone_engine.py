@@ -80,6 +80,9 @@ class ZoneQuoteEngine:
             declared_total_weight_kg=request.weight_kg,
             declared_total_volume_cbm=request.cbm,
             explicit_pallet_count=request.explicit_pallet_count,
+            is_stackable=request.is_stackable,
+            longest_side_cm=request.longest_side_cm,
+            packaging_type=request.packaging_type,
         )
         pallet_trace = _build_pallet_trace(request, pallet_result, self)
         postal_prefix = extract_fsa(request.postal_code)
@@ -216,6 +219,56 @@ class ZoneQuoteEngine:
                 zone_decision=zone_decision,
             )
 
+        # Flexible-package flat rate replaces per-pallet Zone pricing
+        # entirely (design v2 2.8): fixed container rate, no matrix lookup.
+        if pallet_result.pricing_mode == "flat_rate":
+            flat_rate = pallet_result.flat_rate_usd
+            pallet_trace["pricing"] = _json_safe(
+                {
+                    "pricing_mode": "flat_rate",
+                    "flat_rate_usd": flat_rate,
+                }
+            )
+            risk_tags = list(zone_decision.risk_tags)
+            risk_tags.extend(_request_risk_tags(request))
+            risk_tags.extend(pallet_result.risk_tags)
+            risk_tags.append("flexible_package_deal")
+            result = ZoneQuoteResult(
+                source_type=ZoneQuoteSourceType.ZONE_MATRIX,
+                confidence=zone_decision.confidence,
+                postal_code=request.postal_code,
+                preferred_city=preferred_city,
+                postal_prefix=postal_prefix,
+                city=city,
+                province=province,
+                origin=zone_decision.origin,
+                zone=zone_decision.zone,
+                billing_pallets=pallet_result.billing_pallets,
+                pallet_breakdown=pallet_result.components,
+                base_price_usd=flat_rate,
+                fuel_usd=Decimal("0"),
+                accessorials={},
+                total_price_usd=flat_rate,
+                risk_tags=sorted(set(risk_tags)),
+                manual_review_required=False,
+                matched_rule=(
+                    "flexible_package_deal + "
+                    f"{zone_decision.origin} + {province} + {city} + {postal_prefix} "
+                    f"+ Zone {zone_decision.zone}"
+                ),
+                matched_by=zone_decision.matched_by,
+                candidate_count=zone_decision.candidate_count,
+                match_trace=zone_decision.match_trace,
+                internal_note="编织袋/柔性包装包干价：$580/柜，不按托数计费。AI may explain but must not change price.",
+                internal_trace=pallet_trace,
+                oversize_rule_id=self.oversize_rule_id,
+                oversize_rule_version=self.oversize_rule_version,
+                oversize_rule_snapshot=self.oversize_rule_snapshot,
+                oversize_accessorials={},
+            )
+            result.sales_note = build_zone_sales_note(request, result)
+            return result
+
         if not self.pricing_config.zone_price_enabled_for(zone_decision.origin, zone_decision.zone):
             return self._manual(
                 request,
@@ -296,6 +349,7 @@ class ZoneQuoteEngine:
         )
         risk_tags = list(zone_decision.risk_tags)
         risk_tags.extend(_request_risk_tags(request))
+        risk_tags.extend(pallet_result.risk_tags)
         matched_rule = (
             f"zone_matrix + {zone_decision.origin} + {province} + {city} + {postal_prefix} "
             f"+ Zone {zone_decision.zone} + {pallet_result.billing_pallets} pallets"

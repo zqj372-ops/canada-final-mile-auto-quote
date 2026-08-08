@@ -403,8 +403,13 @@ def _has_oversize_manual_risk(result: ZoneQuoteResult) -> bool:
             or tag.startswith("handling_unit_")
             or tag.startswith("oversize_vehicle_")
             or tag.startswith("oversize_rule_")
+            or tag.startswith("oversize_floor_")
+            or tag.startswith("unit_weight_over_")
             or tag.startswith("declared_")
             or tag.startswith("explicit_pallet_count")
+            or tag.startswith("billing_pallets_")
+            or tag.startswith("aggregate_info_")
+            or tag.startswith("flexible_package_deal_")
             or (
                 tag.startswith("customer_piece_count_")
                 and tag != "customer_piece_count_check_skipped"

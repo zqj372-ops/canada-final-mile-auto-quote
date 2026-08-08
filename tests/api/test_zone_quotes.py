@@ -1091,11 +1091,15 @@ def test_suspicious_long_piece_count_requires_manual_before_price_lookup() -> No
     )
 
     body = response.json()
-    assert body["source_type"] == "manual_required"
-    assert body["manual_review_required"] is True
-    assert body["billing_pallets"] is None
+    # Design v2 6.1.2: aggregate orders quote automatically with soft risks;
+    # an unconfirmed long-piece count no longer forces manual review.
+    assert body["source_type"] == "zone_matrix"
+    assert body["manual_review_required"] is False
+    assert body["billing_pallets"] == 3  # max(ceil(1.62/2), ceil(1340/500))
+    assert body["base_price_usd"] == "180.00"
     audit = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
-    assert "handling_units_missing" in audit["risk_tags"]
+    assert "aggregate_based_quote" in audit["risk_tags"]
+    assert "long_piece_count_unconfirmed" in audit["risk_tags"]
     assert audit["internal_trace"]["calculator"]["reconciliation"]["declared_customer_piece_count"] == 2250
 
 
@@ -1113,7 +1117,9 @@ def test_missing_zone_returns_manual_required() -> None:
     assert body["billing_pallets"] is None
     audit = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
     assert audit["billing_pallets"] == 3
-    assert audit["pallet_breakdown"]["total_size_pallets"] == 3
+    # Sub-pallet cartons consolidate into the volume branch (design v2 2.3).
+    assert audit["pallet_breakdown"]["position_pallets"] == 0
+    assert audit["pallet_breakdown"]["volume_pallets"] == 3
     assert audit["pallet_breakdown"]["weight_pallets"] == 2
     assert body["base_price_usd"] is None
 
@@ -1769,22 +1775,22 @@ def test_regina_s4s_uses_corrected_calgary_zone_5() -> None:
             postal_code="S4S 0A2",
             city="Regina",
             province="SK",
-            cbm=1.5,
-            weight_kg=500,
-            piece_count=2,
+            cbm=9.0,
+            weight_kg=7500,
+            piece_count=30,
             packaging_type="wooden_crate",
-            longest_side_cm=400,
+            longest_side_cm=120,
             explicit_pallet_count=15,
             requires_appointment=False,
             handling_units=[
                 {
-                    "quantity": 1,
+                    "quantity": 15,
                     "packaging_type": "wooden_crate",
                     "length_cm": 120,
                     "width_cm": 100,
-                    "height_cm": "124.6111111",
+                    "height_cm": "50",
                     "unit_weight_kg": 500,
-                    "contained_customer_pieces": 2,
+                    "contained_customer_pieces": 30,
                 }
             ],
         ),
@@ -1945,6 +1951,17 @@ def test_nanaimo_v9s_does_not_treat_fsa_character_distance_as_geography() -> Non
             packaging_type="carton",
             longest_side_cm=100,
             requires_appointment=False,
+            handling_units=[
+                {
+                    "quantity": 6,
+                    "packaging_type": "carton",
+                    "length_cm": 120,
+                    "width_cm": 100,
+                    "height_cm": 120,
+                    "unit_weight_kg": "299.6666667",
+                    "contained_customer_pieces": 33,
+                }
+            ],
         ),
     )
 

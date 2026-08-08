@@ -112,15 +112,17 @@ def test_zone_engine_uses_handling_units_and_keeps_oversize_trace_private() -> N
     assert result.source_type is ZoneQuoteSourceType.ZONE_MATRIX
     assert not result.manual_review_required
     assert result.billing_pallets == 3
-    assert result.accessorials["oversize_heavy_fee_usd"] == Decimal("75.00")
-    assert result.total_price_usd == Decimal("210.00")
+    # v2 has no oversize surcharges: oversized/heavy freight enters the table
+    # price through pallet count (design v2 4.4).
+    assert result.accessorials == {}
+    assert result.total_price_usd == Decimal("135.00")
     assert result.internal_trace["oversize_rule_version"] == "7"
     assert result.internal_trace["calculator"]["billing_pallets"] == 3
-    assert result.internal_trace["vehicle"]["status"] == "FIT"
+    assert result.internal_trace["vehicle"]["status"] == "reference_only"
 
     public = result.to_public()
     assert public.billing_pallets == 3
-    assert public.total_price_usd == Decimal("210.00")
+    assert public.total_price_usd == Decimal("135.00")
     assert set(public.model_dump()) == {
         "quote_id",
         "billing_pallets",
@@ -134,10 +136,26 @@ def test_zone_engine_uses_handling_units_and_keeps_oversize_trace_private() -> N
     assert "oversize_heavy_fee_usd" not in public.model_dump()
 
 
-def test_missing_handling_units_is_manual_and_public_hides_candidate_pallets() -> None:
+def test_missing_handling_units_uses_aggregate_fallback() -> None:
     request = _request(handling_units=[])
-    # Keep aggregate values populated to prove the old ceil(CBM / 2) fallback is gone.
     result = ZoneQuoteEngine(_Provider()).quote(request)
+
+    assert not result.manual_review_required
+    assert result.source_type is ZoneQuoteSourceType.ZONE_MATRIX
+    assert result.billing_pallets == 2  # max(ceil(2.6/2), ceil(900/500))
+    assert "aggregate_based_quote" in result.risk_tags
+    assert result.internal_trace["calculator"]["billing_pallets"] == 2
+
+    public = result.to_public()
+    assert not public.manual_review_required
+    assert public.billing_pallets == 2
+    assert public.total_price_usd == Decimal("135.00")
+
+
+def test_missing_handling_units_with_aggregate_disabled_is_manual() -> None:
+    rule = default_oversize_pallet_rule().model_copy(update={"aggregate_quote_enabled": False})
+    request = _request(handling_units=[])
+    result = ZoneQuoteEngine(_Provider(), oversize_rule=rule).quote(request)
 
     assert result.manual_review_required
     assert result.source_type is ZoneQuoteSourceType.MANUAL_REQUIRED
@@ -189,9 +207,42 @@ def test_oversize_manual_keeps_internal_candidate_but_public_hides_it() -> None:
 
     assert result.manual_review_required
     assert result.billing_pallets == 3
-    assert "handling_unit_weight_over_auto_limit" in result.risk_tags
+    assert "unit_weight_over_mechanical_limit" in result.risk_tags
     assert result.pallet_breakdown["weight_pallets"] == 3
     assert result.to_public().billing_pallets is None
+
+
+def test_flexible_package_deal_prices_flat_rate_not_zone_matrix() -> None:
+    request = _request(
+        packaging_type="woven_bag",
+        cbm=Decimal("15.2"),
+        weight_kg=Decimal("1900"),
+        piece_count=76,
+        is_stackable=True,
+        handling_units=[
+            {
+                "quantity": 76,
+                "packaging_type": "woven_bag",
+                "length_cm": Decimal("100"),
+                "width_cm": Decimal("50"),
+                "height_cm": Decimal("40"),
+                "unit_weight_kg": Decimal("25"),
+                "contained_customer_pieces": 76,
+                "stackability": "stackable",
+                "max_stack_layers": 4,
+                "max_top_load_kg": Decimal("100"),
+            }
+        ],
+    )
+    result = ZoneQuoteEngine(_Provider()).quote(request)
+
+    assert not result.manual_review_required
+    assert result.total_price_usd == Decimal("580.00")
+    assert result.base_price_usd == Decimal("580.00")
+    assert result.fuel_usd == Decimal("0")
+    assert result.accessorials == {}
+    assert "flexible_package_deal" in result.risk_tags
+    assert result.internal_trace["pricing"]["pricing_mode"] == "flat_rate"
 
 
 def test_postal_prefix_manual_keeps_internal_candidate(monkeypatch: pytest.MonkeyPatch) -> None:

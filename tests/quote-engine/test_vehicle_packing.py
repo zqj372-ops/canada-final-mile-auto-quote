@@ -189,7 +189,9 @@ def test_stack_height_uses_configured_high_board_limit_not_a_hardcoded_210_cm() 
 
 
 def test_invalid_rule_fails_closed_with_stable_reason_code() -> None:
-    invalid_rule = {"packing_node_limit": 0}
+    # Legacy v1-only keys are ignored under the v2 lenient model; a rule that
+    # violates a real v2 constraint still fails closed.
+    invalid_rule = {"volume_cbm_per_pallet": 0}
 
     result = pack_vehicle([unit("121.92", "101.6")], profile("26_non_cdl"), rule=invalid_rule)
     selected = select_vehicle([unit("121.92", "101.6")], rule=invalid_rule)

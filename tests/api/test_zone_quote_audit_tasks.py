@@ -405,7 +405,8 @@ def test_zone_gap_creates_hermes_diagnostic_without_changing_quote() -> None:
     assert body["zone"] is None
     assert body["billing_pallets"] is None
     audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
-    assert audit_result["billing_pallets"] == 1
+    # 120x100x165cm unit is a long piece (>120cm) -> 2 pallets.
+    assert audit_result["billing_pallets"] == 2
     assert body["total_price_usd"] is None
 
     diagnostics = client.get(f"/quotes/hermes-diagnostics?quote_id={body['quote_id']}").json()

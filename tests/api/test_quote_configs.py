@@ -597,7 +597,7 @@ def test_admin_can_manage_oversize_pallet_rule_versions(monkeypatch: pytest.Monk
         headers={"X-API-Key": ADMIN_KEY},
     )
     draft = initial.json()["draft"]
-    draft["medium_oversize_surcharge"] = "77"
+    draft["volume_cbm_per_pallet"] = "3"
     saved = client.put(
         "/quote-configs/oversize-pallet-rule/draft",
         json=draft,
@@ -623,7 +623,7 @@ def test_admin_can_manage_oversize_pallet_rule_versions(monkeypatch: pytest.Monk
     assert validated.json() == {"valid": True, "errors": []}
     assert published.status_code == 200
     assert published.json()["published_version"] == 1
-    assert read_back.json()["published"]["medium_oversize_surcharge"] == "77"
+    assert read_back.json()["published"]["volume_cbm_per_pallet"] == "3"
 
 
 def test_sales_cannot_manage_oversize_pallet_rule(monkeypatch: pytest.MonkeyPatch) -> None:

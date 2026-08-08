@@ -42,7 +42,7 @@ def test_missing_records_use_default_rule_and_zero_published_version() -> None:
 def test_draft_validation_publish_and_immutable_snapshot_readback() -> None:
     session = make_session()
     repository = OversizePalletRuleRepository(session)
-    draft = default_oversize_pallet_rule().model_copy(update={"medium_oversize_surcharge": Decimal("77")})
+    draft = default_oversize_pallet_rule().model_copy(update={"volume_cbm_per_pallet": Decimal("3")})
 
     repository.save_draft(draft)
     assert repository.validate_draft() == []
@@ -53,29 +53,29 @@ def test_draft_validation_publish_and_immutable_snapshot_readback() -> None:
         select(OversizePalletRuleVersion).where(OversizePalletRuleVersion.version == first_version)
     )
     assert first_version == 1
-    assert first.medium_oversize_surcharge == Decimal("77")
+    assert first.volume_cbm_per_pallet == Decimal("3")
     assert row is not None
     first_snapshot = row.config_json
 
-    next_draft = default_oversize_pallet_rule().model_copy(update={"medium_oversize_surcharge": Decimal("88")})
+    next_draft = default_oversize_pallet_rule().model_copy(update={"volume_cbm_per_pallet": Decimal("4")})
     repository.save_draft(next_draft)
     second, second_version = repository.publish_draft(
         CurrentActor(user_id=None, api_key_id=None, name="Admin", role="admin")
     )
 
     assert second_version == 2
-    assert second.medium_oversize_surcharge == Decimal("88")
+    assert second.volume_cbm_per_pallet == Decimal("4")
     session.expire_all()
     first_row = session.scalar(
         select(OversizePalletRuleVersion).where(OversizePalletRuleVersion.version == first_version)
     )
     assert first_row is not None
     assert first_row.config_json == first_snapshot
-    assert first_row.config_json["medium_oversize_surcharge"] == "77"
+    assert first_row.config_json["volume_cbm_per_pallet"] == "3"
     published, published_version = repository.get_published()
     assert published is not None
     assert published_version == 2
-    assert published.model_dump(mode="json")["medium_oversize_surcharge"] == "88"
+    assert published.model_dump(mode="json")["volume_cbm_per_pallet"] == "4"
 
 
 def test_publish_retries_when_concurrent_publish_races_same_version(
@@ -138,7 +138,7 @@ def test_validate_draft_reports_invalid_pallet_rule_data() -> None:
     session.add(
         QuoteRuleConfig(
             key=OVERSIZE_PALLET_RULE_DRAFT_KEY,
-            value='{"rule_id":"NA_OVERSIZE_RULE_V2","max_auto_vehicles":4}',
+            value='{"rule_id":"NA_OVERSIZE_RULE_V2","volume_cbm_per_pallet":0}',
             description="Oversize pallet draft configuration",
         )
     )
@@ -147,14 +147,14 @@ def test_validate_draft_reports_invalid_pallet_rule_data() -> None:
     errors = OversizePalletRuleRepository(session).validate_draft()
 
     assert errors
-    assert any("max_auto_vehicles" in error for error in errors)
+    assert any("volume_cbm_per_pallet" in error for error in errors)
 
 
 @pytest.mark.parametrize(
     "update",
     [
-        {"mild_oversize_length_cm": Decimal("160")},
-        {"vehicle_profiles": []},
+        {"standard_pallet_area_cm2": Decimal("0")},
+        {"volume_cbm_per_pallet": Decimal("0")},
         {
             "vehicle_profiles": [
                 default_oversize_pallet_rule().vehicle_profiles[0].model_copy(
@@ -171,9 +171,14 @@ def test_validate_draft_reports_invalid_pallet_rule_data() -> None:
                 *default_oversize_pallet_rule().vehicle_profiles[1:],
             ]
         },
-        {"max_auto_vehicles": 4},
+        {
+            "vehicle_profiles": [
+                default_oversize_pallet_rule().vehicle_profiles[0],
+                default_oversize_pallet_rule().vehicle_profiles[0],
+            ]
+        },
     ],
-    ids=["trigger-line-order", "missing-vehicle", "non-positive-payload", "non-positive-volume", "too-many-vehicles"],
+    ids=["area-mismatch", "non-positive-volume-equivalent", "non-positive-payload", "non-positive-volume", "duplicate-vehicle-code"],
 )
 def test_save_draft_rejects_invalid_rule_constraints(update: dict[str, object]) -> None:
     session = make_session()
@@ -205,7 +210,7 @@ def test_invalid_published_snapshot_is_not_replaced_by_default_rule() -> None:
         OversizePalletRuleVersion(
             rule_id="BROKEN_PUBLISHED_RULE",
             version=7,
-            config_json={"rule_id": "BROKEN_PUBLISHED_RULE", "vehicle_profiles": []},
+            config_json={"rule_id": "", "volume_cbm_per_pallet": 0},
             status="published",
         )
     )
