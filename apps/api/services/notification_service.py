@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Literal
 
 from sqlalchemy.orm import Session
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 from apps.api.db.models import EmailNotificationConfig, ManualQuoteTask, WeComBotConfig
 from apps.api.db.repositories.email_notification_config_repository import EmailNotificationConfigRepository
 from apps.api.db.repositories.wecom_bot_config_repository import GROUP_WEBHOOK_BOT_TYPE, WeComBotConfigRepository
+from packages.ai_assistant.quote_extractor import AIExtractedQuoteDraft
 from packages.email_notifier.client import EmailSendResult, SmtpEmailClient
 from packages.email_notifier.templates import (
     build_ai_missing_fields_email,
@@ -31,6 +33,20 @@ logger = logging.getLogger(__name__)
 MANUAL_REQUIRED_AT_ALL_TEXT = "@all 有新的加拿大尾程报价需人工确认，请查看上一条详情。"
 NotificationSendResult = EmailSendResult | WeComSendResult
 NotificationChannel = Literal["email", "wecom"]
+
+
+@dataclass(frozen=True)
+class AIQuoteNotificationPayload:
+    """Typed payload for internal AI-quote success notifications.
+
+    Notifications are an internal operational channel and need the full
+    deterministic result (risk tags, source, etc.), never the public
+    allowlist DTO.  The templates consume exactly these three fields.
+    """
+
+    extraction: AIExtractedQuoteDraft
+    quote_result: ZoneQuoteResult
+    customer_reply: str | None
 
 
 def notify_quote_success(
@@ -59,7 +75,7 @@ def notify_quote_success(
 def notify_ai_quote_success(
     db: Session,
     *,
-    response: object,
+    response: AIQuoteNotificationPayload,
     bot_id: int | None = None,
     email_config_id: int | None = None,
     channels: set[NotificationChannel] | None = None,

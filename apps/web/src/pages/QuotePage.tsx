@@ -14,6 +14,7 @@ import {
   type AddressType,
   type CurrentActor,
   type EmailConfigPublic,
+  type FCLQuoteResult,
   type PackagingType,
   type QuoteSearchContext,
   type QuoteWorkbenchConfig,
@@ -21,7 +22,7 @@ import {
   type ZoneQuoteResult,
 } from "../api/client";
 import AiQuoteInputPanel from "../components/AiQuoteInputPanel";
-import AddressMapPreview from "../components/AddressMapPreview";
+import FclQuotePanel from "../components/FclQuotePanel";
 import AccountMenu from "../components/AccountMenu";
 import LogoutConfirmationDialog from "../components/LogoutConfirmationDialog";
 import ParsedAddressCard from "../components/ParsedAddressCard";
@@ -29,18 +30,25 @@ import ParsedCargoTable from "../components/ParsedCargoTable";
 import QuoteCopyButton from "../components/QuoteCopyButton";
 import QuoteCalculationPanel from "../components/QuoteCalculationPanel";
 import QuoteRiskPanel from "../components/QuoteRiskPanel";
+import {
+  FCL_ADDRESS_TYPES,
+  FCL_CUSTOMER_TYPES,
+  FCL_DEADLINE_STRICTNESS,
+  FCL_EXPORT_DECLARATIONS,
+  FCL_IMPORTER_EXISTS,
+  FCL_SERVICE_STAGES,
+  FCL_SPECIAL_ATTRIBUTES,
+  FCL_TAX_INCLUDED,
+  FCL_TRADE_TERMS,
+  labelOf,
+} from "../components/fclFieldLabels";
+import { printFclQuoteHtml } from "../components/fclQuoteHtml";
 import { parseQuoteInput, type ParsedCargoItem, type ParsedQuoteInput } from "../utils/quoteParser";
 
-type WorkbenchStatus =
-  | "idle"
-  | "parsing"
-  | "parsed"
-  | "quoting"
-  | "quoted"
-  | "manual_required";
+type WorkbenchStatus = "idle" | "quoting" | "quoted" | "manual_required" | "error";
 
 type SalesQuoteTab = "quote" | "records";
-type QuoteWorkspaceStage = "input" | "parsed";
+type QuoteMode = "final_mile" | "fcl";
 type SalesQuoteRecordStatus = "quoted" | "manual_required";
 type SalesQuoteRecordFilter = SalesQuoteRecordStatus | "all";
 
@@ -59,7 +67,6 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   const [status, setStatus] = useState<WorkbenchStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [packagingType, setPackagingType] = useState<PackagingType | "">("");
   const [addressType, setAddressType] = useState<AddressType | "">("");
   const [services, setServices] = useState<Record<string, boolean>>({});
@@ -74,8 +81,9 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   const [isCheckingAuth, setIsCheckingAuth] = useState(Boolean(getStoredAuthToken()));
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [activeSalesTab, setActiveSalesTab] = useState<SalesQuoteTab>("quote");
-  const [workspaceStage, setWorkspaceStage] = useState<QuoteWorkspaceStage>("input");
-  const [isResultModalOpen, setIsResultModalOpen] = useState(false);
+  const [quoteMode, setQuoteMode] = useState<QuoteMode>("final_mile");
+  const [ruralAcknowledgedKey, setRuralAcknowledgedKey] = useState<string | null>(null);
+  const [controlsDirty, setControlsDirty] = useState(false);
   const [quoteRecords, setQuoteRecords] = useState<SalesQuoteRecord[]>([]);
   const [isLoadingRecords, setIsLoadingRecords] = useState(false);
   const [recordsError, setRecordsError] = useState<string | null>(null);
@@ -83,6 +91,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   const [recordQuery, setRecordQuery] = useState("");
   const [selectedRecordId, setSelectedRecordId] = useState<number | null>(null);
   const [isLogoutConfirmationOpen, setIsLogoutConfirmationOpen] = useState(false);
+  const [isResultModalOpen, setIsResultModalOpen] = useState(false);
 
   useEffect(() => {
     void restoreSession();
@@ -142,6 +151,8 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     setResult(null);
     setAiResult(null);
     setStatus("idle");
+    setRuralAcknowledgedKey(null);
+    setControlsDirty(false);
     setIsResultModalOpen(false);
   }
 
@@ -219,13 +230,13 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   );
 
   const statusLabel = config?.status_labels[status] ?? status;
-  const manualRequired = Boolean(result?.manual_review_required) || status === "manual_required";
+  const manualRequired = Boolean(result?.manual_review_required);
   const riskMessages = useMemo(
     () =>
-      config && effectiveParsed
-        ? buildRiskMessages(config, effectiveParsed, result, manualRequired, aiResult)
+      effectiveParsed
+        ? buildRiskMessages(effectiveParsed, manualRequired, aiResult)
         : [],
-    [aiResult, config, effectiveParsed, result, manualRequired],
+    [aiResult, effectiveParsed, manualRequired],
   );
   const salesText = useMemo(
     () =>
@@ -238,6 +249,22 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
   );
   const recordCounts = useMemo(() => countSalesQuoteRecords(quoteRecords), [quoteRecords]);
 
+  // 乡村邮编二次确认:同一 quote_id(或地址组合)在本会话内确认一次即可。
+  const ruralPostalPrefix = extractPostalPrefix(effectiveParsed?.address.postal_code ?? null);
+  const requiresRuralConfirmation = Boolean(ruralPostalPrefix && ruralPostalPrefix[1] === "0");
+  const ruralConfirmationKey =
+    result?.quote_id ||
+    [
+      effectiveParsed?.address.postal_code,
+      effectiveParsed?.address.city,
+      effectiveParsed?.address.address_line,
+    ]
+      .filter(Boolean)
+      .join("|");
+  const ruralConfirmed = Boolean(
+    requiresRuralConfirmation && ruralConfirmationKey && ruralAcknowledgedKey === ruralConfirmationKey,
+  );
+
   function updateRawInput(value: string) {
     setRawInput(value);
     setResult(null);
@@ -245,7 +272,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     setNotice(null);
     setError(null);
     setStatus("idle");
-    setWorkspaceStage("input");
+    setControlsDirty(false);
     setIsResultModalOpen(false);
   }
 
@@ -260,13 +287,9 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
       return;
     }
 
-    setStatus("parsing");
+    setStatus("quoting");
     setError(null);
     setNotice(null);
-    setIsResultModalOpen(false);
-
-    setIsSubmitting(true);
-    setStatus("quoting");
     try {
       const response = await calculateAIAutoQuote(
         {
@@ -291,17 +314,16 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
         setDetentionMinutes,
       });
       setResult(response.quote_result);
-      setWorkspaceStage("parsed");
+      setControlsDirty(false);
       setIsResultModalOpen(true);
-      if (response.manual_review_required || response.quote_result?.manual_review_required) {
-        setStatus("manual_required");
+      const manual = response.manual_review_required || response.quote_result?.manual_review_required;
+      setStatus(manual ? "manual_required" : "quoted");
+      if (manual) {
         setNotice(
           response.missing_fields.length
             ? `AI 已解析，但缺少 ${formatMissingFields(response.missing_fields).join("、")}；已进入人工任务池。`
             : "该票已进入人工确认流程，请勿直接发送客户报价。",
         );
-      } else {
-        setStatus("quoted");
       }
       const recordsRefreshed = await refreshSalesRecords();
       if (!recordsRefreshed) {
@@ -310,14 +332,15 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
         );
       }
     } catch (caught) {
-      setStatus("manual_required");
+      // 请求失败是独立状态:清空旧结果,避免把失败伪装成"人工复核"或展示过期数据。
+      setStatus("error");
+      setResult(null);
+      setAiResult(null);
       setError(
         caught instanceof Error
-          ? `${caught.message}。请检查后台 AI 模型配置和搜索配置，或进入人工任务池处理。`
-          : "AI 智能报价请求失败，请进入人工任务池处理。",
+          ? `报价请求失败：${caught.message}。请检查后台 AI 模型配置后重试。`
+          : "报价请求失败，请稍后重试。",
       );
-    } finally {
-      setIsSubmitting(false);
     }
   }
 
@@ -328,7 +351,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     setError(null);
     setNotice(null);
     setStatus("idle");
-    setWorkspaceStage("input");
+    setControlsDirty(false);
     setIsResultModalOpen(false);
   }
 
@@ -400,6 +423,8 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
     );
   }
 
+  // 守卫之后 parsed 恒非空;effectiveParsed 在 config 非空时也恒非空,
+  // ?? 兜底只用于让 TypeScript 收窄类型(运行时永远走左侧)。
   const displayParsed = effectiveParsed ?? parsed;
 
   return (
@@ -455,23 +480,54 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
         <main id="top">
         <section className="sales-page-heading">
           <div className="min-w-0">
-            <h1>{activeSalesTab === "quote" ? "AI 智能报价" : "报价记录"}</h1>
+            <h1>{activeSalesTab === "quote" ? (quoteMode === "fcl" ? "AI 整柜报价" : "AI 智能报价") : "报价记录"}</h1>
             <p>
               {activeSalesTab === "quote"
-                ? "粘贴客户询价，系统会自动解析货物、地址与服务要求，再交给 Quote Engine 查表报价。"
+                ? quoteMode === "fcl"
+                  ? "填写结构化询价字段；货物重算与计价全部由确定性引擎完成。"
+                  : "粘贴客户询价，系统会自动解析货物、地址与服务要求，再交给 Quote Engine 查表报价。"
                 : "回查自己的报价记录，筛选人工复核状态，并复制已生成的客户回复。"}
             </p>
           </div>
           {activeSalesTab === "quote" ? (
-            <span
-              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                manualRequired
-                  ? "border-amber-200 bg-amber-50 text-amber-700"
-                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
-              }`}
-            >
-              {statusLabel}
-            </span>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="rounded-lg border border-slate-200 bg-white p-0.5 text-xs font-semibold" role="group" aria-label="报价模式">
+                <button
+                  className={`rounded-md px-3 py-1.5 ${quoteMode === "final_mile" ? "bg-teal-700 text-white" : "text-slate-600"}`}
+                  type="button"
+                  onClick={() => setQuoteMode("final_mile")}
+                >
+                  加拿大尾程
+                </button>
+                <button
+                  className={`rounded-md px-3 py-1.5 ${quoteMode === "fcl" ? "bg-teal-700 text-white" : "text-slate-600"}`}
+                  type="button"
+                  onClick={() => setQuoteMode("fcl")}
+                >
+                  AI 整柜
+                </button>
+              </div>
+              {quoteMode === "final_mile" && (
+                <span
+                  className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                    manualRequired
+                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                      : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  }`}
+                >
+                  {statusLabel}
+                </span>
+              )}
+              {quoteMode === "final_mile" && result && (
+                <button
+                  className="btn-primary min-h-10 px-3 py-1"
+                  type="button"
+                  onClick={() => setIsResultModalOpen(true)}
+                >
+                  查看报价结果
+                </button>
+              )}
+            </div>
           ) : (
             <div className="flex flex-wrap gap-2">
               <button className="btn-secondary min-h-10 px-3 py-1" type="button" onClick={() => void refreshSalesRecords()} disabled={isLoadingRecords}>
@@ -509,40 +565,17 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
           )}
 
           {activeSalesTab === "quote" ? (
+            quoteMode === "fcl" ? (
+              <FclQuotePanel onRecordsRefresh={refreshSalesRecords} />
+            ) : (
             <div className="grid gap-4">
-              <nav className="sales-stage-tabs" aria-label="报价工作区阶段">
-                <button
-                  className={workspaceStage === "input" ? "sales-stage-tab-active" : ""}
-                  type="button"
-                  onClick={() => setWorkspaceStage("input")}
-                >
-                  <span>01</span> 询价输入
-                </button>
-                <button
-                  className={workspaceStage === "parsed" ? "sales-stage-tab-active" : ""}
-                  type="button"
-                  onClick={() => setWorkspaceStage("parsed")}
-                >
-                  <span>02</span> 解析结果
-                </button>
-                <button
-                  className={isResultModalOpen ? "sales-stage-tab-active" : ""}
-                  type="button"
-                  onClick={() => setIsResultModalOpen(true)}
-                  disabled={!aiResult && !result}
-                  aria-haspopup="dialog"
-                >
-                  <span>03</span> 报价结果
-                </button>
-              </nav>
-
-              <div className="sales-workbench-grid" data-stage={workspaceStage}>
+              <div className="sales-workbench-grid">
                 <div className="sales-stage sales-stage-input grid min-w-0 content-start gap-3">
                   <AiQuoteInputPanel
                     config={config}
                     value={rawInput}
                     statusLabel={statusLabel}
-                    isQuoting={isSubmitting}
+                    isQuoting={status === "quoting"}
                     onChange={updateRawInput}
                     onSubmit={handleSmartQuote}
                     onClear={clearInput}
@@ -569,18 +602,27 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
                     parsed={displayParsed}
                     config={config}
                     packagingType={packagingType}
-                    onPackagingTypeChange={(value) => setPackagingType(value as PackagingType)}
+                    onPackagingTypeChange={(value) => {
+                      setPackagingType(value as PackagingType);
+                      setControlsDirty(true);
+                    }}
                     addressType={addressType}
-                    onAddressTypeChange={(value) => setAddressType(value as AddressType)}
+                    onAddressTypeChange={(value) => {
+                      setAddressType(value as AddressType);
+                      setControlsDirty(true);
+                    }}
                     services={services}
-                    onServiceChange={(key, checked) =>
-                      setServices((current) => ({ ...current, [key]: checked }))
-                    }
+                    onServiceChange={(key, checked) => {
+                      setServices((current) => ({ ...current, [key]: checked }));
+                      setControlsDirty(true);
+                    }}
                     detentionMinutes={detentionMinutes}
-                    onDetentionMinutesChange={setDetentionMinutes}
+                    onDetentionMinutesChange={(value) => {
+                      setDetentionMinutes(value);
+                      setControlsDirty(true);
+                    }}
                   />
                 </div>
-
               </div>
               <SalesQuoteRecordsPreview
                 isLoading={isLoadingRecords}
@@ -595,6 +637,7 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
                 }}
               />
             </div>
+            )
           ) : (
             <SalesQuoteRecordsPanel
               filter={recordFilter}
@@ -626,6 +669,15 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
         searchContext={aiResult?.search_context ?? null}
         onClose={() => setIsResultModalOpen(false)}
         onExport={exportQuote}
+        requiresRuralConfirmation={requiresRuralConfirmation}
+        ruralConfirmed={ruralConfirmed}
+        onAcknowledgeRural={() => setRuralAcknowledgedKey(ruralConfirmationKey)}
+        onReturnToEdit={() => {
+          setIsResultModalOpen(false);
+          updateRawInput(rawInput);
+        }}
+        controlsDirty={controlsDirty}
+        onRequote={handleSmartQuote}
       />
       <LogoutConfirmationDialog
         isOpen={isLogoutConfirmationOpen}
@@ -639,55 +691,47 @@ export default function QuotePage({ adminHref: _adminHref }: { adminHref: string
 function QuoteResultDialog({
   aiParsed,
   config,
+  controlsDirty,
   isOpen,
   manualRequired,
+  onAcknowledgeRural,
   onClose,
   onExport,
+  onRequote,
+  onReturnToEdit,
   parsed,
+  requiresRuralConfirmation,
   result,
   risks,
+  ruralConfirmed,
   salesText,
   searchContext,
 }: {
   aiParsed: boolean;
   config: QuoteWorkbenchConfig;
+  controlsDirty: boolean;
   isOpen: boolean;
   manualRequired: boolean;
+  onAcknowledgeRural: () => void;
   onClose: () => void;
   onExport: () => void;
+  onRequote: () => void;
+  onReturnToEdit: () => void;
   parsed: ParsedQuoteInput;
+  requiresRuralConfirmation: boolean;
   result: ZoneQuoteResult | null;
   risks: string[];
+  ruralConfirmed: boolean;
   salesText: string;
   searchContext: QuoteSearchContext | null;
 }) {
-  const [acknowledgedQuoteKey, setAcknowledgedQuoteKey] = useState<string | null>(null);
-  const ruralPostalPrefix = extractPostalPrefix(
-    result?.postal_prefix || result?.postal_code || parsed.address.postal_code,
-  );
-  const requiresRuralConfirmation = Boolean(
-    result?.risk_tags.includes("rural_fsa_secondary_confirmation") ||
-      (ruralPostalPrefix && ruralPostalPrefix[1] === "0"),
-  );
-  const confirmationKey =
-    result?.quote_id ||
-    [parsed.address.postal_code, parsed.address.city, parsed.address.address_line]
-      .filter(Boolean)
-      .join("|");
-  const ruralConfirmationAcknowledged = Boolean(
-    requiresRuralConfirmation && confirmationKey && acknowledgedQuoteKey === confirmationKey,
-  );
-  const showRuralConfirmation = Boolean(
-    isOpen && requiresRuralConfirmation && confirmationKey && !ruralConfirmationAcknowledged,
-  );
-
   useEffect(() => {
     if (!isOpen) {
       return;
     }
     const previousOverflow = document.body.style.overflow;
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !showRuralConfirmation) {
+      if (event.key === "Escape") {
         onClose();
       }
     }
@@ -697,25 +741,20 @@ function QuoteResultDialog({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen, onClose, showRuralConfirmation]);
+  }, [isOpen, onClose]);
 
   if (!isOpen) {
     return null;
   }
 
-  const addressLabel = [
-    parsed.address.address_line,
-    parsed.address.city,
-    parsed.address.province_code || parsed.address.province_name,
-    parsed.address.postal_code,
-  ].filter(Boolean).join(", ");
+  const ruralPostalPrefix = extractPostalPrefix(parsed.address.postal_code);
 
   return (
     <div
       className="quote-result-modal-backdrop"
       role="presentation"
       onMouseDown={(event) => {
-        if (!showRuralConfirmation && event.target === event.currentTarget) {
+        if (event.target === event.currentTarget) {
           onClose();
         }
       }}
@@ -725,14 +764,6 @@ function QuoteResultDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="quote-result-modal-title"
-        aria-hidden={showRuralConfirmation || undefined}
-        ref={(element) => {
-          if (showRuralConfirmation) {
-            element?.setAttribute("inert", "");
-          } else {
-            element?.removeAttribute("inert");
-          }
-        }}
       >
         <header className="quote-result-modal-header">
           <div className="min-w-0">
@@ -746,7 +777,7 @@ function QuoteResultDialog({
             type="button"
             onClick={onClose}
             aria-label="关闭报价结果"
-            autoFocus={!showRuralConfirmation}
+            autoFocus
           >
             <span aria-hidden="true">×</span>
           </button>
@@ -754,6 +785,46 @@ function QuoteResultDialog({
 
         <div className="quote-result-modal-content">
           <div className="quote-result-modal-summary grid min-w-0 content-start gap-3">
+            {controlsDirty && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-700" role="status">
+                已修改包装、地址类型或附加服务，当前结果基于修改前的字段。
+                <button className="ml-2 underline" type="button" onClick={onRequote}>
+                  重新报价
+                </button>
+              </div>
+            )}
+
+            {requiresRuralConfirmation && !ruralConfirmed && (
+              <div className="rounded-md border-2 border-amber-400 bg-amber-50 p-3" role="status">
+                <p className="text-sm font-bold text-amber-900">乡村邮编二次确认</p>
+                <p className="mt-1 text-sm leading-6 text-amber-800">
+                  邮编前缀 <strong>{ruralPostalPrefix || "待确认"}</strong> 第二位为 0，属于乡村 FSA。
+                  {manualRequired
+                    ? "该票同时存在人工复核原因，地址确认不代表价格已审核。"
+                    : "报价已计算完成，但复制或导出前必须核对派送条件。"}
+                </p>
+                <ul className="mt-2 grid gap-1">
+                  {RURAL_CONFIRMATION_CHECKS.map((item, index) => (
+                    <li key={item} className="flex gap-2 text-sm leading-5 text-amber-800">
+                      <span className="font-semibold">{index + 1}.</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs leading-5 text-amber-700">
+                  点击确认仅表示已完成地址与派送条件核对；最终价格仍以供应商实测地址为准。
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button className="btn-secondary" type="button" onClick={onReturnToEdit}>
+                    返回修改地址
+                  </button>
+                  <button className="btn-primary" type="button" onClick={onAcknowledgeRural}>
+                    我已核对，允许复制与导出
+                  </button>
+                </div>
+              </div>
+            )}
+
             <QuoteCalculationPanel
               config={config}
               parsed={parsed}
@@ -762,150 +833,11 @@ function QuoteResultDialog({
               salesText={salesText}
               onExport={onExport}
               ruralConfirmationRequired={requiresRuralConfirmation}
-              ruralConfirmationAcknowledged={ruralConfirmationAcknowledged}
+              ruralConfirmationAcknowledged={ruralConfirmed}
             />
             <QuoteRiskPanel risks={risks} manualRequired={manualRequired} />
             {searchContext ? <SearchVerificationPanel searchContext={searchContext} /> : null}
           </div>
-
-          <aside className="quote-result-map-panel panel min-w-0 p-4">
-            <div>
-              <p className="text-xs font-semibold uppercase text-teal-700">Google Maps</p>
-              <h2 className="mt-1 text-lg font-semibold text-slate-950">目的地址验证</h2>
-              <p className="mt-2 break-words text-sm leading-6 text-slate-600">
-                {addressLabel || "等待 AI 解析完整地址"}
-              </p>
-            </div>
-            <AddressMapPreview parsed={parsed} mapMode="expanded" />
-          </aside>
-        </div>
-      </section>
-      {showRuralConfirmation && (
-        <RuralPostalConfirmationDialog
-          inputCity={parsed.address.city}
-          manualRequired={manualRequired}
-          postalCode={result?.postal_code || parsed.address.postal_code}
-          postalPrefix={ruralPostalPrefix}
-          systemCity={result?.preferred_city || result?.city || parsed.address.city}
-          onAcknowledge={() => setAcknowledgedQuoteKey(confirmationKey)}
-          onReturnToEdit={onClose}
-        />
-      )}
-    </div>
-  );
-}
-
-function RuralPostalConfirmationDialog({
-  inputCity,
-  manualRequired,
-  onAcknowledge,
-  onReturnToEdit,
-  postalCode,
-  postalPrefix,
-  systemCity,
-}: {
-  inputCity: string | null;
-  manualRequired: boolean;
-  onAcknowledge: () => void;
-  onReturnToEdit: () => void;
-  postalCode: string | null;
-  postalPrefix: string | null;
-  systemCity: string | null;
-}) {
-  const cityChanged = Boolean(
-    inputCity && systemCity && inputCity.trim().toLowerCase() !== systemCity.trim().toLowerCase(),
-  );
-
-  return (
-    <div className="rural-confirmation-backdrop" role="presentation">
-      <section
-        className="rural-confirmation-dialog"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="rural-confirmation-title"
-        aria-describedby="rural-confirmation-description"
-        onMouseDown={(event) => event.stopPropagation()}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            return;
-          }
-          if (event.key !== "Tab") {
-            return;
-          }
-          const focusableElements = Array.from(
-            event.currentTarget.querySelectorAll<HTMLElement>(
-              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-            ),
-          );
-          const firstFocusable = focusableElements[0];
-          const lastFocusable = focusableElements[focusableElements.length - 1];
-          if (!firstFocusable || !lastFocusable) {
-            event.preventDefault();
-            return;
-          }
-          if (event.shiftKey && document.activeElement === firstFocusable) {
-            event.preventDefault();
-            lastFocusable.focus();
-          } else if (!event.shiftKey && document.activeElement === lastFocusable) {
-            event.preventDefault();
-            firstFocusable.focus();
-          }
-        }}
-      >
-        <div className="rural-confirmation-icon" aria-hidden="true">!</div>
-        <p className="text-xs font-bold uppercase tracking-wide text-amber-700">发价前必须确认</p>
-        <h2 id="rural-confirmation-title" className="mt-2 text-2xl font-bold text-slate-950">
-          乡村邮编二次确认
-        </h2>
-        <p id="rural-confirmation-description" className="mt-3 text-sm leading-6 text-slate-700">
-          邮编前缀 <strong>{postalPrefix || "待确认"}</strong> 第二位为 0，属于乡村 FSA。
-          {manualRequired
-            ? "该票同时存在人工复核原因，地址确认不代表价格已审核。"
-            : "报价已计算完成，但复制或导出前必须再次核对派送条件。"}
-        </p>
-
-        <div className="rural-confirmation-address">
-          <div>
-            <span>完整邮编</span>
-            <strong>{postalCode || "待确认"}</strong>
-          </div>
-          <div>
-            <span>系统城市</span>
-            <strong>{systemCity || "待确认"}</strong>
-          </div>
-          {cityChanged && (
-            <div className="rural-confirmation-city-change">
-              <span>原询价城市</span>
-              <strong>{inputCity}</strong>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-4">
-          <p className="text-sm font-bold text-slate-900">继续前，请确认以下项目：</p>
-          <ul className="rural-confirmation-checklist">
-            {RURAL_CONFIRMATION_CHECKS.map((item, index) => (
-              <li key={item}>
-                <span aria-hidden="true">{index + 1}</span>
-                <p>{item}</p>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <p className="rural-confirmation-footnote">
-          点击确认仅表示已完成地址与派送条件核对；最终价格仍以供应商实测地址为准。
-        </p>
-
-        <div className="rural-confirmation-actions">
-          <button className="btn-secondary" type="button" onClick={onReturnToEdit}>
-            返回修改地址
-          </button>
-          <button className="btn-primary" type="button" onClick={onAcknowledge} autoFocus>
-            我已核对，继续查看报价
-          </button>
         </div>
       </section>
     </div>
@@ -1087,7 +1019,7 @@ function QuotePipelinePanel({
   extractionConfidence: number;
 }) {
   const steps = [
-    { label: "本地预览", status: "已启用" },
+    { label: "本地预览", status: "仅辅助核对" },
     { label: "AI 解析", status: hasAIResult ? `完成 ${extractionConfidence}%` : "待提交" },
     { label: "搜索验证", status: hasAIResult ? (hasSearchContext ? "已返回参考" : "未返回参考") : "提交后验证" },
     { label: "规则报价", status: hasAIResult ? (manualRequired ? "需人工复核" : "已完成") : "待执行" },
@@ -1363,6 +1295,9 @@ function SalesQuoteRecordDetail({ record }: { record: SalesQuoteRecord | null })
 
   const canCopyReply = record.status === "quoted" && Boolean(record.customer_reply?.trim());
   const manualOverride = getManualOverride(record);
+  if (record.quote_type === "fcl") {
+    return <FclSalesRecordDetail record={record} />;
+  }
 
   return (
     <article className="rounded-md border border-slate-200 bg-white p-4">
@@ -1436,6 +1371,119 @@ function SalesQuoteRecordDetail({ record }: { record: SalesQuoteRecord | null })
   );
 }
 
+function FclSalesRecordDetail({ record }: { record: SalesQuoteRecord }) {
+  const resultJson = record.result_json;
+  const quoteResult =
+    resultJson && typeof resultJson === "object" && !Array.isArray(resultJson)
+      ? ((resultJson as Record<string, unknown>).quote_result as FCLQuoteResult | undefined)
+      : undefined;
+  const normalized = quoteResult?.normalized_input;
+  const manual = record.status === "manual_required" || Boolean(quoteResult?.manual_review_required);
+  const visibleItems = quoteResult?.fee_items.filter((item) =>
+    ["both", "quoteOnly", "merged"].includes(item.display_mode),
+  );
+
+  return (
+    <article className="rounded-md border border-slate-200 bg-white p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase text-slate-400">FCL Quote ID</p>
+          <h3 className="mt-1 break-all text-lg font-semibold text-slate-900">{record.quote_id}</h3>
+          <p className="mt-1 text-sm text-slate-500">{formatRecordDate(record.created_at)}</p>
+        </div>
+        <SalesRecordStatusBadge status={record.status} />
+      </div>
+
+      {manual && (
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold leading-6 text-amber-700">
+          已提交人工复核。{(quoteResult?.manual_reasons ?? []).join("、") || record.manual_reason || "请等待后台确认后再回复客户金额。"}
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        <RecordMetric label="报价金额" value={formatRecordMoney(record)} strong wide />
+        <RecordMetric label="线路" value={record.destination} />
+        <RecordMetric label="货物" value={record.cargo_summary} />
+        <RecordMetric label="来源" value={record.source_type === "fcl_rate_card" ? "整柜费率卡" : "人工复核"} />
+        <RecordMetric label="报价有效期至" value={quoteResult?.quote_valid_until ?? "—"} />
+      </div>
+
+      {normalized && (
+        <div className="mt-4 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 xl:grid-cols-3">
+          <RecordMetric label="客户 / 联系人" value={`${normalized.customer_name || "—"} / ${normalized.contact || "—"}`} />
+          <RecordMetric label="客户类型" value={labelOf(FCL_CUSTOMER_TYPES, normalized.customer_type)} />
+          <RecordMetric label="目的邮编 / 地址" value={`${normalized.destination_postal_code || "—"} / ${normalized.destination_address || "—"}`} />
+          <RecordMetric label="货名 / 材质用途" value={`${normalized.cargo_name || "—"}${normalized.cargo_details ? ` / ${normalized.cargo_details}` : ""}`} />
+          <RecordMetric label="货值 / HS / 原产地" value={`${normalized.cargo_value ? `${normalized.cargo_value_currency ?? ""} ${normalized.cargo_value}` : "—"} / ${normalized.hs_code || "—"} / ${normalized.origin_country || "—"}`} />
+          <RecordMetric label="特殊属性" value={(normalized.special_attributes ?? []).map((value) => labelOf(FCL_SPECIAL_ATTRIBUTES, value)).join("、") || "—"} />
+          <RecordMetric label="备货 / ETD / 期望到门" value={`${normalized.ready_date || "—"} / ${normalized.target_etd || "—"} / ${normalized.expected_delivery_date || "—"}（${labelOf(FCL_DEADLINE_STRICTNESS, normalized.deadline_strictness)}）`} />
+          <RecordMetric label="贸易条款 / 出口报关" value={`${labelOf(FCL_TRADE_TERMS, normalized.trade_terms)} / ${labelOf(FCL_EXPORT_DECLARATIONS, normalized.export_declaration)}`} />
+          <RecordMetric label="进口商 / 包税" value={`${labelOf(FCL_IMPORTER_EXISTS, normalized.importer_exists)} / ${labelOf(FCL_TAX_INCLUDED, normalized.tax_included)}`} />
+          <RecordMetric label="服务环节" value={(normalized.service_stages ?? []).map((value) => labelOf(FCL_SERVICE_STAGES, value)).join("、") || "—"} />
+          <RecordMetric label="到门信息" value={`${labelOf(FCL_ADDRESS_TYPES, normalized.address_type)} / 尾板 ${normalized.tail_lift || "—"} / 叉车 ${normalized.forklift || "—"}`} />
+          <RecordMetric label="平台仓 / 预约" value={`${normalized.platform_warehouse || "—"} / ${normalized.appointment_window || "—"}`} />
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-3 xl:grid-cols-2">
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <h4 className="text-sm font-semibold text-slate-700">客户原始询价</h4>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+            {record.customer_message}
+          </pre>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <h4 className="text-sm font-semibold text-slate-700">客户回复</h4>
+          <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+            {record.customer_reply || "人工复核单不生成可直接发送的报价话术。"}
+          </pre>
+          <div className="mt-3">
+            <QuoteCopyButton text={record.customer_reply ?? ""} disabled={manual || !record.customer_reply} />
+          </div>
+        </div>
+      </div>
+
+      {quoteResult && (
+        <>
+          <div className="mt-4 overflow-x-auto rounded-md border border-slate-200">
+            <table className="w-full min-w-[520px] text-left text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-xs text-slate-500">
+                  <th className="px-3 py-2">费用项目</th>
+                  <th className="px-3 py-2">数量</th>
+                  <th className="px-3 py-2">单价</th>
+                  <th className="px-3 py-2">金额</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(visibleItems ?? []).map((item) => (
+                  <tr key={item.item_name} className="border-t border-slate-100">
+                    <td className="px-3 py-2">{item.item_name}</td>
+                    <td className="px-3 py-2">{item.quantity} {item.unit}</td>
+                    <td className="px-3 py-2">{item.unit_price === null || item.unit_price === "" ? "—" : `${item.currency} ${item.unit_price}`}</td>
+                    <td className="px-3 py-2">{item.amount === null || item.amount === "" ? "按实际/人工确认" : `${item.currency} ${item.amount}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <span className="text-sm font-semibold text-slate-800">{formatRecordMoney(record)}</span>
+            <button
+              className="btn-primary"
+              type="button"
+              disabled={manual}
+              onClick={() => printFclQuoteHtml(quoteResult)}
+            >
+              打印 A4 报价单 / 另存为 PDF
+            </button>
+          </div>
+        </>
+      )}
+    </article>
+  );
+}
+
 function RecordMetric({
   label,
   value,
@@ -1503,18 +1551,19 @@ function extractPostalPrefix(value: string | null | undefined): string | null {
   return match?.[1] ?? null;
 }
 
+function formatQuoteAmount(value: string | number): string {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue.toFixed(2) : "待确认";
+}
+
 function buildRiskMessages(
-  config: QuoteWorkbenchConfig,
   parsed: ParsedQuoteInput,
-  result: ZoneQuoteResult | null,
   manualRequired: boolean,
   aiResult: AIAutoQuoteResponse | null,
 ): string[] {
   if (!aiResult) {
     return ["待提交给后台大模型解析；本地预览不再作为最终字段来源。"];
   }
-  const backendRisks =
-    result?.risk_tags.map((tag) => config.backend_risk_tag_labels[tag] || tag) ?? [];
   const manualRisk = manualRequired ? ["需要人工确认，不要直接发客户。"] : [];
   const aiMissingRisks =
     aiResult?.missing_fields.map((field) => `AI 解析缺少：${formatMissingField(field)}`) ?? [];
@@ -1523,7 +1572,6 @@ function buildRiskMessages(
   return Array.from(new Set([
     ...manualRisk,
     ...parsed.risk_hints,
-    ...backendRisks,
     ...aiMissingRisks,
     ...addressValidationRisks,
     ...searchRisks,
@@ -1548,12 +1596,14 @@ function buildSalesText(
     ? `${parsed.max_dimensions_cm.join(" × ")} cm`
     : "待确认";
   const totalPrice =
-    result?.total_price_usd && !result.manual_review_required
-      ? `${config.copy_template.currency_code} ${Number(result.total_price_usd).toFixed(2)}`
+    result?.total_price_usd !== null &&
+    result?.total_price_usd !== undefined &&
+    result.total_price_usd !== "" &&
+    !result.manual_review_required
+      ? `${config.copy_template.currency_code} ${formatQuoteAmount(result.total_price_usd)}`
       : config.copy_template.manual_price_text;
-  const ruralConfirmationLines = result?.risk_tags.includes(
-    "rural_fsa_secondary_confirmation",
-  )
+  const ruralPrefix = extractPostalPrefix(parsed.address.postal_code);
+  const ruralConfirmationLines = ruralPrefix && ruralPrefix[1] === "0"
     ? ["特别提醒：该地址为乡村邮编，完整地址、卡车准入及可能附加费需二次确认。"]
     : [];
 
@@ -1667,8 +1717,7 @@ function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoIt
   if (!Array.isArray(extraction.cargo_items)) {
     return [];
   }
-  return extraction.cargo_items
-    .map((item, index) => {
+  return extraction.cargo_items.flatMap((item, index): ParsedCargoItem[] => {
       const length = toNumber(item.length_cm);
       const width = toNumber(item.width_cm);
       const height = toNumber(item.height_cm);
@@ -1683,10 +1732,17 @@ function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoIt
           : totalCbm === null
             ? null
             : totalCbm / quantity);
-      if (!hasDimensions && weight === null && cbm === null && totalWeight === null && totalCbm === null) {
-        return null;
+      if (
+        !hasDimensions
+        && weight === null
+        && cbm === null
+        && totalWeight === null
+        && totalCbm === null
+        && !item.source_span
+      ) {
+        return [];
       }
-      return {
+      const normalized: ParsedCargoItem = {
         id: index + 1,
         quantity,
         length_cm: length,
@@ -1696,10 +1752,15 @@ function normalizeAICargoItems(extraction: AIExtractedQuoteDraft): ParsedCargoIt
         cbm,
         total_weight_kg: totalWeight ?? (weight === null ? null : weight * quantity),
         total_cbm: totalCbm ?? (cbm === null ? null : cbm * quantity),
+        contained_customer_pieces: item.contained_customer_pieces ?? null,
+        stackability: item.stackability ?? null,
+        max_stack_layers: item.max_stack_layers ?? null,
+        max_top_load_kg: toNumber(item.max_top_load_kg),
+        floor_rotation_allowed: item.floor_rotation_allowed ?? null,
         source_span: item.source_span,
       };
-    })
-    .filter((item): item is ParsedCargoItem => item !== null);
+      return [normalized];
+    });
 }
 
 function hasCargoDimensions(
@@ -1915,6 +1976,21 @@ function salesRecordFilterLabel(
 function formatRecordMoney(record: SalesQuoteRecord): string {
   if (record.status === "manual_required") {
     return "待人工确认";
+  }
+  if (record.quote_type === "fcl") {
+    const totals = record.totals_by_currency ?? {};
+    const entries = Object.entries(totals)
+      .filter(([, value]) => value !== null && value !== undefined && value !== "")
+      .map(([currency, value]) => `${currency} ${value}`);
+    if (
+      record.currency_code &&
+      record.total_price_usd !== null &&
+      record.total_price_usd !== undefined &&
+      record.total_price_usd !== ""
+    ) {
+      entries.push(`折算 ${record.currency_code} ${record.total_price_usd}`);
+    }
+    return entries.length ? entries.join("；") : "待匹配";
   }
   const value = record.total_price_usd;
   if (value === null || value === undefined || value === "") {

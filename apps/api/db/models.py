@@ -1,7 +1,21 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -223,6 +237,102 @@ class QuoteRuleConfig(Base):
     )
 
 
+class FCLRateCard(Base):
+    __tablename__ = "fcl_rate_cards"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    pol: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    pod: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    container_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    carrier: Mapped[str | None] = mapped_column(String(128), index=True)
+    service: Mapped[str | None] = mapped_column(String(128), index=True)
+    service_scope: Mapped[str | None] = mapped_column(String(32), index=True)
+    effective_from: Mapped[date | None] = mapped_column(Date)
+    effective_to: Mapped[date | None] = mapped_column(Date)
+    etd_date: Mapped[date | None] = mapped_column(Date, index=True)
+    vessel_voyage: Mapped[str | None] = mapped_column(String(128))
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100", index=True)
+    source: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="draft", server_default="draft", index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1", index=True)
+    fee_lines: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class FCLQuoteConfigVersion(Base):
+    __tablename__ = "fcl_quote_config_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    config_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    published_by: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class OversizePalletRuleVersion(Base):
+    """Immutable, published snapshots of the oversize pallet rule."""
+
+    __tablename__ = "oversize_pallet_rule_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "rule_id",
+            "version",
+            name="uq_oversize_pallet_rule_versions_rule_version",
+        ),
+        CheckConstraint(
+            "status = 'published'",
+            name="ck_oversize_pallet_rule_versions_published_status",
+        ),
+        CheckConstraint(
+            "config_json IS NOT NULL",
+            name="ck_oversize_pallet_rule_versions_config_not_null",
+        ),
+        CheckConstraint(
+            "length(CAST(config_json AS TEXT)) > 2 AND CAST(config_json AS TEXT) <> 'null'",
+            name="ck_oversize_pallet_rule_versions_config_not_empty",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rule_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    config_json: Mapped[dict[str, object]] = mapped_column(
+        JSON(none_as_null=True),
+        nullable=False,
+    )
+    published_by: Mapped[str | None] = mapped_column(String(128))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="published", server_default="published", index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    published_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 class QuoteAuditLog(Base):
     __tablename__ = "quote_audit_logs"
 
@@ -253,6 +363,7 @@ class SalesQuoteRecord(Base):
     __tablename__ = "sales_quote_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    quote_type: Mapped[str] = mapped_column(String(32), nullable=False, default="final_mile", index=True)
     quote_id: Mapped[str | None] = mapped_column(String(64), index=True)
     actor_user_id: Mapped[int | None] = mapped_column(Integer, index=True)
     actor_api_key_id: Mapped[int | None] = mapped_column(Integer, index=True)
@@ -263,6 +374,7 @@ class SalesQuoteRecord(Base):
     customer_reply: Mapped[str | None] = mapped_column(Text)
     request_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     result_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    snapshot_json: Mapped[dict[str, object] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -6,7 +6,10 @@ from apps.api.auth import QUOTE_WRITE_ROLES, require_roles
 from apps.api.db.session import get_db
 from apps.api.services.quote_service import calculate_vendor_quote, calculate_zone_quote as calculate_zone_quote_service
 from packages.quote_engine.models import QuoteResult, ShipmentInput
-from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult
+from packages.quote_engine.zone_models import (
+    ZoneQuotePublicResult,
+    ZoneQuoteRequest,
+)
 
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
@@ -34,12 +37,16 @@ def calculate_quote(shipment: ShipmentInput, db: Session = Depends(get_db)) -> Q
     return calculate_vendor_quote(db, shipment)
 
 
-@router.post("/zone-calculate", response_model=ZoneQuoteResult, dependencies=[Depends(require_roles(*QUOTE_WRITE_ROLES))])
+@router.post(
+    "/zone-calculate",
+    response_model=ZoneQuotePublicResult,
+    dependencies=[Depends(require_roles(*QUOTE_WRITE_ROLES))],
+)
 def calculate_zone_quote(
     payload: ZoneQuoteWithNotifyRequest,
     db: Session = Depends(get_db),
-) -> ZoneQuoteResult:
-    return calculate_zone_quote_service(
+) -> ZoneQuotePublicResult:
+    result = calculate_zone_quote_service(
         db,
         payload.quote,
         notify_email=payload.notify_email,
@@ -47,3 +54,4 @@ def calculate_zone_quote(
         notify_wecom=payload.notify_wecom,
         wecom_bot_id=payload.wecom_bot_id,
     )
+    return result.to_public()

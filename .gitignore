@@ -21,6 +21,7 @@ env/
 .DS_Store
 .idea/
 .vscode/
+.superpowers/
 
 # Frontend
 node_modules/
@@ -34,3 +35,4 @@ data/samples/*
 !data/samples/.gitkeep
 outputs/
 reference/private_address_agent_pack/
+.zcode/

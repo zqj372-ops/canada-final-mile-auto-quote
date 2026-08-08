@@ -171,6 +171,11 @@ jobs:
           set -euo pipefail
           ssh production "set -e; cd '${DEPLOY_PATH}'; sudo -n docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' up -d --build api web"
 
+      - name: Import zone reference data
+        run: |
+          set -euo pipefail
+          ssh production "set -e; cd '${DEPLOY_PATH}'; sudo -n docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' run --rm api python scripts/load_reference_data.py --skip-postal-codes"
+
       - name: Verify production health
         run: |
           set -euo pipefail

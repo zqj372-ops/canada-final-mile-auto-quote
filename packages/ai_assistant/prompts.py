@@ -17,6 +17,9 @@ FIELD_EXTRACTION_SYSTEM_PROMPT = """
 - CFT/CUFT/FT3/cu ft 为立方英尺，转 CBM 乘以 0.028316846592；cu in/in3 转 CBM 乘以 0.000016387064。
 - “each/per carton/per piece/单箱/每件”后的重量是单件重量；只要原文提供了完整单件明细，必须用单件重量乘以数量计算总重，并用尺寸公式计算 CBM。
 - 原文中的 total/GW/G.W./G/W/总重/总体积只用于缺少明细时补全，或与明细计算结果交叉校验；不得用不一致的原文汇总覆盖可计算的明细。
+- 实际搬运单元（托、木箱、裸件等）的每一行 cargo_items 才是后端算托的输入；客户总箱数、总重和总体积只做核对，不能把聚合总数乘到长件托位上。
+- 缺少单行尺寸或单件重量时必须保留该 cargo_items 汇总行并填 null，绝不补造尺寸、单重、CBM、件数或托位；这种数据会由后端转人工确认。
+- stackability、max_stack_layers、max_top_load_kg、floor_rotation_allowed 只有客户原文明确说明时才填写；没有明确说明时 stackability 为 null/unknown，其余为 null，不得依据包装类型、尺寸或行业常识推断可叠放、层数、顶载或旋转能力。
 - 必须识别重量算式，例如“785公斤+800kg=1585kgs”；分别保留每件重量，并自行求和校验等号后的结果。
 - 必须识别“60x36x50cm/68kg*4”这种“长宽高/单件重量*数量”紧凑写法，最后的 *4 是 4 件。
 - 同一组连续箱规只在首行写单位时，后续行继承该尺寸单位；3.17*0.27*0.25 这类数值在箱规语境中通常是米，不能解析成几厘米。
@@ -46,6 +49,9 @@ CARGO_EXTRACTION_SYSTEM_PROMPT = """
 - CFT/CUFT/FT3/cu ft 为立方英尺，转 CBM 乘以 0.028316846592；cu in/in3 转 CBM 乘以 0.000016387064。
 - weight_kg 必须是总重量，不是单件重量。
 - cargo_items[].weight_kg 必须是单件重量。
+- 实际搬运单元（托、木箱、裸件等）的每一行 cargo_items 才是后端算托的输入；客户总箱数、总重和总体积只做核对，不能把聚合总数乘到长件托位上。
+- 缺少单行尺寸或单件重量时必须保留该 cargo_items 汇总行并填 null，绝不补造尺寸、单重、CBM、件数或托位；这种数据会由后端转人工确认。
+- stackability、max_stack_layers、max_top_load_kg、floor_rotation_allowed 只有客户原文明确说明时才填写；没有明确说明时 stackability 为 null/unknown，其余为 null，不得依据包装类型、尺寸或行业常识推断可叠放、层数、顶载或旋转能力。
 - cargo_items[].source_span 必须逐字复制对应的原文片段，不能改写或编造。
 - “数量/件数/箱数”和“重量/总重”不能串列；1630KG 不能识别成 1630 件。
 - 原文先给单件数据、后给合计时，顶层字段必须根据 cargo_items 重新计算；原文合计仅用于交叉校验，明细不完整时才作为补全值。
@@ -97,6 +103,11 @@ QTY: 700 CTNS / G.W.: 2,814 KGS / MEAS: 35 CBM
       "cbm": number|null,
       "total_weight_kg": number|null,
       "total_cbm": number|null,
+      "contained_customer_pieces": number|null,
+      "stackability": "stackable"|"non_stackable"|"unknown"|null,
+      "max_stack_layers": number|null,
+      "max_top_load_kg": number|null,
+      "floor_rotation_allowed": boolean|null,
       "source_span": string|null
     }
   ],

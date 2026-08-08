@@ -94,7 +94,7 @@ export default function AiQuoteInputPanel({
           <input
             className="sr-only"
             type="file"
-            accept=".txt,.csv,.xlsx,.xls"
+            accept=".txt,.csv"
             onChange={handleFileChange}
           />
         </label>

@@ -7,7 +7,7 @@ import sqlalchemy as sa
 
 
 revision: str = "0022_add_oversize_pallet_rule_versions"
-down_revision: str | None = "0020_zone_reference_integrity"
+down_revision: str | None = "0021_fcl_quote_closed_loop"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -70,10 +70,9 @@ def upgrade() -> None:
         ["version"],
     )
     op.create_index(
-        "ix_oversize_pallet_rule_versions_rule_id_version",
+        "ix_oversize_pallet_rule_versions_status",
         "oversize_pallet_rule_versions",
-        ["rule_id", "version"],
-        unique=True,
+        ["status"],
     )
 
     config_json = _INITIAL_CONFIG_JSON
@@ -120,7 +119,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index(
-        "ix_oversize_pallet_rule_versions_rule_id_version",
+        "ix_oversize_pallet_rule_versions_status",
         table_name="oversize_pallet_rule_versions",
     )
     op.drop_index(
