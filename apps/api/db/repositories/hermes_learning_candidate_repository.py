@@ -89,13 +89,6 @@ class HermesLearningCandidateRepository:
         if record is None:
             return None
 
-        # Candidates created before the oversize gate existed may still carry
-        # handling-unit/oversize hard risks.  Approving them would promote a
-        # rule that bypasses the current manual-review safety check, so the
-        # same gate applied at creation time is enforced here again.
-        if _has_oversize_manual_risk(list(record.risk_tags)):
-            raise ValueError("候选携带超大件硬阻断风险标签,禁止直接晋升为学习规则")
-
         if review_note is not None:
             record.review_note = review_note
         record.reviewed_by = reviewed_by
@@ -166,12 +159,6 @@ class HermesLearningCandidateRepository:
         origin = _string(result_json.get("origin"))
         zone = _int_value(result_json.get("zone"))
         risk_tags = list(result_json.get("risk_tags") or task.risk_tags or [])
-        # A resolved oversize exception is still evidence that the current
-        # deterministic handling-unit/vehicle checks could not safely quote.
-        # Do not turn that exception into a reusable learning candidate; doing
-        # so would let a later request bypass the same safety gate.
-        if _has_oversize_manual_risk(risk_tags):
-            return None
         conditions = quote_conditions_from_mapping(request_json)
         duplicate_key = "|".join(
             str(value or "")
@@ -284,34 +271,6 @@ def _candidate_type(risk_tags: list[str], origin: str | None, zone: int | None) 
     if "zone_not_found" in risk_tags or "postal_family_split_record_conflict" in risk_tags:
         return "postal_zone_override" if origin and zone is not None else "learned_exception_price"
     return "learned_exception_price"
-
-
-def _has_oversize_manual_risk(risk_tags: list[str]) -> bool:
-    # Must stay semantically identical to quote_service._has_oversize_manual_risk.
-    # The calculator treats a missing optional contained-piece declaration as a
-    # soft check when all physical handling units are valid, so that tag never
-    # blocks learning; every other customer_piece_count_* tag is a hard
-    # mismatch and must block candidate creation and promotion.
-    for tag in risk_tags:
-        if (
-            tag in {"handling_units_missing", "handling_unit_invalid"}
-            or tag.startswith("handling_unit_")
-            or tag.startswith("oversize_vehicle_")
-            or tag.startswith("oversize_rule_")
-            or tag.startswith("oversize_floor_")
-            or tag.startswith("unit_weight_over_")
-            or tag.startswith("declared_")
-            or tag.startswith("explicit_pallet_count")
-            or tag.startswith("billing_pallets_")
-            or tag.startswith("aggregate_info_")
-            or tag.startswith("flexible_package_deal_")
-            or (
-                tag.startswith("customer_piece_count_")
-                and tag != "customer_piece_count_check_skipped"
-            )
-        ):
-            return True
-    return False
 
 
 def _string(value: object) -> str | None:

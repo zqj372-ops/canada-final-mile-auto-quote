@@ -7,19 +7,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from apps.api.db.models import (
-    Base,
-    HermesLearningCandidate,
-    LearnedQuoteRule,
-    PostalCodeCityLookup,
-    QuoteRuleConfig,
-    ZoneLookupRule,
-    ZonePriceMatrix,
-)
+from apps.api.db.models import Base, LearnedQuoteRule, PostalCodeCityLookup, QuoteRuleConfig, ZoneLookupRule, ZonePriceMatrix
 from apps.api.db.session import get_db
 from apps.api.main import app
 from packages.ai_assistant.model_client import AIResponse
-from tests.api.test_zone_quotes import _LegacyZoneTestClient
 
 
 def build_client(
@@ -77,7 +68,7 @@ def build_client(
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
-    return _LegacyZoneTestClient(app)
+    return TestClient(app)
 
 
 def teardown_function() -> None:
@@ -102,31 +93,6 @@ def payload(**overrides: object) -> dict[str, object]:
         "explicit_pallet_count": None,
     }
     data.update(overrides)
-    if "handling_units" not in data:
-        longest = data.get("longest_side_cm")
-        longest_value = Decimal(str(longest)) if longest is not None else Decimal("100")
-        if longest_value < Decimal("240"):
-            cbm = Decimal(str(data.get("cbm") or "0"))
-            weight = Decimal(str(data.get("weight_kg") or "0"))
-            target = max(
-                1,
-                int((cbm / Decimal("2")).to_integral_value(rounding="ROUND_CEILING")),
-                int((weight / Decimal("500")).to_integral_value(rounding="ROUND_CEILING")),
-            )
-            explicit = data.get("explicit_pallet_count")
-            if isinstance(explicit, int) and explicit > target:
-                target = explicit
-            data["handling_units"] = [
-                {
-                    "quantity": target,
-                    "packaging_type": str(data.get("packaging_type") or "carton"),
-                    "length_cm": "120",
-                    "width_cm": "100",
-                    "height_cm": str(cbm * Decimal("1000000") / (Decimal(target) * Decimal("12000")) if cbm > 0 else Decimal("100")),
-                    "unit_weight_kg": str(weight / Decimal(target) if weight > 0 else Decimal("1")),
-                    "contained_customer_pieces": int(data.get("piece_count") or 1),
-                }
-            ]
     return data
 
 
@@ -144,8 +110,6 @@ def test_zone_calculate_success_writes_audit_log() -> None:
     assert body["postal_prefix"] == "L4K"
     assert body["total_price_usd"] == "212.00"
     assert body["manual_review_required"] is False
-    assert body["result_json"]["internal_trace"]["calculator"]["totals"]["billing_pallets"] == 3
-    assert body["result_json"]["internal_trace"]["handling_units"][0]["length_cm"] == "120"
     assert body["quote_logic"]["status"] == "quoted"
     assert "Zone 价格矩阵" in body["quote_logic"]["price_source"]
 
@@ -184,7 +148,6 @@ def test_manual_required_creates_manual_quote_task() -> None:
     assert tasks[0]["quote_id"] == quote["quote_id"]
     assert tasks[0]["status"] == "pending"
     assert tasks[0]["reason"] == quote["matched_rule"]
-    assert tasks[0]["result_json"]["internal_trace"]["calculator"]["risk_tags"] == []
 
 
 def test_error_summary_reports_manual_required_and_recent_tasks() -> None:
@@ -287,62 +250,6 @@ def test_resolved_manual_task_creates_candidate_and_reuses_only_after_approval()
     assert summary["recent_learning_candidates"][0]["postal_prefix"] == "L4K"
 
 
-def test_legacy_candidate_with_oversize_risk_cannot_be_approved() -> None:
-    engine = create_engine(
-        "sqlite+pysqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    TestingSessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
-    with TestingSessionLocal() as session:
-        session.add(PostalCodeCityLookup(postal_code="L4K 2N2", preferred_city="Concord", province="ON"))
-        session.add(
-            ZonePriceMatrix(
-                origin="toronto",
-                zone=2,
-                billing_pallets=3,
-                base_price_usd=Decimal("120.00"),
-                source="test",
-                last_updated="2026-06-03",
-            )
-        )
-        session.commit()
-
-    def override_get_db() -> Generator[Session]:
-        with TestingSessionLocal() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = override_get_db
-    client = _LegacyZoneTestClient(app)
-
-    client.post("/quotes/zone-calculate", json=payload())
-    task = client.get("/quotes/manual-tasks").json()[0]
-    client.patch(
-        f"/quotes/manual-tasks/{task['id']}",
-        json={"status": "resolved", "resolved_price_usd": "250.00"},
-    )
-    candidate_id = client.get("/quotes/learning-candidates").json()[0]["id"]
-
-    # Simulate a candidate created before the oversize gate existed: inject a
-    # hard handling-unit risk after creation.
-    with TestingSessionLocal() as session:
-        record = session.get(HermesLearningCandidate, candidate_id)
-        assert record is not None
-        record.risk_tags = list(record.risk_tags) + ["handling_units_missing"]
-        session.commit()
-
-    response = client.post(
-        f"/quotes/learning-candidates/{candidate_id}/approve",
-        json={"review_note": "Legacy candidate review."},
-    )
-
-    assert response.status_code == 422
-    assert "禁止直接晋升" in response.json()["detail"]
-    candidate = client.get(f"/quotes/learning-candidates/{candidate_id}").json()
-    assert candidate["status"] == "pending_review"
-
-
 def test_resolved_manual_task_learning_respects_billing_pallets() -> None:
     client = build_client(include_zone_rule=False)
 
@@ -362,9 +269,7 @@ def test_resolved_manual_task_learning_respects_billing_pallets() -> None:
 
     body = response.json()
     assert body["source_type"] == "manual_required"
-    assert body["billing_pallets"] is None
-    audit = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
-    assert audit["billing_pallets"] == 1
+    assert body["billing_pallets"] == 1
 
 
 def test_zone_gap_creates_hermes_diagnostic_without_changing_quote() -> None:
@@ -403,10 +308,7 @@ def test_zone_gap_creates_hermes_diagnostic_without_changing_quote() -> None:
     assert body["manual_review_required"] is True
     assert body["origin"] is None
     assert body["zone"] is None
-    assert body["billing_pallets"] is None
-    audit_result = client.get(f"/quotes/audit/{body['quote_id']}").json()["result_json"]
-    # 120x100x165cm unit is a long piece (>120cm) -> 2 pallets.
-    assert audit_result["billing_pallets"] == 2
+    assert body["billing_pallets"] == 1
     assert body["total_price_usd"] is None
 
     diagnostics = client.get(f"/quotes/hermes-diagnostics?quote_id={body['quote_id']}").json()

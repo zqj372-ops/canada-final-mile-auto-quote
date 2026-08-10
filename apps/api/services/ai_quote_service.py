@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from apps.api.auth import CurrentActor
 from apps.api.db.repositories.ai_model_config_repository import AIModelConfigRepository
 from apps.api.db.repositories.manual_quote_task_repository import ManualQuoteTaskRepository
-from apps.api.db.repositories.oversize_pallet_rule_repository import OversizePalletRuleRepository
 from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
 from apps.api.db.repositories.sales_quote_record_repository import SalesQuoteRecordRepository
 from apps.api.db.repositories.zone_repository import ZoneRepository
@@ -20,7 +19,6 @@ from apps.api.services.address_validation_service import (
     build_local_address_validation_from_extraction,
 )
 from apps.api.services.notification_service import (
-    AIQuoteNotificationPayload,
     notify_ai_missing_fields,
     notify_ai_quote_success,
     requested_notification_channels,
@@ -46,15 +44,9 @@ from packages.ai_assistant.quote_extractor import (
     missing_required_fields,
 )
 from packages.quote_engine.risk_tags import rural_fsa_risk_tags
-from packages.quote_engine.oversize_models import HandlingUnitInput
 from packages.quote_engine.zone_engine import ZoneQuoteEngine
 from packages.quote_engine.quote_id import generate_quote_id
-from packages.quote_engine.zone_models import (
-    ZoneQuotePublicResult,
-    ZoneQuoteRequest,
-    ZoneQuoteResult,
-    to_public_zone_quote_result,
-)
+from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult
 
 
 logger = logging.getLogger(__name__)
@@ -76,7 +68,7 @@ class AIAutoQuoteRequest(BaseModel):
 
 class AIAutoQuoteResponse(BaseModel):
     extraction: AIExtractedQuoteDraft
-    quote_result: ZoneQuotePublicResult | None = None
+    quote_result: ZoneQuoteResult | None = None
     customer_reply: str | None = None
     internal_note: str | None = None
     missing_fields: list[str] = Field(default_factory=list)
@@ -222,13 +214,7 @@ def calculate_ai_auto_quote(
 
     zone_request = _zone_request_from_extraction(extraction)
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
-    oversize_rule, oversize_rule_version = OversizePalletRuleRepository(db).get_published()
-    quote_result = ZoneQuoteEngine(
-        ZoneRepository(db),
-        pricing_config=pricing_config,
-        oversize_rule=oversize_rule,
-        oversize_rule_version=str(oversize_rule_version),
-    ).quote(zone_request)
+    quote_result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(zone_request)
     quote_result = apply_learned_quote_if_available(db, zone_request, quote_result)
     quote_result = enforce_origin_matrix_safety(zone_request, quote_result)
     quote_result = enforce_zone_price_switch(pricing_config, quote_result)
@@ -247,7 +233,7 @@ def calculate_ai_auto_quote(
     if quote_result.manual_review_required:
         response = AIAutoQuoteResponse(
             extraction=extraction,
-            quote_result=to_public_zone_quote_result(quote_result),
+            quote_result=quote_result,
             customer_reply="这票需要人工确认后才能给客户报价，当前不要直接发送确定金额。",
             internal_note=f"Manual review required: {quote_result.matched_rule}",
             missing_fields=[],
@@ -261,7 +247,7 @@ def calculate_ai_auto_quote(
     quote_result.sales_note = customer_reply
     response = AIAutoQuoteResponse(
         extraction=extraction,
-        quote_result=to_public_zone_quote_result(quote_result),
+        quote_result=quote_result,
         customer_reply=customer_reply,
         internal_note=(
             "AI extraction failed; deterministic parser generated the locked quote_result. "
@@ -275,20 +261,11 @@ def calculate_ai_auto_quote(
         address_validation=address_validation,
     )
     if payload.notify_email or payload.notify_wecom:
-        # Notifications are an internal operational channel and still need
-        # the full deterministic result (risk tags, source, etc.).  The API
-        # response above is intentionally the public allowlist DTO, so do not
-        # pass that sanitized object to the internal notification templates.
-        notification_response = AIQuoteNotificationPayload(
-            extraction=extraction,
-            quote_result=quote_result,
-            customer_reply=customer_reply,
-        )
         try_notification(
             "ai_quote",
             lambda: notify_ai_quote_success(
                 db,
-                response=notification_response,
+                response=response,
                 bot_id=payload.wecom_bot_id,
                 email_config_id=payload.email_config_id,
                 channels=requested_notification_channels(
@@ -388,39 +365,6 @@ def _optional_address_validation(
 
 def _zone_request_from_extraction(extraction: AIExtractedQuoteDraft) -> ZoneQuoteRequest:
     try:
-        handling_units: list[HandlingUnitInput | dict[str, object]] = []
-        for item in extraction.cargo_items:
-            # The cargo agent may return an aggregate reconciliation row with
-            # null dimensions/weight.  Keep that row verbatim as a mapping so
-            # ZoneQuoteEngine can classify it as manual instead of dropping
-            # the source evidence or fabricating a handling unit.
-            stackability = item.stackability
-            if stackability in (None, "unknown") and extraction.is_stackable is not None:
-                stackability = "stackable" if extraction.is_stackable else "non_stackable"
-            row: dict[str, object] = {
-                "quantity": item.quantity,
-                "packaging_type": extraction.packaging_type or "unknown",
-                "length_cm": item.length_cm,
-                "width_cm": item.width_cm,
-                "height_cm": item.height_cm,
-                "unit_weight_kg": item.weight_kg,
-                "cbm": item.cbm,
-                "contained_customer_pieces": item.contained_customer_pieces,
-                "stackability": stackability or "unknown",
-                "max_stack_layers": item.max_stack_layers,
-                "max_top_load_kg": item.max_top_load_kg,
-                "source_span": item.source_span,
-            }
-            if item.floor_rotation_allowed is not None:
-                row["floor_rotation_allowed"] = item.floor_rotation_allowed
-            # Only validated complete rows become HandlingUnitInput instances;
-            # incomplete rows stay as mappings for fail-closed calculator
-            # validation and audit trace retention.
-            try:
-                handling_units.append(HandlingUnitInput.model_validate(row))
-            except Exception:
-                handling_units.append(row)
-
         return ZoneQuoteRequest(
             address_line=extraction.address_line,
             postal_code=extraction.postal_code or "",
@@ -438,7 +382,6 @@ def _zone_request_from_extraction(extraction: AIExtractedQuoteDraft) -> ZoneQuot
             requires_pallet_jack=extraction.requires_pallet_jack,
             requires_appointment=extraction.requires_appointment,
             detention_minutes=extraction.detention_minutes,
-            handling_units=handling_units,
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Extracted quote fields failed validation: {exc}") from exc

@@ -98,29 +98,9 @@ def quote_payload(**overrides: object) -> dict[str, object]:
         "requires_pallet_jack": False,
         "requires_appointment": True,
         "explicit_pallet_count": None,
-        "handling_units": [
-            {
-                "quantity": 3,
-                "packaging_type": "carton",
-                "length_cm": "120",
-                "width_cm": "100",
-                "height_cm": "116.6666667",
-                "unit_weight_kg": "283.3333333",
-                "contained_customer_pieces": 10,
-            }
-        ],
     }
     data.update(overrides)
     return data
-
-
-def _audit_result(client: TestClient, quote_id: str) -> dict[str, object]:
-    response = client.get(f"/quotes/audit/{quote_id}")
-    assert response.status_code == 200
-    body = response.json()
-    result = body.get("result_json")
-    assert isinstance(result, dict)
-    return result
 
 
 def test_create_email_config_does_not_return_password() -> None:
@@ -180,17 +160,7 @@ def test_zone_calculate_success_notify_sends_email(monkeypatch) -> None:
     response = client.post("/quotes/zone-calculate", json={"quote": quote_payload(), "notify_email": True})
 
     assert response.status_code == 200
-    public = response.json()
-    assert set(public) == {
-        "quote_id",
-        "billing_pallets",
-        "total_price_usd",
-        "sales_note",
-        "manual_review_required",
-        "public_flags",
-    }
-    assert public["billing_pallets"] == 3
-    assert _audit_result(client, public["quote_id"])["source_type"] == "zone_matrix"
+    assert response.json()["source_type"] == "zone_matrix"
     assert len(sent) == 1
     assert "报价成功" in str(sent[0]["subject"])
     assert "total_price_usd" in str(sent[0]["body_text"])
@@ -209,9 +179,6 @@ def test_manual_required_auto_sends_email(monkeypatch) -> None:
     response = client.post("/quotes/zone-calculate", json=quote_payload())
 
     assert response.status_code == 200
-    public = response.json()
-    assert public["manual_review_required"] is True
-    assert public["billing_pallets"] is None
-    assert _audit_result(client, public["quote_id"])["source_type"] == "manual_required"
+    assert response.json()["source_type"] == "manual_required"
     assert len(sent) == 1
     assert "需要人工确认" in str(sent[0]["subject"])

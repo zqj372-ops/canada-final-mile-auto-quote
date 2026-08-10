@@ -6,17 +6,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from apps.api.auth import ADMIN_ROLES, require_roles
-from apps.api.auth import CurrentActor
-from apps.api.db.repositories.fcl_rate_card_repository import FCLQuoteConfigRepository
-from apps.api.db.repositories.oversize_pallet_rule_repository import OversizePalletRuleRepository
 from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
 from apps.api.db.repositories.zone_city_rule_repository import ZoneCityRuleRepository
 from apps.api.db.repositories.zone_price_matrix_repository import ZonePriceMatrixRepository
 from apps.api.db.session import get_db
 from packages.quote_engine.workbench_config import QuoteWorkbenchConfig
 from packages.quote_engine.zone_config import ZonePricingConfig
-from packages.quote_engine.fcl import FCLFeeLine, FCLQuoteConfig, FCLRateCardPayload
-from packages.quote_engine.oversize_config import OversizePalletRuleConfig
 
 
 CONFIG_READ_ROLES = ("admin", "operator", "sales", "viewer")
@@ -142,37 +137,6 @@ class ZoneCityRuleGroupSaveResponse(BaseModel):
     created_count: int
     updated_count: int
     deactivated_count: int
-
-
-class FCLConfigAdminResponse(BaseModel):
-    draft: FCLQuoteConfig
-    published: FCLQuoteConfig | None
-    published_version: int
-
-
-class FCLRateCardRecord(FCLRateCardPayload):
-    id: int
-    status: str
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-
-
-class FCLPublishResponse(BaseModel):
-    config: FCLQuoteConfig
-    published_version: int
-
-
-class OversizePalletRuleAdminResponse(BaseModel):
-    draft: OversizePalletRuleConfig
-    published: OversizePalletRuleConfig | None
-    published_version: int
-    published_at: datetime | None = None
-
-
-class OversizePalletRulePublishResponse(BaseModel):
-    config: OversizePalletRuleConfig
-    published_version: int
-    published_at: datetime | None = None
 
 
 @router.get(
@@ -370,178 +334,5 @@ def save_zone_city_rule_group(
             rules=[rule.model_dump() for rule in payload.rules],
             deactivate_ids=payload.deactivate_ids,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.get(
-    "/fcl",
-    response_model=FCLConfigAdminResponse,
-    dependencies=[Depends(require_roles(*ADMIN_ROLES))],
-)
-def get_fcl_config(db: Session = Depends(get_db)) -> dict[str, object]:
-    return FCLQuoteConfigRepository(db).admin_snapshot()
-
-
-@router.put(
-    "/fcl/draft",
-    response_model=FCLConfigAdminResponse,
-    dependencies=[Depends(require_roles(*ADMIN_ROLES))],
-)
-def save_fcl_config_draft(
-    payload: FCLQuoteConfig,
-    db: Session = Depends(get_db),
-) -> dict[str, object]:
-    repository = FCLQuoteConfigRepository(db)
-    try:
-        repository.save_draft(payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return repository.admin_snapshot()
-
-
-@router.post(
-    "/fcl/validate",
-    response_model=dict[str, object],
-    dependencies=[Depends(require_roles(*ADMIN_ROLES))],
-)
-def validate_fcl_config(db: Session = Depends(get_db)) -> dict[str, object]:
-    errors = FCLQuoteConfigRepository(db).validate_draft()
-    return {"valid": not errors, "errors": errors}
-
-
-@router.post(
-    "/fcl/publish",
-    response_model=FCLPublishResponse,
-)
-def publish_fcl_config(
-    db: Session = Depends(get_db),
-    actor: CurrentActor = Depends(require_roles(*ADMIN_ROLES)),
-) -> dict[str, object]:
-    try:
-        config, version = FCLQuoteConfigRepository(db).publish_draft(actor)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"config": config, "published_version": version}
-
-
-@router.get(
-    "/oversize-pallet-rule",
-    response_model=OversizePalletRuleAdminResponse,
-    dependencies=[Depends(require_roles(*CONFIG_READ_ROLES))],
-)
-def get_oversize_pallet_rule_config(db: Session = Depends(get_db)) -> dict[str, object]:
-    return OversizePalletRuleRepository(db).admin_snapshot()
-
-
-@router.put(
-    "/oversize-pallet-rule/draft",
-    response_model=OversizePalletRuleAdminResponse,
-    dependencies=[Depends(require_roles(*ADMIN_ROLES))],
-)
-def save_oversize_pallet_rule_draft(
-    payload: OversizePalletRuleConfig,
-    db: Session = Depends(get_db),
-) -> dict[str, object]:
-    repository = OversizePalletRuleRepository(db)
-    try:
-        repository.save_draft(payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return repository.admin_snapshot()
-
-
-@router.post(
-    "/oversize-pallet-rule/validate",
-    response_model=dict[str, object],
-    dependencies=[Depends(require_roles(*ADMIN_ROLES))],
-)
-def validate_oversize_pallet_rule_draft(db: Session = Depends(get_db)) -> dict[str, object]:
-    errors = OversizePalletRuleRepository(db).validate_draft()
-    return {"valid": not errors, "errors": errors}
-
-
-@router.post(
-    "/oversize-pallet-rule/publish",
-    response_model=OversizePalletRulePublishResponse,
-)
-def publish_oversize_pallet_rule_draft(
-    db: Session = Depends(get_db),
-    actor: CurrentActor = Depends(require_roles(*ADMIN_ROLES)),
-) -> dict[str, object]:
-    try:
-        config, version = OversizePalletRuleRepository(db).publish_draft(actor)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {
-        "config": config,
-        "published_version": version,
-        "published_at": OversizePalletRuleRepository(db).latest_published_at(),
-    }
-
-
-@router.get(
-    "/fcl-rate-cards",
-    response_model=list[FCLRateCardRecord],
-    dependencies=[Depends(require_roles(*ADMIN_ROLES))],
-)
-def list_fcl_rate_cards(
-    status: str | None = Query(default=None, pattern="^(draft|published)$"),
-    db: Session = Depends(get_db),
-) -> list[dict[str, object]]:
-    repository = FCLQuoteConfigRepository(db)
-    return [repository.to_dict(record) for record in repository.list_rate_cards(status=status)]
-
-
-@router.post(
-    "/fcl-rate-cards",
-    response_model=FCLRateCardRecord,
-    status_code=201,
-)
-def create_fcl_rate_card(
-    payload: FCLRateCardPayload,
-    db: Session = Depends(get_db),
-    _actor: CurrentActor = Depends(require_roles(*ADMIN_ROLES)),
-) -> dict[str, object]:
-    repository = FCLQuoteConfigRepository(db)
-    try:
-        return repository.to_dict(repository.create_rate_card(payload))
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.put(
-    "/fcl-rate-cards/{record_id}",
-    response_model=FCLRateCardRecord,
-)
-def update_fcl_rate_card(
-    record_id: int,
-    payload: FCLRateCardPayload,
-    db: Session = Depends(get_db),
-    _actor: CurrentActor = Depends(require_roles(*ADMIN_ROLES)),
-) -> dict[str, object]:
-    repository = FCLQuoteConfigRepository(db)
-    try:
-        return repository.to_dict(repository.update_rate_card(record_id, payload))
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-
-@router.post(
-    "/fcl-rate-cards/{record_id}/publish",
-    response_model=FCLRateCardRecord,
-)
-def publish_fcl_rate_card(
-    record_id: int,
-    db: Session = Depends(get_db),
-    _actor: CurrentActor = Depends(require_roles(*ADMIN_ROLES)),
-) -> dict[str, object]:
-    repository = FCLQuoteConfigRepository(db)
-    try:
-        return repository.to_dict(repository.publish_rate_card(record_id))
-    except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

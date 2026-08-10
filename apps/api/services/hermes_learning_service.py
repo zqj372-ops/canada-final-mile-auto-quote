@@ -59,14 +59,11 @@ def approve_hermes_candidate(
     payload: HermesCandidateReviewPayload,
     actor: CurrentActor,
 ) -> dict[str, object]:
-    try:
-        approved = HermesLearningCandidateRepository(db).approve(
-            candidate_id,
-            reviewed_by=actor.name,
-            review_note=payload.review_note,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    approved = HermesLearningCandidateRepository(db).approve(
+        candidate_id,
+        reviewed_by=actor.name,
+        review_note=payload.review_note,
+    )
     if approved is None:
         raise HTTPException(status_code=404, detail="Hermes learning candidate not found.")
     candidate, rule = approved
