@@ -575,6 +575,100 @@ def test_zone_preview_requires_explicit_context(monkeypatch: pytest.MonkeyPatch)
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize("path", ["/quotes/zone-calculate", "/quotes/zone-preview"])
+def test_quote_rejects_postal_province_conflict_before_business_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    repository_calls = 0
+    engine_calls = 0
+
+    def forbidden_repository(*_args, **_kwargs):
+        nonlocal repository_calls
+        repository_calls += 1
+        raise AssertionError("province conflict must be rejected before pricing config lookup")
+
+    def forbidden_engine(*_args, **_kwargs):
+        nonlocal engine_calls
+        engine_calls += 1
+        raise AssertionError("province conflict must be rejected before zone engine lookup")
+
+    monkeypatch.setattr(quote_service.QuoteRuleConfigRepository, "get_zone_pricing_config", forbidden_repository)
+    monkeypatch.setattr(quote_service.ZoneQuoteEngine, "quote", forbidden_engine)
+    monkeypatch.setattr(quote_service, "get_source_status", forbidden_repository)
+    body = (
+        preview_payload(province="AB")
+        if path.endswith("zone-preview")
+        else base_payload(province="AB")
+    )
+
+    response = client.post(path, json=body)
+
+    assert response.status_code == 422
+    assert repository_calls == 0
+    assert engine_calls == 0
+
+
+@pytest.mark.parametrize("path", ["/quotes/zone-calculate", "/quotes/zone-preview"])
+def test_quote_rejects_unresolved_postal_province_without_guessing(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    calls = 0
+
+    def forbidden(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("unresolved postal province must be rejected before business reads")
+
+    monkeypatch.setattr(quote_service.QuoteRuleConfigRepository, "get_zone_pricing_config", forbidden)
+    monkeypatch.setattr(quote_service.ZoneQuoteEngine, "quote", forbidden)
+    monkeypatch.setattr(quote_service, "get_source_status", forbidden)
+    body = (
+        preview_payload(postal_code="Z1Z 1Z1", province=None)
+        if path.endswith("zone-preview")
+        else base_payload(postal_code="Z1Z 1Z1", province=None)
+    )
+
+    response = client.post(path, json=body)
+
+    assert response.status_code == 422
+    assert calls == 0
+
+
+@pytest.mark.parametrize("path", ["/quotes/zone-calculate", "/quotes/zone-preview"])
+def test_quote_rejects_unknown_explicit_province_before_business_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    calls = 0
+
+    def forbidden(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("unknown province must be rejected before business reads")
+
+    monkeypatch.setattr(quote_service.QuoteRuleConfigRepository, "get_zone_pricing_config", forbidden)
+    monkeypatch.setattr(quote_service.ZoneQuoteEngine, "quote", forbidden)
+    monkeypatch.setattr(quote_service, "get_source_status", forbidden)
+    body = (
+        preview_payload(province="ZZ")
+        if path.endswith("zone-preview")
+        else base_payload(province="ZZ")
+    )
+
+    response = client.post(path, json=body)
+
+    assert response.status_code == 422
+    assert calls == 0
+
+
 def test_zone_preview_rejects_noncanonical_origin_before_engine_lookup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -861,15 +955,36 @@ def test_production_deploy_requires_dispatch_inputs_before_ssh() -> None:
     workflow = Path(".github/workflows/ci.yml").read_text()
     deploy = workflow[workflow.index("  deploy:"):]
     input_gate = deploy.index("Require controlled quote release inputs")
+    validation_command = deploy.index("python scripts/publish_quote_release.py")
     first_ssh = deploy.index("ssh ")
 
-    assert "if: github.event_name == 'workflow_dispatch'" in deploy
+    assert "if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in deploy
     assert "github.event_name == 'push'" not in deploy
     assert input_gate < first_ssh
+    assert input_gate < validation_command < first_ssh
+    assert 'test "$QUOTE_TEST_DATA" = "false"' in deploy
+    assert 'options: ["false"]' in workflow
+    assert 'options: ["false", "true"]' not in workflow
+    assert "validate-only" in deploy
+    assert "--deployment-sha" in deploy
+    assert "--deployment-ref" in deploy
+    assert "API_PORT" in deploy
+    assert "28000" not in deploy
+    assert "DEPLOY_REF" not in deploy
     assert "scripts/publish_quote_release.py" in deploy
-    assert "http://127.0.0.1:28000/status" in deploy
+    assert "base64 -d" in deploy
+    assert "--rule-version '${QUOTE_RULE_VERSION}'" not in deploy
+    assert "--data-version '${QUOTE_DATA_VERSION}'" not in deploy
+    assert "--published-at '${QUOTE_PUBLISHED_AT}'" not in deploy
+    assert "-H 'X-API-Key: ${QUOTE_READINESS_API_KEY}'" not in deploy
+    assert "--deployment-ref '${GITHUB_REF}'" not in deploy
+    assert "--deployment-ref 'refs/heads/main'" in deploy
+    assert "--test-data false" in deploy
+    assert "API_PORT: 18000" in deploy
+    assert "http://127.0.0.1:${API_PORT}/status" in deploy
     assert "https://quote.freightclaw.net/api/status" in deploy
     assert "DEPLOY_SHA: ${DEPLOY_SHA:?DEPLOY_SHA is required}" in Path("infra/docker-compose.prod.yml").read_text()
+    assert "API_PORT=18000" in Path("infra/.env.prod.example").read_text()
     assert "QUOTE_RELEASE_ID=<deployment-commit-sha>" in Path("infra/.env.prod.example").read_text()
 
 

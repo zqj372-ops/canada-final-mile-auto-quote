@@ -570,6 +570,65 @@ def test_publish_rejects_deployed_commit_mismatch(monkeypatch: pytest.MonkeyPatc
         )
 
 
+@pytest.mark.parametrize(
+    ("overrides", "reason"),
+    [
+        ({"deployment_sha": "not-a-commit"}, "deployment_config_invalid:DEPLOY_SHA"),
+        ({"deployment_ref": "refs/heads/feature"}, "deployment_ref_not_allowed"),
+        ({"published_at": datetime.now(timezone.utc) + timedelta(days=1)}, "release_manifest_invalid:published_at"),
+        (
+            {"valid_from": date.today() + timedelta(days=1), "valid_to": date.today()},
+            "release_manifest_invalid:effective_window",
+        ),
+        ({"rule_version": "latest"}, "release_manifest_invalid:rule_version"),
+    ],
+)
+def test_release_parameter_validation_is_pure_and_strict(
+    overrides: dict[str, object],
+    reason: str,
+) -> None:
+    from apps.api.services.quote_release_service import validate_quote_release_inputs
+
+    release_sha = "a" * 40
+    values: dict[str, object] = {
+        "release_id": release_sha,
+        "service_version": "0.1.0",
+        "rule_version": "rules-1",
+        "data_version": "data-1",
+        "published_at": datetime.now(timezone.utc),
+        "valid_from": date.today(),
+        "valid_to": date.today() + timedelta(days=1),
+        "test_data": False,
+        "deployment_sha": release_sha,
+        "deployment_ref": "refs/heads/main",
+    }
+    values.update(overrides)
+
+    with pytest.raises(ValueError, match=reason):
+        validate_quote_release_inputs(**values)
+
+
+def test_zone_pricing_config_query_filters_valid_keys() -> None:
+    from sqlalchemy import event
+
+    from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
+
+    engine = create_engine("sqlite+pysqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    statements: list[str] = []
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def capture(_connection, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    with Session(bind=engine) as session:
+        session.add(QuoteRuleConfig(key="unrelated_config", value="ignored", description="ignored"))
+        session.commit()
+        QuoteRuleConfigRepository(session).get_zone_pricing_config()
+
+    assert any("quote_rule_config" in statement and " IN " in statement.upper() for statement in statements)
+
+
 def test_status_evidence_reads_do_not_take_postgres_locks() -> None:
     from apps.api.db.models import QuoteReleaseManifest
 

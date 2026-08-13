@@ -1,7 +1,7 @@
-# GitHub 自动部署
+# GitHub 受控部署
 
 生产部署已经接入 `.github/workflows/ci.yml`。服务器不需要保存 GitHub
-账号或 Personal Access Token；GitHub Actions 在 CI 通过后经 SSH 同步已检出的确切提交。
+账号或 Personal Access Token；只有 `main` 分支的手动 workflow dispatch 在全部门禁通过后，才经 SSH 同步已检出的确切提交。
 
 ```text
 git push
@@ -67,18 +67,19 @@ sudo -n docker compose \
 
 ```text
 /home/opc/canada-final-mile-auto-quote/.deploy-state/current-sha
-/home/opc/canada-final-mile-auto-quote/.deploy-state/current-ref
 /home/opc/canada-final-mile-auto-quote/.deploy-state/deployed-at
 ```
 
 ## 日常使用
 
-正常发布只需要把通过评审的修改推送到生产分支：
+正常发布分两步：先推送通过评审的修改触发只读 CI，再在 `main` 上手动 dispatch 生产 workflow 并填写完整发布参数：
 
 ```bash
 git push origin main
 ```
 
-在仓库的 **Actions → CI & Deploy** 可以查看测试、构建、部署和健康检查结果。
-需要回退时，对问题提交执行 `git revert` 并推送；回退提交会走同一套 CI 和自动部署，
-不要在服务器上手工覆盖代码。
+在仓库的 **Actions → CI & Deploy** 手动选择 `main` 并填写规则版本、数据版本、UTC
+发布时间、有效窗口和 `test_data=false`。参数校验、版本/提交绑定和 ref 校验均在首个
+SSH/rsync/Compose 步骤之前完成；参数缺失、测试数据或非 `main` ref 会零生产副作用失败。
+部署成功后线上只记录 `.deploy-state/current-sha` 和 `.deploy-state/deployed-at`。
+需要回退时，对问题提交执行 `git revert`、重新跑 CI，再对 `main` 手动 dispatch；不要在服务器上手工覆盖代码。

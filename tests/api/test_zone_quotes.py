@@ -871,12 +871,8 @@ def test_postal_province_prevents_wrong_origin_from_parser_or_address_data() -> 
         json=base_payload(postal_code="V6V 1A1", city="Richmond", province="ON"),
     )
 
-    body = response.json()
-    assert body["source_type"] == "manual_required"
-    assert body["province"] == "BC"
-    assert body["origin"] is None
-    assert body["zone"] is None
-    assert body["total_price_usd"] is None
+    assert response.status_code == 422
+    assert response.json()["detail"] == "province does not match the Canadian postal code."
 
 
 def test_t1x_prefers_expected_calgary_origin_over_stale_toronto_record() -> None:

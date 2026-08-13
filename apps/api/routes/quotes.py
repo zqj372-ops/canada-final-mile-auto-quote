@@ -13,6 +13,7 @@ from apps.api.services.quote_service import (
     calculate_vendor_quote,
     calculate_zone_quote as calculate_zone_quote_service,
     calculate_zone_quote_preview as calculate_zone_quote_preview_service,
+    validate_zone_quote_request,
 )
 from apps.api.services.source_status_service import SourceStatus, quote_version
 from packages.quote_engine.models import QuoteResult, ShipmentInput
@@ -101,6 +102,7 @@ def calculate_zone_quote(
     payload: ZoneQuoteWithNotifyRequest,
     db: Session = Depends(get_db),
 ) -> ZoneQuoteResult:
+    _validate_quote_request(payload.quote)
     return calculate_zone_quote_service(
         db,
         payload.quote,
@@ -136,6 +138,7 @@ def preview_zone_quote(
     ),
     db: Session = Depends(get_db),
 ) -> ZoneQuotePreviewResponse | JSONResponse:
+    _validate_quote_request(payload.quote)
     requested_origin = _validate_preview_origin(payload)
     if payload.effective_date != date.today():
         raise HTTPException(
@@ -154,6 +157,13 @@ def preview_zone_quote(
     if response.status == "unavailable":
         return JSONResponse(status_code=503, content=response.model_dump(mode="json"))
     return response
+
+
+def _validate_quote_request(payload: ZoneQuoteRequest) -> None:
+    try:
+        validate_zone_quote_request(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
 def _validate_preview_origin(payload: ZoneQuotePreviewRequest) -> str:

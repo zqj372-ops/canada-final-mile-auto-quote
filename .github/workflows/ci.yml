@@ -34,7 +34,7 @@ on:
         required: true
         default: "false"
         type: choice
-        options: ["false", "true"]
+        options: ["false"]
 
 permissions:
   contents: read
@@ -104,7 +104,7 @@ jobs:
   deploy:
     name: Deploy production
     needs: test
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
@@ -120,8 +120,8 @@ jobs:
       COMPOSE_PROJECT: canada_quote_oracle
       COMPOSE_FILE: infra/docker-compose.prod.yml
       ENV_FILE: .env.prod
+      API_PORT: 18000
       DEPLOY_SHA: ${{ github.sha }}
-      DEPLOY_REF: ${{ github.ref_name }}
       QUOTE_RULE_VERSION: ${{ inputs.quote_rule_version || '' }}
       QUOTE_DATA_VERSION: ${{ inputs.quote_data_version || '' }}
       QUOTE_PUBLISHED_AT: ${{ inputs.quote_published_at || '' }}
@@ -133,17 +133,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Set up Python for release validation
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install release validation package
+        run: python -m pip install -e .
+
       - name: Require controlled quote release inputs
         run: |
           set -euo pipefail
-          for value in "$QUOTE_RULE_VERSION" "$QUOTE_DATA_VERSION" "$QUOTE_PUBLISHED_AT" "$QUOTE_VALID_FROM" "$QUOTE_VALID_TO" "$QUOTE_TEST_DATA"; do
-            test -n "$value"
-            case "$value" in *"'"*) echo "::error::quote release inputs may not contain single quotes."; exit 1 ;; esac
-          done
-          case "$QUOTE_TEST_DATA" in
-            true|false) ;;
-            *) echo "::error::quote_test_data must be true or false; automatic pushes must use workflow_dispatch with explicit release inputs."; exit 1 ;;
-          esac
+          test "$QUOTE_TEST_DATA" = "false"
+          python scripts/publish_quote_release.py \
+            --validate-only \
+            --release-id "$DEPLOY_SHA" \
+            --service-version "$(python -c 'from importlib import metadata; print(metadata.version("canada-final-mile-auto-quote"))')" \
+            --rule-version "$QUOTE_RULE_VERSION" \
+            --data-version "$QUOTE_DATA_VERSION" \
+            --published-at "$QUOTE_PUBLISHED_AT" \
+            --valid-from "$QUOTE_VALID_FROM" \
+            --valid-to "$QUOTE_VALID_TO" \
+            --test-data "$QUOTE_TEST_DATA" \
+            --deployment-sha "$DEPLOY_SHA" \
+            --deployment-ref "$GITHUB_REF"
 
       - name: Configure production SSH
         env:
@@ -210,18 +223,23 @@ jobs:
       - name: Migrate and start production services
         run: |
           set -euo pipefail
-          ssh production "set -e; cd '${DEPLOY_PATH}'; sudo -n env DEPLOY_SHA='${DEPLOY_SHA}' QUOTE_RELEASE_ID='${DEPLOY_SHA}' docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' up -d --build api web"
+          ssh production "set -e; cd '${DEPLOY_PATH}'; sudo -n env API_PORT='${API_PORT}' DEPLOY_SHA='${DEPLOY_SHA}' QUOTE_RELEASE_ID='${DEPLOY_SHA}' docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' up -d --build api web"
 
       - name: Verify production health
         run: |
           set -euo pipefail
-          ssh production "set -e; for attempt in \$(seq 1 24); do if curl -fsS --max-time 10 http://127.0.0.1:28000/health; then exit 0; fi; sleep 5; done; exit 1"
+          ssh production "set -e; for attempt in \$(seq 1 24); do if curl -fsS --max-time 10 http://127.0.0.1:${API_PORT}/health; then exit 0; fi; sleep 5; done; exit 1"
           curl --fail --silent --show-error --retry 5 --retry-delay 5 https://quote.freightclaw.net/api/health
 
       - name: Publish controlled quote release
         run: |
           set -euo pipefail
-          ssh production "set -e; cd '${DEPLOY_PATH}'; service_version=\$(sudo -n env DEPLOY_SHA='${DEPLOY_SHA}' QUOTE_RELEASE_ID='${DEPLOY_SHA}' docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' exec -T api python -c 'from importlib import metadata; print(metadata.version(\"canada-final-mile-auto-quote\"))'); sudo -n env DEPLOY_SHA='${DEPLOY_SHA}' QUOTE_RELEASE_ID='${DEPLOY_SHA}' docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' exec -T api python scripts/publish_quote_release.py --release-id '${DEPLOY_SHA}' --service-version \"\$service_version\" --rule-version '${QUOTE_RULE_VERSION}' --data-version '${QUOTE_DATA_VERSION}' --published-at '${QUOTE_PUBLISHED_AT}' --valid-from '${QUOTE_VALID_FROM}' --valid-to '${QUOTE_VALID_TO}' --test-data '${QUOTE_TEST_DATA}'"
+          rule_version_b64="$(printf '%s' "$QUOTE_RULE_VERSION" | base64 | tr -d '\n')"
+          data_version_b64="$(printf '%s' "$QUOTE_DATA_VERSION" | base64 | tr -d '\n')"
+          published_at_b64="$(printf '%s' "$QUOTE_PUBLISHED_AT" | base64 | tr -d '\n')"
+          valid_from_b64="$(printf '%s' "$QUOTE_VALID_FROM" | base64 | tr -d '\n')"
+          valid_to_b64="$(printf '%s' "$QUOTE_VALID_TO" | base64 | tr -d '\n')"
+          ssh production "set -e; cd '${DEPLOY_PATH}'; rule_version=\$(printf '%s' '${rule_version_b64}' | base64 -d); data_version=\$(printf '%s' '${data_version_b64}' | base64 -d); published_at=\$(printf '%s' '${published_at_b64}' | base64 -d); valid_from=\$(printf '%s' '${valid_from_b64}' | base64 -d); valid_to=\$(printf '%s' '${valid_to_b64}' | base64 -d); service_version=\$(sudo -n env API_PORT='${API_PORT}' DEPLOY_SHA='${DEPLOY_SHA}' QUOTE_RELEASE_ID='${DEPLOY_SHA}' docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' exec -T api python -c 'from importlib import metadata; print(metadata.version(\"canada-final-mile-auto-quote\"))'); sudo -n env API_PORT='${API_PORT}' DEPLOY_SHA='${DEPLOY_SHA}' QUOTE_RELEASE_ID='${DEPLOY_SHA}' docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' exec -T api python scripts/publish_quote_release.py --release-id '${DEPLOY_SHA}' --service-version \"\$service_version\" --rule-version \"\$rule_version\" --data-version \"\$data_version\" --published-at \"\$published_at\" --valid-from \"\$valid_from\" --valid-to \"\$valid_to\" --test-data false --deployment-sha '${DEPLOY_SHA}' --deployment-ref 'refs/heads/main'"
 
       - name: Verify quote release readiness
         env:
@@ -229,20 +247,20 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$QUOTE_READINESS_API_KEY"
+          readiness_key_b64="$(printf '%s' "$QUOTE_READINESS_API_KEY" | base64 | tr -d '\n')"
           check_readiness() {
             DEPLOY_SHA="$DEPLOY_SHA" python3 -c 'import json, os, sys; body = json.load(sys.stdin); raise SystemExit(0 if body.get("ready") is True and body.get("test_data") is False and body.get("release_id") == os.environ["DEPLOY_SHA"] and isinstance(body.get("snapshot_hash"), str) else 1)'
           }
-          ssh production "curl --fail --silent --show-error --max-time 10 -H 'X-API-Key: ${QUOTE_READINESS_API_KEY}' http://127.0.0.1:28000/status" | check_readiness
+          ssh production "readiness_key=\$(printf '%s' '${readiness_key_b64}' | base64 -d); curl --fail --silent --show-error --max-time 10 -H \"X-API-Key: \$readiness_key\" http://127.0.0.1:${API_PORT}/status" | check_readiness
           curl --fail --silent --show-error --max-time 10 -H "X-API-Key: ${QUOTE_READINESS_API_KEY}" https://quote.freightclaw.net/api/status | check_readiness
 
       - name: Record deployed revision
         run: |
           set -euo pipefail
-          ssh production "set -e; install -d '${DEPLOY_PATH}/.deploy-state'; printf '%s\n' '${DEPLOY_SHA}' > '${DEPLOY_PATH}/.deploy-state/current-sha'; printf '%s\n' '${DEPLOY_REF}' > '${DEPLOY_PATH}/.deploy-state/current-ref'; date -u '+%Y-%m-%dT%H:%M:%SZ' > '${DEPLOY_PATH}/.deploy-state/deployed-at'"
+          ssh production "set -e; install -d '${DEPLOY_PATH}/.deploy-state'; printf '%s\n' '${DEPLOY_SHA}' > '${DEPLOY_PATH}/.deploy-state/current-sha'; date -u '+%Y-%m-%dT%H:%M:%SZ' > '${DEPLOY_PATH}/.deploy-state/deployed-at'"
           {
             echo "## Production deployment succeeded"
             echo
-            echo "- Ref: \`${DEPLOY_REF}\`"
             echo "- Commit: \`${DEPLOY_SHA}\`"
             echo "- URL: https://quote.freightclaw.net"
           } >> "$GITHUB_STEP_SUMMARY"

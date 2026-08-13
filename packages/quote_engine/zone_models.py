@@ -59,7 +59,10 @@ class ZoneQuoteRequest(BaseModel):
     @field_validator("province")
     @classmethod
     def normalize_province_value(cls, value: str | None) -> str | None:
-        return normalize_province(value)
+        normalized = normalize_province(value)
+        if value and normalized is None:
+            raise ValueError("province must be a supported Canadian province")
+        return normalized
 
     @field_validator("packaging_type")
     @classmethod

@@ -140,7 +140,9 @@ python scripts/publish_quote_release.py \
   --published-at "<UTC ISO-8601 timestamp>" \
   --valid-from "<YYYY-MM-DD>" \
   --valid-to "<YYYY-MM-DD>" \
-  --test-data false
+  --test-data false \
+  --deployment-sha "$DEPLOY_SHA" \
+  --deployment-ref "refs/heads/main"
 ```
 
 发布事务只计算一次 source snapshot hash，并把显式 `--test-data` 与数据标记检测取逻辑或；
@@ -148,13 +150,13 @@ python scripts/publish_quote_release.py \
 `test_data=true`。发布后必须用内网 `/status` 和公网 `/api/status` 验证 `ready=true`、
 `test_data=false`、release_id 等于部署 SHA 和 snapshot hash。
 
-## GitHub 自动部署
+## GitHub 受控部署
 
 推送到生产分支后，GitHub Actions 只运行完整测试、数据库迁移验证和前端构建，不触碰生产。
 生产部署必须手动 dispatch 并填写受控发布参数；通过后才同步生产服务器、迁移并启动
 API/Web、发布 manifest、检查内外网 readiness。服务器无需手工 `git pull`。Secrets、
 分支策略、部署版本记录和回退方法见
-[GitHub 自动部署说明](docs/GITHUB_DEPLOYMENT.md)。
+[GitHub 受控部署说明](docs/GITHUB_DEPLOYMENT.md)。
 
 本地 Compose 会在 API 启动前自动执行 `alembic upgrade head`。如需加载演示数据：
 

@@ -88,7 +88,9 @@ class QuoteRuleConfigRepository:
         valid_keys = set(ZonePricingConfig.model_fields)
 
         for record in self.session.scalars(
-            select(QuoteRuleConfig).execution_options(stream_results=True, yield_per=5000)
+            select(QuoteRuleConfig)
+            .where(QuoteRuleConfig.key.in_(valid_keys))
+            .execution_options(stream_results=True, yield_per=5000)
         ):
             if record.key not in valid_keys:
                 continue

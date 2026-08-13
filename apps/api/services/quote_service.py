@@ -58,6 +58,7 @@ def calculate_zone_quote(
     persist_side_effects: bool = True,
     use_learned_rules: bool = True,
 ) -> ZoneQuoteResult:
+    validate_zone_quote_request(payload)
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
     if use_learned_rules:
@@ -102,6 +103,7 @@ def calculate_zone_quote_preview(
     *,
     origin: str,
 ) -> tuple[SourceStatus, ZoneQuoteResult | None, list[str]]:
+    validate_zone_quote_request(payload)
     status = get_source_status(db)
     if not status.ready:
         return status, None, list(status.reasons)
@@ -125,6 +127,14 @@ def calculate_zone_quote_preview(
     if result.origin is not None and normalize_origin(result.origin) != origin:
         return status, None, ["origin_mismatch"]
     return status, result, []
+
+
+def validate_zone_quote_request(payload: ZoneQuoteRequest) -> None:
+    postal_province = get_province_from_postal_code(payload.postal_code)
+    if postal_province is None or postal_province not in ORIGIN_BY_PROVINCE:
+        raise ValueError("postal_code province is not supported by the current quote engine.")
+    if payload.province is not None and payload.province != postal_province:
+        raise ValueError("province does not match the Canadian postal code.")
 
 
 def apply_learned_quote_if_available(
