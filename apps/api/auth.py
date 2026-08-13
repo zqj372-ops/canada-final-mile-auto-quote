@@ -74,7 +74,7 @@ def require_roles(
 
     def dependency(
         authorization: str | None = Header(default=None, alias="Authorization"),
-        x_api_key: str | None = Depends(api_key_header),
+        x_api_key: str | None = Header(default=None, alias="X-API-Key"),
         db: Session = Depends(get_db),
     ) -> CurrentActor:
         if is_auth_disabled():

@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from fastapi.testclient import TestClient
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -189,6 +189,12 @@ def build_client() -> TestClient:
                     test_data=os.getenv("QUOTE_TEST_DATA", "false").lower() in {"1", "true", "yes", "on"},
                     active=True,
                 )
+            )
+            session.commit()
+            manifest = session.query(QuoteReleaseManifest).filter_by(release_id="release-20260812-a").one()
+            session.execute(
+                text("UPDATE quote_release_manifest SET published_at = :published_at WHERE id = :id"),
+                {"published_at": datetime(2026, 8, 12, 10, tzinfo=timezone.utc).isoformat(), "id": manifest.id},
             )
             session.commit()
 

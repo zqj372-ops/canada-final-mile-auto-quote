@@ -1,11 +1,11 @@
 from collections.abc import Generator
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import os
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -80,6 +80,12 @@ def add_release_manifest(session: Session, *, test_data: bool = False) -> None:
         )
     )
     session.commit()
+    manifest = session.query(QuoteReleaseManifest).filter_by(release_id="release-20260812-a").one()
+    session.execute(
+        text("UPDATE quote_release_manifest SET published_at = :published_at WHERE id = :id"),
+        {"published_at": datetime(2026, 8, 12, 10, tzinfo=timezone.utc).isoformat(), "id": manifest.id},
+    )
+    session.commit()
 
 
 def test_source_status_is_not_ready_without_release_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -140,6 +146,74 @@ def test_source_status_uses_explicit_deployment_evidence(monkeypatch: pytest.Mon
         "valid_from": "2026-07-28",
         "valid_to": "2026-12-31",
     }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("release_id", " "),
+        ("service_version", " "),
+        ("rule_version", " "),
+        ("data_version", " "),
+        ("release_id", "null"),
+        ("service_version", "latest"),
+        ("rule_version", "unknown"),
+        ("data_version", "pending"),
+    ],
+)
+def test_preview_rejects_invalid_release_manifest_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client(manifest_overrides={field: value})
+
+    status_response = client.get("/api/status")
+    preview_response = client.post("/quotes/zone-preview", json=preview_payload())
+
+    assert status_response.status_code == 200
+    assert status_response.json()["ready"] is False
+    assert f"release_manifest_invalid:{field}" in status_response.json()["reasons"]
+    assert preview_response.status_code == 503
+    assert preview_response.json()["quote_version"] is None
+    assert f"release_manifest_invalid:{field}" in preview_response.json()["reasons"]
+
+
+def test_preview_rejects_naive_release_manifest_published_at(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client(manifest_overrides={"published_at": datetime.now().replace(microsecond=0)})
+
+    response = client.post("/quotes/zone-preview", json=preview_payload())
+
+    assert response.status_code == 503
+    assert response.json()["quote_version"] is None
+    assert "release_manifest_invalid:published_at" in response.json()["reasons"]
+
+
+def test_preview_rejects_future_release_manifest_published_at(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client(
+        manifest_overrides={"published_at": datetime.now(timezone.utc) + timedelta(minutes=5)}
+    )
+
+    response = client.post("/quotes/zone-preview", json=preview_payload())
+
+    assert response.status_code == 503
+    assert response.json()["quote_version"] is None
+    assert "release_manifest_invalid:published_at" in response.json()["reasons"]
+
+
+def test_source_status_normalizes_manifest_published_at_to_utc(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    published_at = datetime(2026, 8, 13, 8, tzinfo=timezone(timedelta(hours=8)))
+    client = build_client(manifest_overrides={"published_at": published_at})
+
+    response = client.get("/api/status")
+
+    assert response.status_code == 200
+    assert response.json()["ready"] is True
+    assert response.json()["published_at"] == "2026-08-13T00:00:00+00:00"
 
 
 def test_source_status_rejects_test_data_as_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -680,6 +754,21 @@ def test_preview_openapi_matches_api_key_only_contract() -> None:
     assert all(parameter["name"] != "Authorization" for parameter in source_status.get("parameters", []))
     assert {"401", "403", "503"}.issubset(preview["responses"])
     assert {"401", "403"}.issubset(source_status["responses"])
+    assert preview["responses"]["503"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/ZoneQuotePreviewResponse"
+    )
+
+
+def test_existing_auth_openapi_keeps_header_contract() -> None:
+    schema = app.openapi()
+    for path, method in [
+        ("/quotes/zone-calculate", "post"),
+        ("/quotes/calculate", "post"),
+        ("/auth/me", "get"),
+    ]:
+        operation = schema["paths"][path][method]
+        assert "security" not in operation
+        assert {parameter["name"] for parameter in operation["parameters"]} >= {"Authorization", "X-API-Key"}
 
 
 def test_zone_preview_fails_closed_when_versions_switch(monkeypatch: pytest.MonkeyPatch) -> None:

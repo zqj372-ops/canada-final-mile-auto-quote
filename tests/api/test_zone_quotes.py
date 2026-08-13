@@ -4,7 +4,7 @@ from decimal import Decimal
 from collections.abc import Generator
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -32,6 +32,7 @@ def build_client(
     zone_rules: list[dict[str, object]] | None = None,
     prices: list[dict[str, object]] | None = None,
     quote_rule_configs: list[dict[str, object]] | None = None,
+    manifest_overrides: dict[str, object] | None = None,
 ) -> TestClient:
     engine = create_engine(
         "sqlite+pysqlite://",
@@ -74,21 +75,33 @@ def build_client(
             configured_hash = os.getenv("QUOTE_RELEASE_HASH")
             if configured_hash and configured_hash != "auto":
                 snapshot_hash = configured_hash
-            session.add(
-                QuoteReleaseManifest(
-                    release_id="release-20260812-a",
-                    snapshot_hash=snapshot_hash,
-                    service_version="0.1.0",
-                    rule_version="zone-rules-20260728",
-                    data_version="zone-data-20260728",
-                    published_at=datetime(2026, 8, 12, 10, tzinfo=timezone.utc),
-                    valid_from=date.fromisoformat(valid_from),
-                    valid_to=date.fromisoformat(valid_to),
-                    test_data=os.getenv("QUOTE_TEST_DATA", "false").lower() in {"1", "true", "yes", "on"},
-                    active=True,
-                )
-            )
+            manifest_values: dict[str, object] = {
+                "release_id": "release-20260812-a",
+                "snapshot_hash": snapshot_hash,
+                "service_version": "0.1.0",
+                "rule_version": "zone-rules-20260728",
+                "data_version": "zone-data-20260728",
+                "published_at": datetime(2026, 8, 12, 10, tzinfo=timezone.utc),
+                "valid_from": date.fromisoformat(valid_from),
+                "valid_to": date.fromisoformat(valid_to),
+                "test_data": os.getenv("QUOTE_TEST_DATA", "false").lower() in {"1", "true", "yes", "on"},
+                "active": True,
+            }
+            manifest_values.update(manifest_overrides or {})
+            session.add(QuoteReleaseManifest(**manifest_values))
             session.commit()
+            published_at = manifest_values.get("published_at")
+            if isinstance(published_at, datetime):
+                manifest_id = session.scalar(
+                    select(QuoteReleaseManifest.id).where(
+                        QuoteReleaseManifest.release_id == manifest_values["release_id"]
+                    )
+                )
+                session.execute(
+                    text("UPDATE quote_release_manifest SET published_at = :published_at WHERE id = :id"),
+                    {"published_at": published_at.isoformat(), "id": manifest_id},
+                )
+                session.commit()
 
     def override_get_db() -> Generator[Session]:
         with TestingSessionLocal() as session:

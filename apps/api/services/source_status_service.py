@@ -28,6 +28,19 @@ CONTRACT_VERSION = "quote-zone.v1"
 SUPPORTED_OPERATIONS = ["quote.zone_preview"]
 _EXPECTED_RELEASE_ENV = "QUOTE_RELEASE_ID"
 _TEST_DATA_MARKERS = {"demo", "fixture", "mock", "sample", "test", "test_data"}
+_MANIFEST_PLACEHOLDERS = {
+    "latest",
+    "unknown",
+    "none",
+    "null",
+    "pending",
+    "pending_review",
+    "draft",
+    "unset",
+    "tbd",
+    "n/a",
+    "na",
+}
 
 
 class SourceStatus(BaseModel):
@@ -63,8 +76,19 @@ def get_source_status(db: Session | None = None) -> SourceStatus:
     if test_data:
         reasons.append("test_data_not_authoritative")
 
+    manifest_values: dict[str, str | None] = {}
+    published_at: str | None = None
+    if manifest is not None:
+        for field in ("release_id", "service_version", "rule_version", "data_version"):
+            manifest_values[field] = _manifest_text(getattr(manifest, field), field, reasons)
+        published_at = _manifest_published_at(manifest.published_at, reasons)
+
     expected_release_id = _env(_EXPECTED_RELEASE_ENV)
-    if expected_release_id and manifest is not None and manifest.release_id != expected_release_id:
+    if (
+        expected_release_id
+        and manifest_values.get("release_id")
+        and manifest_values["release_id"] != expected_release_id
+    ):
         reasons.append("deployment_config_mismatch:QUOTE_RELEASE_ID")
     if manifest is not None and actual_snapshot_hash is not None:
         if _normalize_hash(manifest.snapshot_hash) != actual_snapshot_hash:
@@ -83,8 +107,8 @@ def get_source_status(db: Session | None = None) -> SourceStatus:
     return SourceStatus(
         ready=not reasons,
         test_data=bool(test_data),
-        service_version=manifest.service_version if manifest is not None else None,
-        release_id=manifest.release_id if manifest is not None else None,
+        service_version=manifest_values.get("service_version"),
+        release_id=manifest_values.get("release_id"),
         release_hash=(
             actual_snapshot_hash
             if manifest is not None
@@ -93,9 +117,9 @@ def get_source_status(db: Session | None = None) -> SourceStatus:
             else None
         ),
         snapshot_hash=actual_snapshot_hash,
-        rule_version=manifest.rule_version if manifest is not None else None,
-        data_version=manifest.data_version if manifest is not None else None,
-        published_at=_format_datetime(manifest.published_at) if manifest is not None else None,
+        rule_version=manifest_values.get("rule_version"),
+        data_version=manifest_values.get("data_version"),
+        published_at=published_at,
         reasons=reasons,
         supported_operations=list(SUPPORTED_OPERATIONS),
         valid_from=manifest.valid_from.isoformat() if manifest is not None else None,
@@ -268,10 +292,33 @@ def _source_data_is_test_data(db: Session) -> bool:
     return any(isinstance(value, str) and value.strip().lower() in _TEST_DATA_MARKERS for value in values)
 
 
-def _format_datetime(value: datetime) -> str:
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.isoformat()
+def _manifest_text(value: object, field: str, reasons: list[str]) -> str | None:
+    normalized = value.strip() if isinstance(value, str) else ""
+    if not normalized or normalized.lower() in _MANIFEST_PLACEHOLDERS:
+        reasons.append(f"release_manifest_invalid:{field}")
+        return None
+    return normalized
+
+
+def _manifest_published_at(value: object, reasons: list[str]) -> str | None:
+    try:
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, str):
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        else:
+            raise ValueError
+    except (TypeError, ValueError):
+        reasons.append("release_manifest_invalid:published_at")
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        reasons.append("release_manifest_invalid:published_at")
+        return None
+    normalized = parsed.astimezone(timezone.utc)
+    if normalized > datetime.now(timezone.utc):
+        reasons.append("release_manifest_invalid:published_at")
+        return None
+    return normalized.isoformat()
 
 
 def _canonical_decimal(value: Decimal | None) -> str | None:

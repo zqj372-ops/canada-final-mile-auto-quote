@@ -118,7 +118,10 @@ def calculate_zone_quote(
         401: {"description": "X-API-Key is missing or invalid."},
         403: {"description": "API key role, scope, or tenant is not allowed."},
         422: {"description": "The request context is invalid."},
-        503: {"description": "The authoritative quote release is unavailable or changed."},
+        503: {
+            "description": "The authoritative quote release is unavailable or changed.",
+            "model": ZoneQuotePreviewResponse,
+        },
     },
 )
 def preview_zone_quote(
