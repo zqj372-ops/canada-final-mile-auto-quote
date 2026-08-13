@@ -114,6 +114,12 @@ def calculate_zone_quote(
 @router.post(
     "/zone-preview",
     response_model=ZoneQuotePreviewResponse,
+    responses={
+        401: {"description": "X-API-Key is missing or invalid."},
+        403: {"description": "API key role, scope, or tenant is not allowed."},
+        422: {"description": "The request context is invalid."},
+        503: {"description": "The authoritative quote release is unavailable or changed."},
+    },
 )
 def preview_zone_quote(
     payload: ZoneQuotePreviewRequest,
@@ -190,7 +196,7 @@ def _build_zone_preview_response(
         quote_version=quote_version(source_status),
         status=status,
         source_type=result.source_type.value,
-        origin=requested_origin,
+        origin=result.origin,
         zone=result.zone,
         billing_pallets=result.billing_pallets,
         fees=fees,

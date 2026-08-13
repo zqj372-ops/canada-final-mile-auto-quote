@@ -223,6 +223,33 @@ class QuoteRuleConfig(Base):
     )
 
 
+class QuoteReleaseManifest(Base):
+    __tablename__ = "quote_release_manifest"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    release_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    snapshot_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    service_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    rule_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    data_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    valid_from: Mapped[date] = mapped_column(Date, nullable=False)
+    valid_to: Mapped[date] = mapped_column(Date, nullable=False)
+    test_data: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0", index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class QuoteAuditLog(Base):
     __tablename__ = "quote_audit_logs"
 

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import os
-import re
 import json
-from datetime import date, datetime
+import os
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from hashlib import sha256
 from typing import Literal
@@ -12,26 +11,23 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from apps.api.db.models import ZoneLookupRule, ZonePriceMatrix
+from apps.api.db.models import (
+    CityAlias,
+    PostalCodeCityLookup,
+    PostalZoneOverride,
+    QuoteReleaseManifest,
+    ZoneLookupRule,
+    ZonePriceMatrix,
+)
+from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
 
 
 SCHEMA_VERSION = "source-status.v1"
 SYSTEM = "ai_quote"
 CONTRACT_VERSION = "quote-zone.v1"
 SUPPORTED_OPERATIONS = ["quote.zone_preview"]
-_REQUIRED_ENV = (
-    "QUOTE_SERVICE_VERSION",
-    "QUOTE_RELEASE_ID",
-    "QUOTE_RELEASE_HASH",
-    "QUOTE_RULE_VERSION",
-    "QUOTE_DATA_VERSION",
-    "QUOTE_PUBLISHED_AT",
-    "QUOTE_VALID_FROM",
-    "QUOTE_VALID_TO",
-    "QUOTE_TEST_DATA",
-)
-_PLACEHOLDERS = {"latest", "unknown", "none", "null"}
-_HASH_PATTERN = re.compile(r"^(?:sha256:)?[0-9a-f]{7,64}$", re.IGNORECASE)
+_EXPECTED_RELEASE_ENV = "QUOTE_RELEASE_ID"
+_TEST_DATA_MARKERS = {"demo", "fixture", "mock", "sample", "test", "test_data"}
 
 
 class SourceStatus(BaseModel):
@@ -56,75 +52,76 @@ class SourceStatus(BaseModel):
 
 
 def get_source_status(db: Session | None = None) -> SourceStatus:
-    values = {name: _env(name) for name in _REQUIRED_ENV}
     reasons: list[str] = []
     actual_snapshot_hash = source_data_hash(db) if db is not None else None
-    for name in _REQUIRED_ENV:
-        if values[name] is None:
-            reasons.append(f"deployment_config_missing:{name}")
-
-    for name in ("QUOTE_SERVICE_VERSION", "QUOTE_RELEASE_ID", "QUOTE_RULE_VERSION", "QUOTE_DATA_VERSION"):
-        value = values[name]
-        if value is not None and value.lower() in _PLACEHOLDERS:
-            reasons.append(f"deployment_config_invalid:{name}")
-
-    release_hash = values["QUOTE_RELEASE_HASH"]
-    if release_hash is not None and (
-        release_hash.lower() in _PLACEHOLDERS or not _HASH_PATTERN.fullmatch(release_hash)
-    ):
-        reasons.append("deployment_config_invalid:QUOTE_RELEASE_HASH")
-
-    published_at = values["QUOTE_PUBLISHED_AT"]
-    if published_at is not None and not _parse_datetime(published_at):
-        reasons.append("deployment_config_invalid:QUOTE_PUBLISHED_AT")
-
-    valid_from = values["QUOTE_VALID_FROM"]
-    valid_from_date = _parse_date(valid_from) if valid_from is not None else None
-    if valid_from is not None and valid_from_date is None:
-        reasons.append("deployment_config_invalid:QUOTE_VALID_FROM")
-
-    valid_to = values["QUOTE_VALID_TO"]
-    valid_to_date = _parse_date(valid_to) if valid_to is not None else None
-    if valid_to is not None and valid_to_date is None:
-        reasons.append("deployment_config_invalid:QUOTE_VALID_TO")
-    if valid_from_date and valid_to_date and valid_to_date < valid_from_date:
-        reasons.append("deployment_config_invalid:effective_window")
-    today = date.today()
-    if valid_from_date and valid_from_date > today:
-        reasons.append("effective_window_not_active:before_valid_from")
-    if valid_to_date and valid_to_date < today:
-        reasons.append("effective_window_not_active:after_valid_to")
-
-    test_data = _parse_bool(values["QUOTE_TEST_DATA"])
-    if values["QUOTE_TEST_DATA"] is not None and test_data is None:
-        reasons.append("deployment_config_invalid:QUOTE_TEST_DATA")
-        test_data = False
+    manifest = _active_manifest(db) if db is not None else None
+    test_data = _source_data_is_test_data(db) if db is not None else False
+    if manifest is None:
+        reasons.append("release_manifest_missing")
+    elif manifest.test_data:
+        test_data = True
     if test_data:
         reasons.append("test_data_not_authoritative")
+
+    expected_release_id = _env(_EXPECTED_RELEASE_ENV)
+    if expected_release_id and manifest is not None and manifest.release_id != expected_release_id:
+        reasons.append("deployment_config_mismatch:QUOTE_RELEASE_ID")
+    if manifest is not None and actual_snapshot_hash is not None:
+        if _normalize_hash(manifest.snapshot_hash) != actual_snapshot_hash:
+            reasons.append("release_manifest_snapshot_mismatch")
+    if manifest is not None:
+        if manifest.valid_to < manifest.valid_from:
+            reasons.append("release_manifest_invalid:effective_window")
+        today = date.today()
+        if manifest.valid_from > today:
+            reasons.append("effective_window_not_active:before_valid_from")
+        if manifest.valid_to < today:
+            reasons.append("effective_window_not_active:after_valid_to")
     if actual_snapshot_hash is None:
         reasons.append("source_data_unavailable")
-    elif release_hash is not None and _normalize_hash(release_hash) != actual_snapshot_hash:
-        reasons.append("deployment_config_mismatch:QUOTE_RELEASE_HASH")
 
     return SourceStatus(
         ready=not reasons,
         test_data=bool(test_data),
-        service_version=values["QUOTE_SERVICE_VERSION"],
-        release_id=values["QUOTE_RELEASE_ID"],
-        release_hash=actual_snapshot_hash if release_hash and _normalize_hash(release_hash) == actual_snapshot_hash else None,
+        service_version=manifest.service_version if manifest is not None else None,
+        release_id=manifest.release_id if manifest is not None else None,
+        release_hash=(
+            actual_snapshot_hash
+            if manifest is not None
+            and actual_snapshot_hash is not None
+            and _normalize_hash(manifest.snapshot_hash) == actual_snapshot_hash
+            else None
+        ),
         snapshot_hash=actual_snapshot_hash,
-        rule_version=values["QUOTE_RULE_VERSION"],
-        data_version=values["QUOTE_DATA_VERSION"],
-        published_at=published_at,
+        rule_version=manifest.rule_version if manifest is not None else None,
+        data_version=manifest.data_version if manifest is not None else None,
+        published_at=_format_datetime(manifest.published_at) if manifest is not None else None,
         reasons=reasons,
         supported_operations=list(SUPPORTED_OPERATIONS),
-        valid_from=valid_from,
-        valid_to=valid_to,
+        valid_from=manifest.valid_from.isoformat() if manifest is not None else None,
+        valid_to=manifest.valid_to.isoformat() if manifest is not None else None,
     )
 
 
 def source_data_hash(db: Session) -> str:
     db.expire_all()
+    postal_city_lookups = db.scalars(
+        select(PostalCodeCityLookup)
+        .order_by(PostalCodeCityLookup.postal_code)
+        .execution_options(populate_existing=True)
+    ).all()
+    postal_overrides = db.scalars(
+        select(PostalZoneOverride)
+        .where(PostalZoneOverride.active.is_(True))
+        .order_by(PostalZoneOverride.postal_code, PostalZoneOverride.id)
+        .execution_options(populate_existing=True)
+    ).all()
+    city_aliases = db.scalars(
+        select(CityAlias)
+        .where(CityAlias.active.is_(True))
+        .order_by(CityAlias.province, CityAlias.alias_city, CityAlias.id)
+        .execution_options(populate_existing=True)
+    ).all()
     rules = db.scalars(
         select(ZoneLookupRule)
         .where(ZoneLookupRule.active.is_(True))
@@ -144,7 +141,51 @@ def source_data_hash(db: Session) -> str:
         .order_by(ZonePriceMatrix.origin, ZonePriceMatrix.zone, ZonePriceMatrix.billing_pallets, ZonePriceMatrix.id)
         .execution_options(populate_existing=True)
     ).all()
+    pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     payload = {
+        "postal_code_city_lookup": [
+            {
+                "postal_code": record.postal_code,
+                "preferred_city": record.preferred_city,
+                "province": record.province,
+                "fsa": record.fsa,
+                "official_city": record.official_city,
+                "municipality": record.municipality,
+                "latitude": _canonical_decimal(record.latitude),
+                "longitude": _canonical_decimal(record.longitude),
+                "source": record.source,
+            }
+            for record in postal_city_lookups
+        ],
+        "postal_zone_overrides": [
+            {
+                "id": record.id,
+                "postal_code": record.postal_code,
+                "postal_prefix": record.postal_prefix,
+                "province": record.province,
+                "canonical_city": record.canonical_city,
+                "origin": record.origin,
+                "zone": record.zone,
+                "confidence": record.confidence,
+                "active": record.active,
+                "source": record.source,
+                "note": record.note,
+            }
+            for record in postal_overrides
+        ],
+        "city_aliases": [
+            {
+                "id": record.id,
+                "province": record.province,
+                "alias_city": record.alias_city,
+                "canonical_city": record.canonical_city,
+                "alias_type": record.alias_type,
+                "active": record.active,
+                "source": record.source,
+                "note": record.note,
+            }
+            for record in city_aliases
+        ],
         "zone_lookup_rules": [
             {
                 "id": record.id,
@@ -173,6 +214,7 @@ def source_data_hash(db: Session) -> str:
             }
             for record in prices
         ],
+        "zone_pricing_config": pricing_config.model_dump(mode="json"),
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return f"sha256:{sha256(encoded).hexdigest()}"
@@ -205,31 +247,31 @@ def _env(name: str) -> str | None:
     return value.strip() if value and value.strip() else None
 
 
-def _parse_bool(value: str | None) -> bool | None:
-    if value is None:
+def _active_manifest(db: Session) -> QuoteReleaseManifest | None:
+    manifests = db.scalars(
+        select(QuoteReleaseManifest)
+        .where(QuoteReleaseManifest.active.is_(True))
+        .order_by(QuoteReleaseManifest.updated_at.desc(), QuoteReleaseManifest.id.desc())
+    ).all()
+    if len(manifests) != 1:
         return None
-    if value.lower() in {"1", "true", "yes", "on"}:
-        return True
-    if value.lower() in {"0", "false", "no", "off"}:
-        return False
-    return None
+    return manifests[0]
 
 
-def _parse_date(value: str | None) -> date | None:
-    if value is None:
-        return None
-    try:
-        return date.fromisoformat(value)
-    except ValueError:
-        return None
+def _source_data_is_test_data(db: Session) -> bool:
+    values = [
+        *db.scalars(select(PostalCodeCityLookup.source)).all(),
+        *db.scalars(select(PostalZoneOverride.source).where(PostalZoneOverride.active.is_(True))).all(),
+        *db.scalars(select(CityAlias.source).where(CityAlias.active.is_(True))).all(),
+        *db.scalars(select(ZonePriceMatrix.source)).all(),
+    ]
+    return any(isinstance(value, str) and value.strip().lower() in _TEST_DATA_MARKERS for value in values)
 
 
-def _parse_datetime(value: str) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo is not None else None
+def _format_datetime(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
 
 
 def _canonical_decimal(value: Decimal | None) -> str | None:

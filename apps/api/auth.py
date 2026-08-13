@@ -1,7 +1,7 @@
 import os
 from collections.abc import Callable
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -46,6 +46,32 @@ def require_roles(
     required_scope: str | None = None,
     api_key_only: bool = False,
 ) -> Callable[..., CurrentActor]:
+    if api_key_only:
+        def api_key_dependency(
+            request: Request,
+            x_api_key: str | None = Depends(api_key_header),
+            db: Session = Depends(get_db),
+        ) -> CurrentActor:
+            if request.headers.get("authorization"):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="X-API-Key header is required for this action.",
+                )
+            if not x_api_key:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="X-API-Key header is required for this action.",
+                )
+            return _actor_from_api_key(
+                x_api_key,
+                db,
+                allowed_roles=allowed_roles,
+                required_scope=required_scope,
+                update_last_used=update_api_key_last_used,
+            )
+
+        return api_key_dependency
+
     def dependency(
         authorization: str | None = Header(default=None, alias="Authorization"),
         x_api_key: str | None = Depends(api_key_header),
@@ -53,11 +79,6 @@ def require_roles(
     ) -> CurrentActor:
         if is_auth_disabled():
             return CurrentActor(user_id=None, api_key_id=None, name="dev-auth-disabled", role="admin")
-        if api_key_only and authorization:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="X-API-Key header is required for this action.",
-            )
         if authorization:
             actor = _actor_from_authorization(authorization, db)
             if actor.role not in allowed_roles:
@@ -72,36 +93,50 @@ def require_roles(
                 detail="Authorization bearer token or X-API-Key header is required.",
             )
 
-        record = APIKeyRepository(db).authenticate(
+        return _actor_from_api_key(
             x_api_key,
+            db,
+            allowed_roles=allowed_roles,
+            required_scope=required_scope,
             update_last_used=update_api_key_last_used,
-        )
-        if record is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or disabled API key.",
-            )
-        if record.role not in allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="API key role is not allowed for this action.",
-            )
-        scopes = list(record.scopes or [])
-        if required_scope and required_scope not in scopes:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"API key scope is required: {required_scope}.",
-            )
-        return CurrentActor(
-            user_id=None,
-            api_key_id=record.id,
-            name=record.name,
-            role=record.role,
-            tenant_id=record.tenant_id,
-            scopes=scopes,
         )
 
     return dependency
+
+
+def _actor_from_api_key(
+    x_api_key: str,
+    db: Session,
+    *,
+    allowed_roles: tuple[str, ...],
+    required_scope: str | None,
+    update_last_used: bool,
+) -> CurrentActor:
+    record = APIKeyRepository(db).authenticate(x_api_key, update_last_used=update_last_used)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or disabled API key.",
+        )
+    if record.role not in allowed_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API key role is not allowed for this action.",
+        )
+    scopes = list(record.scopes or [])
+    if required_scope and required_scope not in scopes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"API key scope is required: {required_scope}.",
+        )
+    return CurrentActor(
+        user_id=None,
+        api_key_id=record.id,
+        name=record.name,
+        role=record.role,
+        tenant_id=record.tenant_id,
+        scopes=scopes,
+    )
 
 
 def _actor_from_authorization(authorization: str, db: Session) -> CurrentActor:

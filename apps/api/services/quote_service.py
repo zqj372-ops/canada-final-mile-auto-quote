@@ -57,16 +57,18 @@ def calculate_zone_quote(
     notify_wecom: bool = False,
     wecom_bot_id: int | None = None,
     persist_side_effects: bool = True,
+    use_learned_rules: bool = True,
 ) -> ZoneQuoteResult:
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
-    result = apply_learned_quote_if_available(
-        db,
-        payload,
-        result,
-        mark_used=persist_side_effects,
-        rollback_on_error=persist_side_effects,
-    )
+    if use_learned_rules:
+        result = apply_learned_quote_if_available(
+            db,
+            payload,
+            result,
+            mark_used=persist_side_effects,
+            rollback_on_error=persist_side_effects,
+        )
     result = enforce_origin_matrix_safety(payload, result)
     result = enforce_zone_price_switch(pricing_config, result)
     result = attach_zone_quote_logic(payload, result)
@@ -107,7 +109,12 @@ def calculate_zone_quote_preview(
 
     before_data_hash = source_data_hash(db)
     try:
-        result = calculate_zone_quote(db, payload, persist_side_effects=False)
+        result = calculate_zone_quote(
+            db,
+            payload,
+            persist_side_effects=False,
+            use_learned_rules=False,
+        )
     except Exception:
         logger.exception("Read-only zone quote preview failed.")
         return status, None, ["quote_preview_failed"]

@@ -1,4 +1,5 @@
 import os
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from collections.abc import Generator
 
@@ -8,16 +9,19 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from apps.api.db.models import (
+    APIKey,
     Base,
     CityAlias,
     PostalCodeCityLookup,
     PostalZoneOverride,
+    QuoteReleaseManifest,
     QuoteRuleConfig,
     ZoneLookupRule,
     ZonePriceMatrix,
 )
 from apps.api.db.session import get_db
 from apps.api.main import app
+from apps.api.security.api_keys import hash_api_key
 
 
 def build_client(
@@ -50,18 +54,48 @@ def build_client(
             session.add(ZonePriceMatrix(**record))
         for record in quote_rule_configs or []:
             session.add(QuoteRuleConfig(**record))
+        session.add(
+            APIKey(
+                name="Preview Sales",
+                key_hash=hash_api_key("caq_sales_test_key"),
+                role="sales",
+                tenant_id="default",
+                scopes=["quote:preview"],
+                enabled=True,
+            )
+        )
         session.commit()
-        if os.getenv("QUOTE_RELEASE_HASH") == "auto":
+        valid_from = os.getenv("QUOTE_VALID_FROM")
+        valid_to = os.getenv("QUOTE_VALID_TO")
+        if os.getenv("QUOTE_RELEASE_ID") and valid_from and valid_to:
             from apps.api.services.source_status_service import source_data_hash
 
-            os.environ["QUOTE_RELEASE_HASH"] = source_data_hash(session)
+            snapshot_hash = source_data_hash(session)
+            configured_hash = os.getenv("QUOTE_RELEASE_HASH")
+            if configured_hash and configured_hash != "auto":
+                snapshot_hash = configured_hash
+            session.add(
+                QuoteReleaseManifest(
+                    release_id="release-20260812-a",
+                    snapshot_hash=snapshot_hash,
+                    service_version="0.1.0",
+                    rule_version="zone-rules-20260728",
+                    data_version="zone-data-20260728",
+                    published_at=datetime(2026, 8, 12, 10, tzinfo=timezone.utc),
+                    valid_from=date.fromisoformat(valid_from),
+                    valid_to=date.fromisoformat(valid_to),
+                    test_data=os.getenv("QUOTE_TEST_DATA", "false").lower() in {"1", "true", "yes", "on"},
+                    active=True,
+                )
+            )
+            session.commit()
 
     def override_get_db() -> Generator[Session]:
         with TestingSessionLocal() as session:
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
-    return TestClient(app)
+    return TestClient(app, headers={"X-API-Key": "caq_sales_test_key"})
 
 
 def teardown_function() -> None:
@@ -124,7 +158,7 @@ def default_prices() -> list[dict[str, object]]:
             "zone": 2,
             "billing_pallets": 1,
             "base_price_usd": Decimal("90.00"),
-            "source": "test",
+            "source": "release",
             "last_updated": "2026-06-03",
         },
         {
@@ -132,7 +166,7 @@ def default_prices() -> list[dict[str, object]]:
             "zone": 2,
             "billing_pallets": 2,
             "base_price_usd": Decimal("105.00"),
-            "source": "test",
+            "source": "release",
             "last_updated": "2026-06-03",
         },
         {
@@ -140,7 +174,7 @@ def default_prices() -> list[dict[str, object]]:
             "zone": 2,
             "billing_pallets": 3,
             "base_price_usd": Decimal("120.00"),
-            "source": "test",
+            "source": "release",
             "last_updated": "2026-06-03",
         },
         {
@@ -148,7 +182,7 @@ def default_prices() -> list[dict[str, object]]:
             "zone": 2,
             "billing_pallets": 4,
             "base_price_usd": Decimal("135.00"),
-            "source": "test",
+            "source": "release",
             "last_updated": "2026-06-03",
         },
         {
@@ -156,7 +190,7 @@ def default_prices() -> list[dict[str, object]]:
             "zone": 1,
             "billing_pallets": 3,
             "base_price_usd": Decimal("95.00"),
-            "source": "test",
+            "source": "release",
             "last_updated": "2026-06-03",
         },
         {
@@ -164,7 +198,7 @@ def default_prices() -> list[dict[str, object]]:
             "zone": 5,
             "billing_pallets": 3,
             "base_price_usd": Decimal("180.00"),
-            "source": "test",
+            "source": "release",
             "last_updated": "2026-06-03",
         },
     ]

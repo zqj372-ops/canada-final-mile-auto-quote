@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from datetime import date, datetime, timezone
 import os
 from decimal import Decimal
 
@@ -13,6 +14,7 @@ from apps.api.db.models import (
     Base,
     ManualQuoteTask,
     PostalCodeCityLookup,
+    QuoteReleaseManifest,
     SalesQuoteRecord,
     User,
     ZoneLookupRule,
@@ -150,7 +152,7 @@ def build_client() -> TestClient:
                 zone=2,
                 billing_pallets=3,
                 base_price_usd=Decimal("120.00"),
-                source="test",
+                source="release",
                 last_updated="2026-06-03",
             )
         )
@@ -165,10 +167,30 @@ def build_client() -> TestClient:
             )
         )
         session.commit()
-        if os.getenv("QUOTE_RELEASE_HASH") == "auto":
+        valid_from = os.getenv("QUOTE_VALID_FROM")
+        valid_to = os.getenv("QUOTE_VALID_TO")
+        if os.getenv("QUOTE_RELEASE_ID") and valid_from and valid_to:
             from apps.api.services.source_status_service import source_data_hash
 
-            os.environ["QUOTE_RELEASE_HASH"] = source_data_hash(session)
+            snapshot_hash = source_data_hash(session)
+            configured_hash = os.getenv("QUOTE_RELEASE_HASH")
+            if configured_hash and configured_hash != "auto":
+                snapshot_hash = configured_hash
+            session.add(
+                QuoteReleaseManifest(
+                    release_id="release-20260812-a",
+                    snapshot_hash=snapshot_hash,
+                    service_version="0.1.0",
+                    rule_version="zone-rules-20260728",
+                    data_version="zone-data-20260728",
+                    published_at=datetime(2026, 8, 12, 10, tzinfo=timezone.utc),
+                    valid_from=date.fromisoformat(valid_from),
+                    valid_to=date.fromisoformat(valid_to),
+                    test_data=os.getenv("QUOTE_TEST_DATA", "false").lower() in {"1", "true", "yes", "on"},
+                    active=True,
+                )
+            )
+            session.commit()
 
     def override_get_db() -> Generator[Session]:
         with TestingSessionLocal() as session:
