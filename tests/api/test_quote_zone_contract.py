@@ -614,6 +614,7 @@ def test_zone_preview_v2_manual_review_has_null_total_and_source(monkeypatch: py
     assert body["snapshot_hash"]
     assert body["source_ref_ids"] == [f"src:quote:snapshot:{body['snapshot_hash'][7:]}"]
     assert body["sendable"] is False
+    assert "quote_preview_invariant_failed" not in body["reasons"]
 
 
 def test_zone_preview_requested_origin_drives_lookup_and_price_not_destination_province(
@@ -796,6 +797,45 @@ def test_zone_preview_v2_rejects_oversized_or_noncanonical_decimal_strings(
 
     assert response.status_code == 422
     assert calls == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("piece_count", 100001),
+        ("explicit_pallet_count", 10001),
+        ("detention_minutes", 10081),
+    ],
+)
+def test_zone_preview_v2_rejects_oversized_integer_fields_before_business_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: int,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    service_calls = 0
+    engine_calls = 0
+
+    def forbidden_service(*_args, **_kwargs):
+        nonlocal service_calls
+        service_calls += 1
+        raise AssertionError("oversized preview integer must stop before quote service")
+
+    def forbidden_engine(*_args, **_kwargs):
+        nonlocal engine_calls
+        engine_calls += 1
+        raise AssertionError("oversized preview integer must stop before quote engine")
+
+    monkeypatch.setattr(quote_routes, "calculate_zone_quote_preview_service", forbidden_service)
+    monkeypatch.setattr(quote_service.ZoneQuoteEngine, "quote", forbidden_engine)
+    payload = preview_v2_payload(**{field: value})
+
+    response = client.post("/quotes/zone-preview", json=payload)
+
+    assert response.status_code == 422
+    assert service_calls == 0
+    assert engine_calls == 0
 
 
 @pytest.mark.parametrize("effective_date", ["2026-08-13T00:00:00Z", 20260813])
@@ -1495,6 +1535,9 @@ def test_preview_openapi_matches_api_key_only_contract() -> None:
         assert property_schema["maxLength"] == quote_routes._PREVIEW_DECIMAL_MAX_LENGTH
         assert property_schema["x-decimal-maximum"] == maximum
         assert property_schema["x-decimal-places"] == places
+    assert preview_quote["properties"]["piece_count"]["maximum"] == 100000.0
+    assert preview_quote["properties"]["explicit_pallet_count"]["anyOf"][0]["maximum"] == 10000.0
+    assert preview_quote["properties"]["detention_minutes"]["maximum"] == 10080.0
     calculated = schemas["ZoneQuotePreviewCalculatedResponse"]
     manual = schemas["ZoneQuotePreviewManualResponse"]
     assert calculated["properties"]["status"]["const"] == "quoted"

@@ -73,7 +73,7 @@ class ZoneQuotePreviewQuoteRequest(BaseModel):
         max_length=_PREVIEW_DECIMAL_MAX_LENGTH,
         json_schema_extra={"x-decimal-maximum": "100000", "x-decimal-places": 3},
     )
-    piece_count: StrictInt = Field(ge=1)
+    piece_count: StrictInt = Field(ge=1, le=100000)
     packaging_type: StrictStr
     longest_side_cm: StrictStr = Field(
         pattern=_DECIMAL_STRING_RE.pattern,
@@ -84,9 +84,9 @@ class ZoneQuotePreviewQuoteRequest(BaseModel):
     requires_liftgate: StrictBool
     requires_pallet_jack: StrictBool
     requires_appointment: StrictBool
-    explicit_pallet_count: StrictInt | None = Field(..., ge=1)
+    explicit_pallet_count: StrictInt | None = Field(..., ge=1, le=10000)
     is_stackable: StrictBool
-    detention_minutes: StrictInt = Field(ge=0)
+    detention_minutes: StrictInt = Field(ge=0, le=10080)
 
     @model_validator(mode="after")
     def validate_preview_values(self):
@@ -494,7 +494,7 @@ def _build_zone_preview_response(
             pass
 
     manual_reasons = list(reasons or sorted(result.risk_tags))
-    if not _preview_monetary_values_are_safe(result) or not result.manual_review_required:
+    if not result.manual_review_required and not _preview_monetary_values_are_safe(result):
         manual_reasons.append("quote_preview_invariant_failed")
     return ZoneQuotePreviewManualResponse(
         version="quote-result@2026-08-13.v2",
