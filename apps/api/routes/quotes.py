@@ -1,13 +1,13 @@
 import json
 import re
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from hashlib import sha256
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, model_validator
 from sqlalchemy.orm import Session
 
 from apps.api.auth import CurrentActor, QUOTE_WRITE_ROLES, require_roles
@@ -20,11 +20,23 @@ from apps.api.services.quote_service import (
 )
 from apps.api.services.source_status_service import PREVIEW_CONTRACT_VERSION, SourceStatus, quote_version
 from packages.quote_engine.models import QuoteResult, ShipmentInput
+from packages.quote_engine.zone_lookup import normalize_origin
 from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult
 
 
 router = APIRouter(prefix="/quotes", tags=["quotes"])
 SourceRefId = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")]
+V2Identifier = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")]
+V2Version = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$")]
+V2Hash = Annotated[str, Field(pattern=r"^sha256:[A-Fa-f0-9]{64}$")]
+_DECIMAL_STRING_RE = re.compile(r"^(?:0|[1-9]\d*)(?:\.\d+)?$")
+_PREVIEW_DECIMAL_LIMITS = {
+    "cbm": (Decimal("1000"), 3),
+    "weight_kg": (Decimal("100000"), 3),
+    "longest_side_cm": (Decimal("10000"), 2),
+}
+_PREVIEW_DECIMAL_MAX_DIGITS = 12
+_PREVIEW_DECIMAL_MAX_LENGTH = 24
 
 
 class ZoneQuoteWithNotifyRequest(BaseModel):
@@ -44,13 +56,83 @@ class ZoneQuoteWithNotifyRequest(BaseModel):
         return value
 
 
+class ZoneQuotePreviewQuoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    address_line: StrictStr | None = None
+    postal_code: StrictStr
+    city: StrictStr | None = None
+    province: StrictStr | None = None
+    cbm: StrictStr = Field(
+        pattern=_DECIMAL_STRING_RE.pattern,
+        max_length=_PREVIEW_DECIMAL_MAX_LENGTH,
+        json_schema_extra={"x-decimal-maximum": "1000", "x-decimal-places": 3},
+    )
+    weight_kg: StrictStr = Field(
+        pattern=_DECIMAL_STRING_RE.pattern,
+        max_length=_PREVIEW_DECIMAL_MAX_LENGTH,
+        json_schema_extra={"x-decimal-maximum": "100000", "x-decimal-places": 3},
+    )
+    piece_count: StrictInt = Field(ge=1)
+    packaging_type: StrictStr
+    longest_side_cm: StrictStr = Field(
+        pattern=_DECIMAL_STRING_RE.pattern,
+        max_length=_PREVIEW_DECIMAL_MAX_LENGTH,
+        json_schema_extra={"x-decimal-maximum": "10000", "x-decimal-places": 2},
+    )
+    address_type: StrictStr
+    requires_liftgate: StrictBool
+    requires_pallet_jack: StrictBool
+    requires_appointment: StrictBool
+    explicit_pallet_count: StrictInt | None = Field(..., ge=1)
+    is_stackable: StrictBool
+    detention_minutes: StrictInt = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_preview_values(self):
+        for field, (maximum, decimal_places) in _PREVIEW_DECIMAL_LIMITS.items():
+            raw_value = getattr(self, field)
+            if len(raw_value) > _PREVIEW_DECIMAL_MAX_LENGTH or _DECIMAL_STRING_RE.fullmatch(raw_value) is None:
+                raise ValueError(f"{field} must be a decimal string")
+            try:
+                value_as_decimal = Decimal(raw_value)
+            except (InvalidOperation, TypeError, ValueError) as exc:
+                raise ValueError(f"{field} must be greater than zero for preview") from exc
+            integer_part, _, fractional_part = raw_value.partition(".")
+            if (
+                len(integer_part) + len(fractional_part) > _PREVIEW_DECIMAL_MAX_DIGITS
+                or len(fractional_part) > decimal_places
+                or not value_as_decimal.is_finite()
+                or value_as_decimal <= 0
+                or value_as_decimal > maximum
+            ):
+                raise ValueError(f"{field} must be greater than zero for preview")
+        if self.explicit_pallet_count is not None and self.explicit_pallet_count < 1:
+            raise ValueError("explicit_pallet_count must be null or at least one for preview")
+        return self
+
+
 class ZoneQuotePreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tenant_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
     origin: str = Field(min_length=1, max_length=32)
     effective_date: date
-    quote: ZoneQuoteRequest
+    quote: ZoneQuotePreviewQuoteRequest
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_date_string(cls, value: object) -> object:
+        if isinstance(value, dict):
+            for field in ("tenant_id", "origin"):
+                if field in value and not isinstance(value[field], str):
+                    raise ValueError(f"{field} must be a string")
+            if "effective_date" in value and not (
+                isinstance(value["effective_date"], str)
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value["effective_date"])
+            ):
+                raise ValueError("effective_date must be an ISO YYYY-MM-DD string")
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -59,47 +141,6 @@ class ZoneQuotePreviewRequest(BaseModel):
             return {"quote": value}
         return value
 
-    @model_validator(mode="before")
-    @classmethod
-    def require_explicit_pricing_fields(cls, value: object) -> object:
-        if not isinstance(value, dict):
-            return value
-        quote = value.get("quote", value)
-        if not isinstance(quote, dict):
-            return value
-        required_fields = (
-            "cbm",
-            "weight_kg",
-            "piece_count",
-            "packaging_type",
-            "longest_side_cm",
-            "address_type",
-            "requires_liftgate",
-            "requires_pallet_jack",
-            "requires_appointment",
-            "explicit_pallet_count",
-            "is_stackable",
-            "detention_minutes",
-        )
-        missing = [field for field in required_fields if field not in quote]
-        if missing:
-            raise ValueError(f"preview quote fields are required: {', '.join(missing)}")
-        for field in ("cbm", "weight_kg", "longest_side_cm"):
-            try:
-                value_as_decimal = Decimal(str(quote[field]))
-            except (InvalidOperation, TypeError, ValueError) as exc:
-                raise ValueError(f"{field} must be greater than zero for preview") from exc
-            if value_as_decimal <= 0:
-                raise ValueError(f"{field} must be greater than zero for preview")
-        explicit_pallet_count = quote["explicit_pallet_count"]
-        if explicit_pallet_count is not None:
-            try:
-                value_as_decimal = Decimal(str(explicit_pallet_count))
-            except (InvalidOperation, TypeError, ValueError) as exc:
-                raise ValueError("explicit_pallet_count must be null or at least one for preview") from exc
-            if value_as_decimal < 1:
-                raise ValueError("explicit_pallet_count must be null or at least one for preview")
-        return value
 
 
 class ZoneQuotePreviewFee(BaseModel):
@@ -119,41 +160,135 @@ class ZoneQuotePreviewLineItem(BaseModel):
     source_ref_ids: list[SourceRefId] = Field(min_length=1)
 
 
-class ZoneQuotePreviewResponse(BaseModel):
+class _ZoneQuotePreviewAvailableBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    quote_id: str | None
-    quote_version: str | None
-    status: Literal["quoted", "manual_required", "unavailable"]
-    source_type: str
-    origin: str | None
+    version: Literal["quote-result@2026-08-13.v2"]
+    quote_id: V2Identifier
+    quote_version: V2Version
+    status: Literal["quoted", "manual_required"]
+    source_type: V2Identifier
+    origin: V2Identifier
     zone: int | None
     billing_pallets: int | None
     fees: dict[str, ZoneQuotePreviewFee]
-    test_data: bool
+    test_data: Literal[False]
     manual_review_required: bool
     matched_by: str | None
-    rule_version: str | None
-    data_version: str | None
-    valid_from: str | None
-    valid_to: str | None
-    source_ref: str | None
-    service_version: str | None
-    contract_version: str
-    release_id: str | None
-    release_hash: str | None
-    snapshot_hash: str | None
-    published_at: str | None
+    rule_version: V2Version
+    data_version: V2Version
+    valid_from: date
+    valid_to: date
+    source_ref: V2Identifier | None
+    service_version: V2Version
+    contract_version: Literal["quote-zone.v2"]
+    release_id: V2Identifier
+    release_hash: V2Hash
+    snapshot_hash: V2Hash
+    published_at: AwareDatetime
     reasons: list[str]
-    quote_status: Literal["calculated", "manual_review", "not_calculable"]
     currency: Literal["USD"]
-    total: ZoneQuotePreviewFee | None
-    line_items: list[ZoneQuotePreviewLineItem]
-    source_ref_ids: list[SourceRefId]
+    source_ref_ids: list[SourceRefId] = Field(min_length=1)
     sendable: Literal[False]
-    tenant: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
-    effective_date: str
-    ready: bool
+    tenant: V2Identifier
+    effective_date: date
+    ready: Literal[True]
+
+    @model_validator(mode="after")
+    def validate_release_identity(self):
+        if self.release_hash != self.snapshot_hash:
+            raise ValueError("release_hash must equal snapshot_hash")
+        expected_quote_version = f"{self.release_id}:{self.rule_version}:{self.data_version}"
+        if self.quote_version != expected_quote_version:
+            raise ValueError("quote_version must equal release_id:rule_version:data_version")
+        if self.valid_from > self.valid_to or not self.valid_from <= self.effective_date <= self.valid_to:
+            raise ValueError("effective_date must be within the valid release window")
+        if len(set(self.source_ref_ids)) != len(self.source_ref_ids):
+            raise ValueError("source_ref_ids must be unique")
+        return self
+
+
+class ZoneQuotePreviewCalculatedResponse(_ZoneQuotePreviewAvailableBase):
+    status: Literal["quoted"]
+    manual_review_required: Literal[False]
+    quote_status: Literal["calculated"]
+    total: ZoneQuotePreviewFee
+    line_items: list[ZoneQuotePreviewLineItem] = Field(min_length=1)
+    billing_pallets: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def validate_line_items(self):
+        if self.status != "quoted" or self.manual_review_required:
+            raise ValueError("calculated response must be quoted and not require manual review")
+        line_ids = [item.line_id for item in self.line_items]
+        if len(line_ids) != len(set(line_ids)):
+            raise ValueError("calculated line_ids must be unique")
+        expected_refs = set(self.source_ref_ids)
+        if any(set(item.source_ref_ids) != expected_refs for item in self.line_items):
+            raise ValueError("line item source_ref_ids must equal top-level source_ref_ids")
+        total = Decimal(self.total.amount)
+        amount_sum = sum((Decimal(item.amount.amount) for item in self.line_items), Decimal("0"))
+        if amount_sum != total:
+            raise ValueError("line item amounts must equal total")
+        return self
+
+
+class ZoneQuotePreviewManualResponse(_ZoneQuotePreviewAvailableBase):
+    status: Literal["manual_required"]
+    manual_review_required: Literal[True]
+    quote_status: Literal["manual_review", "not_calculable"]
+    total: Literal[None] = None
+    line_items: list[ZoneQuotePreviewLineItem] = Field(default_factory=list, max_length=0)
+    billing_pallets: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_manual_status(self):
+        if self.status != "manual_required" or not self.manual_review_required:
+            raise ValueError("manual response must require manual review")
+        return self
+
+
+ZoneQuotePreviewResponse = Annotated[
+    Union[ZoneQuotePreviewCalculatedResponse, ZoneQuotePreviewManualResponse],
+    Field(discriminator="quote_status"),
+]
+
+
+class ZoneQuotePreviewUnavailableResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal["quote-preview-unavailable@2026-08-13"]
+    quote_id: Literal[None] = None
+    quote_version: Literal[None] = None
+    status: Literal["unavailable"]
+    source_type: Literal["manual_required"]
+    origin: V2Identifier
+    zone: Literal[None] = None
+    billing_pallets: Literal[None] = None
+    fees: dict[str, ZoneQuotePreviewFee] = Field(default_factory=dict, max_length=0)
+    test_data: bool
+    manual_review_required: Literal[True]
+    matched_by: Literal[None] = None
+    rule_version: V2Version | None
+    data_version: V2Version | None
+    valid_from: date | None
+    valid_to: date | None
+    source_ref: Literal[None] = None
+    service_version: V2Version | None
+    contract_version: Literal["quote-zone.v2"]
+    release_id: V2Identifier | None
+    release_hash: V2Hash | None
+    snapshot_hash: V2Hash | None
+    published_at: AwareDatetime | None
+    reasons: list[str] = Field(min_length=1)
+    quote_status: Literal["not_calculable"]
+    total: Literal[None] = None
+    line_items: list[ZoneQuotePreviewLineItem] = Field(default_factory=list, max_length=0)
+    source_ref_ids: list[SourceRefId] = Field(default_factory=list, max_length=0)
+    sendable: Literal[False]
+    tenant: V2Identifier
+    effective_date: date
+    ready: Literal[False]
 
 
 @router.post("/calculate", response_model=QuoteResult, dependencies=[Depends(require_roles(*QUOTE_WRITE_ROLES))])
@@ -186,7 +321,7 @@ def calculate_zone_quote(
         422: {"description": "The request context is invalid."},
         503: {
             "description": "The authoritative quote release is unavailable or changed.",
-            "model": ZoneQuotePreviewResponse,
+            "model": ZoneQuotePreviewUnavailableResponse,
         },
     },
 )
@@ -201,15 +336,16 @@ def preview_zone_quote(
         )
     ),
     db: Session = Depends(get_db),
-) -> ZoneQuotePreviewResponse | JSONResponse:
-    _validate_quote_request(payload.quote)
+) -> ZoneQuotePreviewResponse | ZoneQuotePreviewUnavailableResponse | JSONResponse:
+    quote = _preview_legacy_quote(payload.quote)
+    _validate_quote_request(quote)
     requested_origin = _validate_preview_origin(payload)
     if actor.api_key_id is not None and actor.tenant_id != payload.tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="API key tenant does not match request.")
 
     source_status, result, reasons = calculate_zone_quote_preview_service(
         db,
-        payload.quote,
+        quote,
         origin=requested_origin,
         effective_date=payload.effective_date,
     )
@@ -223,7 +359,7 @@ def preview_zone_quote(
         result,
         reasons,
         requested_origin,
-        quote=payload.quote,
+        quote=quote,
         tenant=payload.tenant_id,
         effective_date=payload.effective_date,
     )
@@ -235,6 +371,13 @@ def preview_zone_quote(
 def _validate_quote_request(payload: ZoneQuoteRequest) -> None:
     try:
         validate_zone_quote_request(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+def _preview_legacy_quote(payload: ZoneQuotePreviewQuoteRequest) -> ZoneQuoteRequest:
+    try:
+        return ZoneQuoteRequest.model_validate(payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
@@ -255,56 +398,106 @@ def _build_zone_preview_response(
     quote: ZoneQuoteRequest,
     tenant: str,
     effective_date: date,
-) -> ZoneQuotePreviewResponse:
-    source_ref_ids = []
-    ready = source_status.ready and not source_status.test_data
-    if result is None:
-        return ZoneQuotePreviewResponse(
-            quote_id=None,
-            quote_version=None,
-            status="unavailable",
-            source_type="manual_required",
-            origin=requested_origin,
-            zone=None,
-            billing_pallets=None,
-            fees={},
-            test_data=source_status.test_data,
-            manual_review_required=True,
-            matched_by=None,
-            rule_version=source_status.rule_version,
-            data_version=source_status.data_version,
-            valid_from=source_status.valid_from,
-            valid_to=source_status.valid_to,
-            source_ref=None,
-            service_version=source_status.service_version,
-            contract_version=PREVIEW_CONTRACT_VERSION,
-            release_id=source_status.release_id,
-            release_hash=source_status.release_hash,
-            snapshot_hash=source_status.snapshot_hash,
-            published_at=source_status.published_at,
-            reasons=reasons,
-            quote_status="not_calculable",
-            currency="USD",
-            total=None,
-            line_items=[],
-            source_ref_ids=source_ref_ids,
-            sendable=False,
+) -> ZoneQuotePreviewCalculatedResponse | ZoneQuotePreviewManualResponse | ZoneQuotePreviewUnavailableResponse:
+    source_ref_ids = _preview_source_ref_ids(source_status)
+    if result is None or not source_status.ready or source_status.test_data or not source_ref_ids:
+        unavailable_reasons = list(reasons)
+        if not unavailable_reasons:
+            unavailable_reasons.append("quote_preview_unavailable")
+        if not source_ref_ids and result is not None:
+            unavailable_reasons.append("quote_preview_source_ref_missing")
+        return _unavailable_zone_preview_response(
+            source_status,
+            unavailable_reasons,
+            requested_origin,
             tenant=tenant,
-            effective_date=effective_date.isoformat(),
-            ready=False,
+            effective_date=effective_date,
         )
 
-    has_price = not result.manual_review_required and result.total_price_usd is not None
-    fees = _preview_fees(result) if has_price else {}
-    status = "quoted" if has_price else "manual_required"
-    source_ref_ids = _preview_source_ref_ids(source_status)
-    total = (
-        ZoneQuotePreviewFee(amount=_decimal_string(result.total_price_usd))
-        if has_price and result.total_price_usd is not None
-        else None
+    raw_result_origin = result.origin
+    normalized_result_origin = normalize_origin(raw_result_origin) if raw_result_origin is not None else None
+    origin_mismatch = raw_result_origin is not None and normalized_result_origin != requested_origin
+    if origin_mismatch:
+        return _unavailable_zone_preview_response(
+            source_status,
+            [*reasons, "origin_mismatch"],
+            requested_origin,
+            tenant=tenant,
+            effective_date=effective_date,
+        )
+    response_origin = requested_origin
+    response_quote_version = quote_version(source_status)
+    if response_quote_version is None:
+        return _build_zone_preview_response(
+            source_status,
+            None,
+            [*reasons, "quote_preview_identity_missing"],
+            requested_origin,
+            quote=quote,
+            tenant=tenant,
+            effective_date=effective_date,
+        )
+
+    has_price = (
+        not origin_mismatch
+        and not result.manual_review_required
+        and result.total_price_usd is not None
+        and _preview_monetary_values_are_safe(result)
     )
-    line_items = _preview_line_items(result, source_ref_ids) if has_price else []
-    return ZoneQuotePreviewResponse(
+    if has_price:
+        try:
+            total = ZoneQuotePreviewFee(amount=_decimal_string(result.total_price_usd))
+            line_items = _preview_line_items(result, source_ref_ids)
+            calculated = ZoneQuotePreviewCalculatedResponse(
+                version="quote-result@2026-08-13.v2",
+                quote_id=_preview_quote_id(
+                    quote,
+                    tenant=tenant,
+                    origin=requested_origin,
+                    effective_date=effective_date,
+                    source_status=source_status,
+                ),
+                quote_version=response_quote_version,
+                status="quoted",
+                source_type=result.source_type.value,
+                origin=response_origin,
+                zone=result.zone,
+                billing_pallets=result.billing_pallets,
+                fees=_preview_fees(result),
+                test_data=False,
+                manual_review_required=False,
+                matched_by=result.matched_by,
+                rule_version=source_status.rule_version,
+                data_version=source_status.data_version,
+                valid_from=source_status.valid_from,
+                valid_to=source_status.valid_to,
+                source_ref=_source_ref(result.source_type.value) or source_ref_ids[0],
+                service_version=source_status.service_version,
+                contract_version=PREVIEW_CONTRACT_VERSION,
+                release_id=source_status.release_id,
+                release_hash=source_status.release_hash,
+                snapshot_hash=source_status.snapshot_hash,
+                published_at=source_status.published_at,
+                reasons=reasons or sorted(result.risk_tags),
+                quote_status="calculated",
+                currency="USD",
+                total=total,
+                line_items=line_items,
+                source_ref_ids=source_ref_ids,
+                sendable=False,
+                tenant=tenant,
+                effective_date=effective_date,
+                ready=True,
+            )
+            return calculated
+        except (InvalidOperation, TypeError, ValueError):
+            pass
+
+    manual_reasons = list(reasons or sorted(result.risk_tags))
+    if not _preview_monetary_values_are_safe(result) or not result.manual_review_required:
+        manual_reasons.append("quote_preview_invariant_failed")
+    return ZoneQuotePreviewManualResponse(
+        version="quote-result@2026-08-13.v2",
         quote_id=_preview_quote_id(
             quote,
             tenant=tenant,
@@ -312,38 +505,115 @@ def _build_zone_preview_response(
             effective_date=effective_date,
             source_status=source_status,
         ),
-        quote_version=quote_version(source_status),
-        status=status,
+        quote_version=response_quote_version,
+        status="manual_required",
         source_type=result.source_type.value,
-        origin=result.origin,
+        origin=response_origin,
         zone=result.zone,
-        billing_pallets=result.billing_pallets,
-        fees=fees,
-        test_data=source_status.test_data,
-        manual_review_required=not has_price,
+        billing_pallets=result.billing_pallets if result.billing_pallets and result.billing_pallets >= 1 else None,
+        fees={},
+        test_data=False,
+        manual_review_required=True,
         matched_by=result.matched_by,
         rule_version=source_status.rule_version,
         data_version=source_status.data_version,
         valid_from=source_status.valid_from,
         valid_to=source_status.valid_to,
-        source_ref=_source_ref(result.source_type.value) or (source_ref_ids[0] if source_ref_ids else None),
+        source_ref=_source_ref(result.source_type.value) or source_ref_ids[0],
         service_version=source_status.service_version,
         contract_version=PREVIEW_CONTRACT_VERSION,
         release_id=source_status.release_id,
         release_hash=source_status.release_hash,
         snapshot_hash=source_status.snapshot_hash,
         published_at=source_status.published_at,
-        reasons=reasons or sorted(result.risk_tags),
-        quote_status="calculated" if has_price else "manual_review",
+        reasons=sorted(set(manual_reasons)),
+        quote_status="manual_review",
         currency="USD",
-        total=total,
-        line_items=line_items,
         source_ref_ids=source_ref_ids,
         sendable=False,
         tenant=tenant,
-        effective_date=effective_date.isoformat(),
-        ready=ready,
+        effective_date=effective_date,
+        ready=True,
     )
+
+
+def _unavailable_zone_preview_response(
+    source_status: SourceStatus,
+    reasons: list[str],
+    requested_origin: str,
+    *,
+    tenant: str,
+    effective_date: date,
+) -> ZoneQuotePreviewUnavailableResponse:
+    return ZoneQuotePreviewUnavailableResponse(
+        version="quote-preview-unavailable@2026-08-13",
+        quote_id=None,
+        quote_version=None,
+        status="unavailable",
+        source_type="manual_required",
+        origin=requested_origin,
+        zone=None,
+        billing_pallets=None,
+        fees={},
+        test_data=source_status.test_data,
+        manual_review_required=True,
+        matched_by=None,
+        rule_version=_safe_v2_version(source_status.rule_version),
+        data_version=_safe_v2_version(source_status.data_version),
+        valid_from=_safe_date(source_status.valid_from),
+        valid_to=_safe_date(source_status.valid_to),
+        source_ref=None,
+        service_version=_safe_v2_version(source_status.service_version),
+        contract_version=PREVIEW_CONTRACT_VERSION,
+        release_id=_safe_v2_identifier(source_status.release_id),
+        release_hash=_safe_v2_hash(source_status.release_hash),
+        snapshot_hash=_safe_v2_hash(source_status.snapshot_hash),
+        published_at=_safe_aware_datetime(source_status.published_at),
+        reasons=sorted(set(reasons or ["quote_preview_unavailable"])),
+        quote_status="not_calculable",
+        total=None,
+        line_items=[],
+        source_ref_ids=[],
+        sendable=False,
+        tenant=tenant,
+        effective_date=effective_date,
+        ready=False,
+    )
+
+
+def _safe_v2_identifier(value: object) -> str | None:
+    return value if isinstance(value, str) and re.fullmatch(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$", value) else None
+
+
+def _safe_v2_version(value: object) -> str | None:
+    return value if isinstance(value, str) and re.fullmatch(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$", value) else None
+
+
+def _safe_v2_hash(value: object) -> str | None:
+    return value if isinstance(value, str) and re.fullmatch(r"^sha256:[A-Fa-f0-9]{64}$", value) else None
+
+
+def _safe_date(value: object) -> date | None:
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _safe_aware_datetime(value: object) -> AwareDatetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
 
 
 def _preview_source_ref_ids(source_status: SourceStatus) -> list[str]:
@@ -351,6 +621,17 @@ def _preview_source_ref_ids(source_status: SourceStatus) -> list[str]:
     if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
         return []
     return [f"src:quote:snapshot:{digest}"]
+
+
+def _preview_monetary_values_are_safe(result: ZoneQuoteResult) -> bool:
+    values = [result.base_price_usd, result.fuel_usd, result.total_price_usd, *result.accessorials.values()]
+    if any(value is None for value in values[:3]):
+        return False
+    try:
+        decimals = [Decimal(str(value)) for value in values if value is not None]
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    return all(value.is_finite() and value >= 0 for value in decimals)
 
 
 def _preview_quote_id(

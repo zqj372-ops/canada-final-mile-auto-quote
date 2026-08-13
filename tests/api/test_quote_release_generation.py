@@ -50,6 +50,8 @@ def _configure_release(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _preview_payload() -> dict[str, object]:
     quote = base_payload()
+    for field in ("cbm", "weight_kg", "longest_side_cm"):
+        quote[field] = str(quote[field])
     quote["is_stackable"] = False
     quote["detention_minutes"] = 0
     return {

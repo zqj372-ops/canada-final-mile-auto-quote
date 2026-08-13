@@ -30,6 +30,7 @@ from apps.api.security.api_keys import hash_api_key
 from apps.api.services import quote_service, source_status_service
 from tests.api.test_api_keys_auth import SALES_KEY, VIEWER_KEY, build_client as build_auth_client
 from tests.api.test_zone_quotes import base_payload, build_client
+from packages.quote_engine.zone_models import ZoneQuoteResult, ZoneQuoteSourceType
 
 
 def configure_ready_status(monkeypatch: pytest.MonkeyPatch, *, test_data: str = "false") -> None:
@@ -52,6 +53,8 @@ def configure_ready_status(monkeypatch: pytest.MonkeyPatch, *, test_data: str = 
 
 def preview_payload(**overrides: object) -> dict[str, object]:
     quote = base_payload(**overrides)
+    for field in ("cbm", "weight_kg", "longest_side_cm"):
+        quote[field] = str(quote[field])
     quote.setdefault("is_stackable", False)
     quote.setdefault("detention_minutes", 0)
     return {
@@ -70,9 +73,9 @@ def preview_v2_payload(**overrides: object) -> dict[str, object]:
     payload["tenant_id"] = tenant_id
     payload["origin"] = origin
     payload["effective_date"] = effective_date
-    payload["quote"].setdefault("cbm", 4.2)
-    payload["quote"].setdefault("weight_kg", 850)
-    payload["quote"].setdefault("longest_side_cm", 100)
+    payload["quote"].setdefault("cbm", "4.2")
+    payload["quote"].setdefault("weight_kg", "850")
+    payload["quote"].setdefault("longest_side_cm", "100")
     payload["quote"].setdefault("explicit_pallet_count", None)
     payload["quote"].setdefault("is_stackable", False)
     payload["quote"].setdefault("requires_pallet_jack", False)
@@ -607,6 +610,7 @@ def test_zone_preview_v2_manual_review_has_null_total_and_source(monkeypatch: py
     assert body["line_items"] == []
     assert body["ready"] is True
     assert body["test_data"] is False
+    assert body["origin"] == "toronto"
     assert body["snapshot_hash"]
     assert body["source_ref_ids"] == [f"src:quote:snapshot:{body['snapshot_hash'][7:]}"]
     assert body["sendable"] is False
@@ -719,6 +723,130 @@ def test_zone_preview_v2_required_pricing_fields_reject_missing_or_zero() -> Non
     )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("cbm", 4.2),
+        ("weight_kg", 850),
+        ("longest_side_cm", 100),
+        ("piece_count", "3"),
+        ("piece_count", 3.0),
+        ("requires_liftgate", "false"),
+        ("detention_minutes", "0"),
+        ("explicit_pallet_count", 1.0),
+        ("is_stackable", "false"),
+    ],
+)
+def test_zone_preview_v2_rejects_coercive_raw_types_before_business_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    calls = 0
+
+    def forbidden(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("invalid preview raw type must stop before quote service")
+
+    monkeypatch.setattr(quote_routes, "calculate_zone_quote_preview_service", forbidden)
+    payload = preview_v2_payload()
+    payload["quote"][field] = value
+
+    response = client.post("/quotes/zone-preview", json=payload)
+
+    assert response.status_code == 422
+    assert calls == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("cbm", "1e6"),
+        ("cbm", "+1"),
+        ("cbm", "01"),
+        ("cbm", "1000.001"),
+        ("cbm", "1234567890123"),
+        ("weight_kg", "100001"),
+        ("longest_side_cm", "10000.01"),
+        ("longest_side_cm", "1.234"),
+    ],
+)
+def test_zone_preview_v2_rejects_oversized_or_noncanonical_decimal_strings(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    calls = 0
+
+    def forbidden(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("oversized preview value must stop before quote service")
+
+    monkeypatch.setattr(quote_routes, "calculate_zone_quote_preview_service", forbidden)
+    payload = preview_v2_payload()
+    payload["quote"][field] = value
+
+    response = client.post("/quotes/zone-preview", json=payload)
+
+    assert response.status_code == 422
+    assert calls == 0
+
+
+@pytest.mark.parametrize("effective_date", ["2026-08-13T00:00:00Z", 20260813])
+def test_zone_preview_rejects_non_date_effective_date_before_business_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    effective_date: object,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    calls = 0
+
+    def forbidden(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("invalid effective_date must stop before quote service")
+
+    monkeypatch.setattr(quote_routes, "calculate_zone_quote_preview_service", forbidden)
+    payload = preview_v2_payload(effective_date=effective_date)
+
+    response = client.post("/quotes/zone-preview", json=payload)
+
+    assert response.status_code == 422
+    assert calls == 0
+
+
+def test_zone_preview_v2_response_model_rejects_invalid_available_combinations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_ready_status(monkeypatch)
+    body = build_client().post("/quotes/zone-preview", json=preview_v2_payload()).json()
+    quote_routes.ZoneQuotePreviewCalculatedResponse.model_validate(body)
+
+    invalid_bodies = [
+        {**body, "ready": False},
+        {**body, "test_data": True},
+        {**body, "total": None},
+        {**body, "line_items": []},
+        {**body, "source_ref_ids": []},
+        {**body, "origin": None},
+        {**body, "release_hash": "sha256:" + "f" * 64},
+        {**body, "snapshot_hash": "sha256:bad"},
+        {**body, "effective_date": "2027-01-01"},
+        {**body, "quote_version": "wrong"},
+        {**body, "status": "manual_required"},
+        {**body, "manual_review_required": True},
+    ]
+    for invalid_body in invalid_bodies:
+        with pytest.raises(ValueError):
+            quote_routes.ZoneQuotePreviewCalculatedResponse.model_validate(invalid_body)
+
+
 def test_zone_calculate_keeps_legacy_optional_cargo_fields() -> None:
     client = build_client()
 
@@ -774,8 +902,12 @@ def test_zone_preview_uses_engine_origin_in_response(monkeypatch: pytest.MonkeyP
 
     response = client.post("/quotes/zone-preview", json=preview_payload())
 
-    assert response.status_code == 200
-    assert response.json()["origin"] == "calgary"
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "unavailable"
+    assert body["origin"] == "toronto"
+    assert body["quote_id"] is None
+    assert "origin_mismatch" in body["reasons"]
 
 
 @pytest.mark.parametrize(
@@ -955,7 +1087,7 @@ def test_zone_preview_requested_origin_without_rule_is_manual_review(
     assert response.status_code == 200
     body = response.json()
     assert body["quote_status"] == "manual_review"
-    assert body["origin"] is None
+    assert body["origin"] == "calgary"
     assert body["total"] is None
 
 
@@ -1026,8 +1158,99 @@ def test_zone_preview_requested_origin_filters_city_fallback_to_manual(monkeypat
     assert response.status_code == 200
     body = response.json()
     assert body["quote_status"] == "manual_review"
-    assert body["origin"] is None
+    assert body["origin"] == "calgary"
     assert body["total"] is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        (field, value)
+        for field in ("cbm", "weight_kg", "longest_side_cm", "explicit_pallet_count")
+        for value in ("NaN", "sNaN", "Infinity", "-Infinity")
+    ],
+)
+def test_zone_preview_rejects_nonfinite_pricing_values_before_business_reads(
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    service_calls = 0
+    engine_calls = 0
+
+    def forbidden_service(*_args, **_kwargs):
+        nonlocal service_calls
+        service_calls += 1
+        raise AssertionError("non-finite preview input must stop before the quote service")
+
+    def forbidden_engine(*_args, **_kwargs):
+        nonlocal engine_calls
+        engine_calls += 1
+        raise AssertionError("non-finite preview input must stop before the quote engine")
+
+    monkeypatch.setattr(quote_routes, "calculate_zone_quote_preview_service", forbidden_service)
+    monkeypatch.setattr(quote_service.ZoneQuoteEngine, "quote", forbidden_engine)
+
+    response = client.post(
+        "/quotes/zone-preview",
+        json=preview_v2_payload(**{field: value}),
+    )
+
+    assert response.status_code == 422
+    assert service_calls == 0
+    assert engine_calls == 0
+
+
+def test_zone_preview_builder_rejects_nonconserving_calculated_result() -> None:
+    snapshot_hash = "sha256:" + "c" * 64
+    source_status = source_status_service.SourceStatus(
+        ready=True,
+        test_data=False,
+        service_version="0.1.0",
+        release_id="release-20260812-a",
+        release_hash=snapshot_hash,
+        snapshot_hash=snapshot_hash,
+        rule_version="zone-rules-20260728",
+        data_version="zone-data-20260728",
+        published_at="2026-08-12T10:00:00+00:00",
+        reasons=[],
+        supported_operations=["quote.zone_preview", "quote.zone_preview:quote-zone.v2"],
+        valid_from="2026-07-28",
+        valid_to="2026-12-31",
+    )
+    result = ZoneQuoteResult(
+        source_type=ZoneQuoteSourceType.ZONE_MATRIX,
+        confidence=90,
+        postal_code="L4K 2N2",
+        province="ON",
+        origin="toronto",
+        zone=2,
+        billing_pallets=3,
+        base_price_usd=Decimal("120.00"),
+        fuel_usd=Decimal("42.00"),
+        accessorials={"appointment_fee_usd": Decimal("50.00")},
+        total_price_usd=Decimal("999.00"),
+        manual_review_required=False,
+        matched_rule="test",
+        matched_by="fsa_single_zone",
+    )
+
+    response = quote_routes._build_zone_preview_response(
+        source_status,
+        result,
+        [],
+        "toronto",
+        quote=quote_routes.ZoneQuoteRequest.model_validate(preview_v2_payload()["quote"]),
+        tenant="default",
+        effective_date=date.today(),
+    )
+
+    assert response.quote_status == "manual_review"
+    assert response.status == "manual_required"
+    assert response.total is None
+    assert response.line_items == []
 
 
 def test_zone_preview_api_key_auth_does_not_commit_auth_metadata(
@@ -1242,8 +1465,42 @@ def test_preview_openapi_matches_api_key_only_contract() -> None:
     assert {"401", "403", "503"}.issubset(preview["responses"])
     assert {"401", "403"}.issubset(source_status["responses"])
     assert preview["responses"]["503"]["content"]["application/json"]["schema"]["$ref"].endswith(
-        "/ZoneQuotePreviewResponse"
+        "/ZoneQuotePreviewUnavailableResponse"
     )
+    schemas = schema["components"]["schemas"]
+    preview_quote = schemas["ZoneQuotePreviewQuoteRequest"]
+    required = set(preview_quote["required"])
+    assert {
+        "cbm",
+        "weight_kg",
+        "piece_count",
+        "packaging_type",
+        "longest_side_cm",
+        "address_type",
+        "requires_liftgate",
+        "requires_pallet_jack",
+        "requires_appointment",
+        "explicit_pallet_count",
+        "is_stackable",
+        "detention_minutes",
+    } <= required
+    for field, maximum, places in (
+        ("cbm", "1000", 3),
+        ("weight_kg", "100000", 3),
+        ("longest_side_cm", "10000", 2),
+    ):
+        property_schema = preview_quote["properties"][field]
+        assert property_schema["type"] == "string"
+        assert property_schema["pattern"] == quote_routes._DECIMAL_STRING_RE.pattern
+        assert property_schema["maxLength"] == quote_routes._PREVIEW_DECIMAL_MAX_LENGTH
+        assert property_schema["x-decimal-maximum"] == maximum
+        assert property_schema["x-decimal-places"] == places
+    calculated = schemas["ZoneQuotePreviewCalculatedResponse"]
+    manual = schemas["ZoneQuotePreviewManualResponse"]
+    assert calculated["properties"]["status"]["const"] == "quoted"
+    assert calculated["properties"]["manual_review_required"]["const"] is False
+    assert manual["properties"]["status"]["const"] == "manual_required"
+    assert manual["properties"]["manual_review_required"]["const"] is True
 
 
 def test_existing_auth_openapi_keeps_header_contract() -> None:
