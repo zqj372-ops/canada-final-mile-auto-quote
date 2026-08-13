@@ -177,6 +177,15 @@ jobs:
           ssh production "set -e; for attempt in \$(seq 1 24); do if curl -fsS --max-time 10 http://127.0.0.1:28000/health; then exit 0; fi; sleep 5; done; exit 1"
           curl --fail --silent --show-error --retry 5 --retry-delay 5 https://quote.freightclaw.net/api/health
 
+      - name: Verify quote release readiness
+        env:
+          QUOTE_READINESS_API_KEY: ${{ secrets.QUOTE_READINESS_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$QUOTE_READINESS_API_KEY"
+          ssh production "curl --fail --silent --show-error --max-time 10 -H 'X-API-Key: ${QUOTE_READINESS_API_KEY}' http://127.0.0.1:28000/api/status" |
+            python3 -c 'import json, sys; body = json.load(sys.stdin); raise SystemExit(0 if body.get("ready") is True and body.get("test_data") is False else 1)'
+
       - name: Record deployed revision
         run: |
           set -euo pipefail

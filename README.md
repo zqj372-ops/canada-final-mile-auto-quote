@@ -121,6 +121,32 @@ cp .env.example .env
 docker compose -f infra/docker-compose.yml up --build
 ```
 
+### Quote release readiness
+
+`/health` 只表示进程存活；`/api/status` 才是报价发布就绪门禁，并且只接受带有
+`quote:preview` scope 的 `X-API-Key`。0026 迁移会停用旧 manifest；没有经过受控发布的
+active manifest 时，状态保持 `ready=false`，不会输出可用报价。
+
+生产 `.env.prod` 必须提供 `QUOTE_RELEASE_ID`，但本仓库不保存生产值。数据和构建完成后，
+由操作员在目标环境执行一次发布命令：
+
+```bash
+python scripts/publish_quote_release.py \
+  --release-id "$QUOTE_RELEASE_ID" \
+  --service-version "$(python -c 'from importlib import metadata; print(metadata.version("canada-final-mile-auto-quote"))')" \
+  --rule-version "<published-rule-version>" \
+  --data-version "<published-data-version>" \
+  --published-at "<UTC ISO-8601 timestamp>" \
+  --valid-from "<YYYY-MM-DD>" \
+  --valid-to "<YYYY-MM-DD>" \
+  --test-data false
+```
+
+发布事务只计算一次 source snapshot hash，并把显式 `--test-data` 与数据标记检测取逻辑或；
+检测到 demo、fixture、mock、sample 或 test 标记时仍会保持 `test_data=true`。发布后必须用
+`/api/status` 验证 `ready=true`、`test_data=false` 和 snapshot hash；CI 部署同时检查
+`/health` 与该 readiness 门禁。
+
 ## GitHub 自动部署
 
 推送到生产分支后，GitHub Actions 会先运行完整测试、数据库迁移验证和前端构建；
@@ -289,7 +315,7 @@ project name，避免影响同机其他容器：
 
 ```bash
 cp infra/.env.prod.example .env.prod
-# 修改 .env.prod 中的 POSTGRES_PASSWORD / DATABASE_URL / AI_CONFIG_SECRET / AUTH_TOKEN_SECRET
+# 修改 .env.prod 中的 POSTGRES_PASSWORD / DATABASE_URL / AI_CONFIG_SECRET / AUTH_TOKEN_SECRET / QUOTE_RELEASE_ID
 docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml up -d --build
 docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml exec api \
   python scripts/create_user.py \

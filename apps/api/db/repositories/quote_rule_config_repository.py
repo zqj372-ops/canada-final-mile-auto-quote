@@ -84,11 +84,12 @@ class QuoteRuleConfigRepository:
 
     def _get_standalone_zone_pricing_config(self) -> ZonePricingConfig:
         defaults = ZonePricingConfig()
-        records = self.session.scalars(select(QuoteRuleConfig)).all()
         values: dict[str, object] = {}
         valid_keys = set(ZonePricingConfig.model_fields)
 
-        for record in records:
+        for record in self.session.scalars(
+            select(QuoteRuleConfig).execution_options(stream_results=True, yield_per=5000)
+        ):
             if record.key not in valid_keys:
                 continue
             parsed = self._parse_value(record.key, record.value)

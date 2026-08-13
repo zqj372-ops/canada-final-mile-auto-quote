@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from hashlib import sha256
+from importlib import metadata
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from apps.api.db.models import (
@@ -16,6 +18,8 @@ from apps.api.db.models import (
     PostalCodeCityLookup,
     PostalZoneOverride,
     QuoteReleaseManifest,
+    QuoteRuleConfig,
+    QuoteSourceGeneration,
     ZoneLookupRule,
     ZonePriceMatrix,
 )
@@ -27,6 +31,7 @@ SYSTEM = "ai_quote"
 CONTRACT_VERSION = "quote-zone.v1"
 SUPPORTED_OPERATIONS = ["quote.zone_preview"]
 _EXPECTED_RELEASE_ENV = "QUOTE_RELEASE_ID"
+_PACKAGE_NAME = "canada-final-mile-auto-quote"
 _TEST_DATA_MARKERS = {"demo", "fixture", "mock", "sample", "test", "test_data"}
 _MANIFEST_PLACEHOLDERS = {
     "latest",
@@ -66,13 +71,10 @@ class SourceStatus(BaseModel):
 
 def get_source_status(db: Session | None = None) -> SourceStatus:
     reasons: list[str] = []
-    actual_snapshot_hash = source_data_hash(db) if db is not None else None
-    manifest = _active_manifest(db) if db is not None else None
-    test_data = _source_data_is_test_data(db) if db is not None else False
+    manifest, source_generation = _active_release_evidence(db) if db is not None else (None, None)
+    test_data = bool(manifest.test_data) if manifest is not None else False
     if manifest is None:
         reasons.append("release_manifest_missing")
-    elif manifest.test_data:
-        test_data = True
     if test_data:
         reasons.append("test_data_not_authoritative")
 
@@ -84,16 +86,20 @@ def get_source_status(db: Session | None = None) -> SourceStatus:
         published_at = _manifest_published_at(manifest.published_at, reasons)
 
     expected_release_id = _env(_EXPECTED_RELEASE_ENV)
-    if (
-        expected_release_id
-        and manifest_values.get("release_id")
-        and manifest_values["release_id"] != expected_release_id
-    ):
+    if not expected_release_id:
+        reasons.append("deployment_config_missing:QUOTE_RELEASE_ID")
+    elif manifest_values.get("release_id") != expected_release_id:
         reasons.append("deployment_config_mismatch:QUOTE_RELEASE_ID")
-    if manifest is not None and actual_snapshot_hash is not None:
-        if _normalize_hash(manifest.snapshot_hash) != actual_snapshot_hash:
-            reasons.append("release_manifest_snapshot_mismatch")
+    installed_service_version = _installed_service_version()
+    if installed_service_version is None:
+        reasons.append("service_version_metadata_unavailable")
+    elif manifest_values.get("service_version") != installed_service_version:
+        reasons.append("release_manifest_service_version_mismatch")
     if manifest is not None:
+        if source_generation is None:
+            reasons.append("source_generation_unavailable")
+        elif manifest.source_generation != source_generation.generation:
+            reasons.append("release_manifest_source_generation_mismatch")
         if manifest.valid_to < manifest.valid_from:
             reasons.append("release_manifest_invalid:effective_window")
         today = date.today()
@@ -101,22 +107,20 @@ def get_source_status(db: Session | None = None) -> SourceStatus:
             reasons.append("effective_window_not_active:before_valid_from")
         if manifest.valid_to < today:
             reasons.append("effective_window_not_active:after_valid_to")
-    if actual_snapshot_hash is None:
-        reasons.append("source_data_unavailable")
+    snapshot_hash = _normalize_hash(manifest.snapshot_hash) if manifest is not None else None
+    evidence_bound = (
+        manifest is not None
+        and source_generation is not None
+        and manifest.source_generation == source_generation.generation
+    )
 
     return SourceStatus(
         ready=not reasons,
         test_data=bool(test_data),
         service_version=manifest_values.get("service_version"),
         release_id=manifest_values.get("release_id"),
-        release_hash=(
-            actual_snapshot_hash
-            if manifest is not None
-            and actual_snapshot_hash is not None
-            and _normalize_hash(manifest.snapshot_hash) == actual_snapshot_hash
-            else None
-        ),
-        snapshot_hash=actual_snapshot_hash,
+        release_hash=snapshot_hash if evidence_bound else None,
+        snapshot_hash=snapshot_hash,
         rule_version=manifest_values.get("rule_version"),
         data_version=manifest_values.get("data_version"),
         published_at=published_at,
@@ -128,26 +132,77 @@ def get_source_status(db: Session | None = None) -> SourceStatus:
 
 
 def source_data_hash(db: Session) -> str:
-    db.expire_all()
-    postal_city_lookups = db.scalars(
-        select(PostalCodeCityLookup)
-        .order_by(PostalCodeCityLookup.postal_code)
-        .execution_options(populate_existing=True)
-    ).all()
-    postal_overrides = db.scalars(
-        select(PostalZoneOverride)
+    digest = sha256()
+    _hash_table(
+        digest,
+        db,
+        "postal_code_city_lookup",
+        select(
+            PostalCodeCityLookup.postal_code,
+            PostalCodeCityLookup.preferred_city,
+            PostalCodeCityLookup.province,
+            PostalCodeCityLookup.fsa,
+            PostalCodeCityLookup.official_city,
+            PostalCodeCityLookup.municipality,
+            PostalCodeCityLookup.latitude,
+            PostalCodeCityLookup.longitude,
+            PostalCodeCityLookup.source,
+        ).order_by(PostalCodeCityLookup.postal_code),
+    )
+    _hash_table(
+        digest,
+        db,
+        "postal_zone_overrides",
+        select(
+            PostalZoneOverride.id,
+            PostalZoneOverride.postal_code,
+            PostalZoneOverride.postal_prefix,
+            PostalZoneOverride.province,
+            PostalZoneOverride.canonical_city,
+            PostalZoneOverride.origin,
+            PostalZoneOverride.zone,
+            PostalZoneOverride.confidence,
+            PostalZoneOverride.active,
+            PostalZoneOverride.source,
+            PostalZoneOverride.note,
+        )
         .where(PostalZoneOverride.active.is_(True))
-        .order_by(PostalZoneOverride.postal_code, PostalZoneOverride.id)
-        .execution_options(populate_existing=True)
-    ).all()
-    city_aliases = db.scalars(
-        select(CityAlias)
+        .order_by(PostalZoneOverride.postal_code, PostalZoneOverride.id),
+    )
+    _hash_table(
+        digest,
+        db,
+        "city_aliases",
+        select(
+            CityAlias.id,
+            CityAlias.province,
+            CityAlias.alias_city,
+            CityAlias.canonical_city,
+            CityAlias.alias_type,
+            CityAlias.active,
+            CityAlias.source,
+            CityAlias.note,
+        )
         .where(CityAlias.active.is_(True))
-        .order_by(CityAlias.province, CityAlias.alias_city, CityAlias.id)
-        .execution_options(populate_existing=True)
-    ).all()
-    rules = db.scalars(
-        select(ZoneLookupRule)
+        .order_by(CityAlias.province, CityAlias.alias_city, CityAlias.id),
+    )
+    _hash_table(
+        digest,
+        db,
+        "zone_lookup_rules",
+        select(
+            ZoneLookupRule.id,
+            ZoneLookupRule.postal_prefix,
+            ZoneLookupRule.city,
+            ZoneLookupRule.province,
+            ZoneLookupRule.origin,
+            ZoneLookupRule.zone,
+            ZoneLookupRule.canonical_city,
+            ZoneLookupRule.priority,
+            ZoneLookupRule.active,
+            ZoneLookupRule.match_level,
+            ZoneLookupRule.note,
+        )
         .where(ZoneLookupRule.active.is_(True))
         .order_by(
             ZoneLookupRule.postal_prefix,
@@ -157,91 +212,63 @@ def source_data_hash(db: Session) -> str:
             ZoneLookupRule.zone,
             ZoneLookupRule.priority,
             ZoneLookupRule.id,
-        )
-        .execution_options(populate_existing=True)
-    ).all()
-    prices = db.scalars(
-        select(ZonePriceMatrix)
-        .order_by(ZonePriceMatrix.origin, ZonePriceMatrix.zone, ZonePriceMatrix.billing_pallets, ZonePriceMatrix.id)
-        .execution_options(populate_existing=True)
-    ).all()
+        ),
+    )
+    _hash_table(
+        digest,
+        db,
+        "zone_price_matrix",
+        select(
+            ZonePriceMatrix.id,
+            ZonePriceMatrix.origin,
+            ZonePriceMatrix.zone,
+            ZonePriceMatrix.billing_pallets,
+            ZonePriceMatrix.base_price_usd,
+            ZonePriceMatrix.source,
+            ZonePriceMatrix.last_updated,
+        ).order_by(ZonePriceMatrix.origin, ZonePriceMatrix.zone, ZonePriceMatrix.billing_pallets, ZonePriceMatrix.id),
+    )
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
-    payload = {
-        "postal_code_city_lookup": [
-            {
-                "postal_code": record.postal_code,
-                "preferred_city": record.preferred_city,
-                "province": record.province,
-                "fsa": record.fsa,
-                "official_city": record.official_city,
-                "municipality": record.municipality,
-                "latitude": _canonical_decimal(record.latitude),
-                "longitude": _canonical_decimal(record.longitude),
-                "source": record.source,
-            }
-            for record in postal_city_lookups
-        ],
-        "postal_zone_overrides": [
-            {
-                "id": record.id,
-                "postal_code": record.postal_code,
-                "postal_prefix": record.postal_prefix,
-                "province": record.province,
-                "canonical_city": record.canonical_city,
-                "origin": record.origin,
-                "zone": record.zone,
-                "confidence": record.confidence,
-                "active": record.active,
-                "source": record.source,
-                "note": record.note,
-            }
-            for record in postal_overrides
-        ],
-        "city_aliases": [
-            {
-                "id": record.id,
-                "province": record.province,
-                "alias_city": record.alias_city,
-                "canonical_city": record.canonical_city,
-                "alias_type": record.alias_type,
-                "active": record.active,
-                "source": record.source,
-                "note": record.note,
-            }
-            for record in city_aliases
-        ],
-        "zone_lookup_rules": [
-            {
-                "id": record.id,
-                "postal_prefix": record.postal_prefix,
-                "city": record.city,
-                "province": record.province,
-                "origin": record.origin,
-                "zone": record.zone,
-                "canonical_city": record.canonical_city,
-                "priority": record.priority,
-                "active": record.active,
-                "match_level": record.match_level,
-                "note": record.note,
-            }
-            for record in rules
-        ],
-        "zone_price_matrix": [
-            {
-                "id": record.id,
-                "origin": record.origin,
-                "zone": record.zone,
-                "billing_pallets": record.billing_pallets,
-                "base_price_usd": _canonical_decimal(record.base_price_usd),
-                "source": record.source,
-                "last_updated": record.last_updated,
-            }
-            for record in prices
-        ],
-        "zone_pricing_config": pricing_config.model_dump(mode="json"),
-    }
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return f"sha256:{sha256(encoded).hexdigest()}"
+    _hash_value(digest, "zone_pricing_config", pricing_config.model_dump(mode="json"))
+    return f"sha256:{digest.hexdigest()}"
+
+
+def _hash_table(digest, db: Session, table_name: str, statement) -> None:
+    fields = tuple(column.key for column in statement.selected_columns)
+    _hash_value(digest, "table", {"name": table_name, "fields": fields})
+    result = db.execute(statement.execution_options(stream_results=True, yield_per=5000))
+    for row in result:
+        _hash_value(digest, "row", dict(zip(fields, row, strict=True)))
+
+
+def _hash_value(digest, kind: str, value: object) -> None:
+    encoded = json.dumps(
+        {"kind": kind, "value": _canonical_json(value)},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest.update(len(encoded).to_bytes(8, "big"))
+    digest.update(encoded)
+
+
+def _canonical_json(value: object) -> object:
+    if isinstance(value, Decimal):
+        return _canonical_decimal(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {
+            str(key): _canonical_json(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_canonical_json(item) for item in value]
+    if value is None or isinstance(value, (bool, float, int, str)):
+        return value
+    return str(value)
 
 
 def source_status_version_key(status: SourceStatus) -> tuple[object, ...]:
@@ -271,25 +298,57 @@ def _env(name: str) -> str | None:
     return value.strip() if value and value.strip() else None
 
 
+def _installed_service_version() -> str | None:
+    try:
+        value = metadata.version(_PACKAGE_NAME).strip()
+    except (metadata.PackageNotFoundError, ValueError):
+        return None
+    return value or None
+
+
 def _active_manifest(db: Session) -> QuoteReleaseManifest | None:
+    return _active_release_evidence(db)[0]
+
+
+def _active_release_evidence(
+    db: Session,
+) -> tuple[QuoteReleaseManifest | None, QuoteSourceGeneration | None]:
+    source_generation = db.scalar(
+        select(QuoteSourceGeneration)
+        .where(QuoteSourceGeneration.id == 1)
+    )
     manifests = db.scalars(
         select(QuoteReleaseManifest)
         .where(QuoteReleaseManifest.active.is_(True))
         .order_by(QuoteReleaseManifest.updated_at.desc(), QuoteReleaseManifest.id.desc())
+        .limit(2)
     ).all()
-    if len(manifests) != 1:
-        return None
-    return manifests[0]
+    return (manifests[0] if len(manifests) == 1 else None, source_generation)
 
 
 def _source_data_is_test_data(db: Session) -> bool:
-    values = [
-        *db.scalars(select(PostalCodeCityLookup.source)).all(),
-        *db.scalars(select(PostalZoneOverride.source).where(PostalZoneOverride.active.is_(True))).all(),
-        *db.scalars(select(CityAlias.source).where(CityAlias.active.is_(True))).all(),
-        *db.scalars(select(ZonePriceMatrix.source)).all(),
-    ]
-    return any(isinstance(value, str) and value.strip().lower() in _TEST_DATA_MARKERS for value in values)
+    marker_columns = (
+        (PostalCodeCityLookup.source, ()),
+        (PostalZoneOverride.source, (PostalZoneOverride.active.is_(True),)),
+        (PostalZoneOverride.note, (PostalZoneOverride.active.is_(True),)),
+        (CityAlias.source, (CityAlias.active.is_(True),)),
+        (CityAlias.note, (CityAlias.active.is_(True),)),
+        (ZoneLookupRule.match_level, (ZoneLookupRule.active.is_(True),)),
+        (ZoneLookupRule.note, (ZoneLookupRule.active.is_(True),)),
+        (ZonePriceMatrix.source, ()),
+        (QuoteRuleConfig.value, ()),
+        (QuoteRuleConfig.description, ()),
+    )
+    markers = tuple(sorted(_TEST_DATA_MARKERS))
+    return any(
+        db.scalar(
+            select(column)
+            .where(func.lower(func.trim(column)).in_(markers), *conditions)
+            .limit(1)
+        )
+        is not None
+        for column, conditions in marker_columns
+    )
 
 
 def _manifest_text(value: object, field: str, reasons: list[str]) -> str | None:

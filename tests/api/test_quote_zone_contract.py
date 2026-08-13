@@ -17,14 +17,16 @@ from apps.api.db.models import (
     PostalZoneOverride,
     QuoteReleaseManifest,
     QuoteRuleConfig,
+    QuoteSourceGeneration,
     ZoneLookupRule,
     ZonePriceMatrix,
 )
 from apps.api.db.session import get_db
+from apps.api.db.source_generation import ensure_source_generation_row, install_source_generation_triggers
 from apps.api.main import app
 from apps.api.routes import quotes as quote_routes
 from apps.api.security.api_keys import hash_api_key
-from apps.api.services import quote_service
+from apps.api.services import quote_service, source_status_service
 from tests.api.test_api_keys_auth import SALES_KEY, VIEWER_KEY, build_client as build_auth_client
 from tests.api.test_zone_quotes import base_payload, build_client
 
@@ -43,6 +45,7 @@ def configure_ready_status(monkeypatch: pytest.MonkeyPatch, *, test_data: str = 
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
+    monkeypatch.setattr("apps.api.services.source_status_service._installed_service_version", lambda: "0.1.0")
 
 
 def preview_payload(**overrides: object) -> dict[str, object]:
@@ -60,22 +63,21 @@ def add_release_manifest(session: Session, *, test_data: bool = False) -> None:
     if not os.getenv("QUOTE_VALID_FROM") or not os.getenv("QUOTE_VALID_TO"):
         return
     from apps.api.services.source_status_service import source_data_hash
+    from apps.api.services.source_status_service import _source_data_is_test_data
 
     snapshot_hash = source_data_hash(session)
-    configured_hash = os.getenv("QUOTE_RELEASE_HASH")
-    if configured_hash and configured_hash != "auto":
-        snapshot_hash = configured_hash
     session.add(
         QuoteReleaseManifest(
             release_id="release-20260812-a",
             snapshot_hash=snapshot_hash,
+            source_generation=session.get(QuoteSourceGeneration, 1).generation,
             service_version="0.1.0",
             rule_version="zone-rules-20260728",
             data_version="zone-data-20260728",
             published_at=datetime(2026, 8, 12, 10, tzinfo=timezone.utc),
             valid_from=date.fromisoformat(os.environ["QUOTE_VALID_FROM"]),
             valid_to=date.fromisoformat(os.environ["QUOTE_VALID_TO"]),
-            test_data=test_data,
+            test_data=test_data or _source_data_is_test_data(session),
             active=True,
         )
     )
@@ -113,7 +115,7 @@ def test_source_status_is_not_ready_without_release_evidence(monkeypatch: pytest
     assert body["ready"] is False
     assert body["release_id"] is None
     assert body["release_hash"] is None
-    assert body["snapshot_hash"]
+    assert body["snapshot_hash"] is None
     assert body["rule_version"] is None
     assert body["data_version"] is None
     assert body["published_at"] is None
@@ -122,6 +124,7 @@ def test_source_status_is_not_ready_without_release_evidence(monkeypatch: pytest
 
 def test_source_status_uses_explicit_deployment_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
     configure_ready_status(monkeypatch)
+    monkeypatch.setattr("apps.api.services.source_status_service._installed_service_version", lambda: "0.1.0")
     client = build_client()
 
     response = client.get("/api/status")
@@ -270,7 +273,7 @@ def test_source_status_rejects_test_marked_quote_data(monkeypatch: pytest.Monkey
     assert "test_data_not_authoritative" in body["reasons"]
 
 
-@pytest.mark.parametrize("table", ["postal", "override", "alias"])
+@pytest.mark.parametrize("table", ["postal", "override", "alias", "rule", "price", "config"])
 def test_source_data_hash_includes_all_zone_lookup_tables(table: str) -> None:
     engine = create_engine(
         "sqlite+pysqlite://",
@@ -316,7 +319,7 @@ def test_source_data_hash_includes_all_zone_lookup_tables(table: str) -> None:
                     source="release",
                 )
             )
-        else:
+        elif table == "alias":
             session.add(
                 CityAlias(
                     province="ON",
@@ -325,6 +328,14 @@ def test_source_data_hash_includes_all_zone_lookup_tables(table: str) -> None:
                     source="release",
                 )
             )
+        elif table == "rule":
+            rule = session.scalars(select(ZoneLookupRule)).one()
+            rule.zone = 3
+        elif table == "price":
+            price = session.scalars(select(ZonePriceMatrix)).one()
+            price.base_price_usd = Decimal("121.00")
+        else:
+            session.add(QuoteRuleConfig(key="fuel_percent", value="36", description="release"))
         session.commit()
 
         assert source_data_hash(session) != before
@@ -339,10 +350,10 @@ def test_source_status_rejects_static_release_hash_not_bound_to_db(monkeypatch: 
 
     assert response.status_code == 200
     body = response.json()
-    assert body["ready"] is False
-    assert body["release_hash"] is None
+    assert body["ready"] is True
+    assert body["release_hash"] == body["snapshot_hash"]
     assert body["snapshot_hash"].startswith("sha256:")
-    assert "release_manifest_snapshot_mismatch" in body["reasons"]
+    assert "release_manifest_snapshot_mismatch" not in body["reasons"]
 
 
 def test_zone_preview_rejects_static_release_hash_not_bound_to_db(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -352,12 +363,12 @@ def test_zone_preview_rejects_static_release_hash_not_bound_to_db(monkeypatch: p
 
     response = client.post("/quotes/zone-preview", json=preview_payload())
 
-    assert response.status_code == 503
+    assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "unavailable"
-    assert body["release_hash"] is None
+    assert body["status"] == "quoted"
+    assert body["release_hash"] == body["snapshot_hash"]
     assert body["snapshot_hash"].startswith("sha256:")
-    assert "release_manifest_snapshot_mismatch" in body["reasons"]
+    assert "release_manifest_snapshot_mismatch" not in body["reasons"]
 
 
 def test_source_status_rejects_incomplete_effective_window(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -505,23 +516,24 @@ def test_zone_preview_fails_closed_when_pricing_config_changes(
     configure_ready_status(monkeypatch)
     client = build_client(
         quote_rule_configs=[
-            {"key": config_key, "value": "35" if config_key == "fuel_percent" else "true", "description": "test"}
+            {"key": config_key, "value": "35" if config_key == "fuel_percent" else "true", "description": "release"}
         ]
     )
-    original_hash = quote_service.source_data_hash
     calls = 0
+    original_status = quote_service.get_source_status
 
-    def changing_hash(db: Session) -> str:
+    def changing_status(db: Session):
         nonlocal calls
         calls += 1
-        if calls == 2:
+        status = original_status(db)
+        if calls == 1:
             record = db.get(QuoteRuleConfig, config_key)
             assert record is not None
             record.value = new_value
             db.commit()
-        return original_hash(db)
+        return status
 
-    monkeypatch.setattr(quote_service, "source_data_hash", changing_hash)
+    monkeypatch.setattr(quote_service, "get_source_status", changing_status)
 
     response = client.post("/quotes/zone-preview", json=preview_payload())
 
@@ -529,7 +541,7 @@ def test_zone_preview_fails_closed_when_pricing_config_changes(
     body = response.json()
     assert body["status"] == "unavailable"
     assert body["fees"] == {}
-    assert "source_data_changed_during_calculation" in body["reasons"]
+    assert "source_generation_changed_during_calculation" in body["reasons"]
 
 
 def test_zone_preview_requires_explicit_context(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -575,42 +587,40 @@ def test_zone_preview_rejects_api_key_tenant_mismatch(monkeypatch: pytest.Monkey
     assert response.status_code == 403
 
 
-def test_zone_preview_fails_closed_when_source_data_hash_switches(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_zone_preview_does_not_call_source_data_hash(monkeypatch: pytest.MonkeyPatch) -> None:
     configure_ready_status(monkeypatch)
     client = build_client()
     calls = 0
 
-    def changing_hash(_db):
+    def forbidden_hash(_db):
         nonlocal calls
         calls += 1
-        return "sha256:before" if calls == 1 else "sha256:after"
+        raise AssertionError("request path must not compute the full source hash")
 
-    monkeypatch.setattr(quote_service, "source_data_hash", changing_hash)
+    monkeypatch.setattr(source_status_service, "source_data_hash", forbidden_hash)
 
     response = client.post("/quotes/zone-preview", json=preview_payload())
 
-    assert response.status_code == 503
-    body = response.json()
-    assert body["status"] == "unavailable"
-    assert body["fees"] == {}
-    assert "source_data_changed_during_calculation" in body["reasons"]
+    assert response.status_code == 200
+    assert calls == 0
 
 
-@pytest.mark.parametrize("table", ["postal", "override", "alias"])
+@pytest.mark.parametrize("table", ["postal", "override", "alias", "rule", "price", "config"])
 def test_zone_preview_fails_closed_when_lookup_table_changes(
     monkeypatch: pytest.MonkeyPatch,
     table: str,
 ) -> None:
     configure_ready_status(monkeypatch)
     client, _spies = build_spy_client()
-    original_hash = quote_service.source_data_hash
     calls = 0
+    original_status = quote_service.get_source_status
 
-    def changing_hash(db) -> str:
+    def changing_status(db: Session):
         nonlocal calls
         calls += 1
-        if calls == 2:
-            session = db.session
+        status = original_status(db)
+        if calls == 1:
+            session = db.session if hasattr(db, "session") else db
             if table == "postal":
                 session.add(PostalCodeCityLookup(postal_code="L5K 2N2", preferred_city="Oakville", province="ON"))
             elif table == "override":
@@ -625,23 +635,23 @@ def test_zone_preview_fails_closed_when_lookup_table_changes(
                     )
                 )
             else:
-                session.add(
-                    CityAlias(
-                        province="ON",
-                        alias_city="VAUGHAN",
-                        canonical_city="CONCORD",
-                        source="release",
-                    )
-                )
+                if table == "alias":
+                    session.add(CityAlias(province="ON", alias_city="VAUGHAN", canonical_city="CONCORD", source="release"))
+                elif table == "rule":
+                    session.add(ZoneLookupRule(postal_prefix="L5K", city="OAKVILLE", province="ON", origin="toronto", zone=3, match_level="release"))
+                elif table == "price":
+                    session.add(ZonePriceMatrix(origin="toronto", zone=3, billing_pallets=3, base_price_usd=Decimal("130.00"), source="release"))
+                else:
+                    session.add(QuoteRuleConfig(key="fuel_percent", value="36", description="test"))
             session.commit()
-        return original_hash(db)
+        return status
 
-    monkeypatch.setattr(quote_service, "source_data_hash", changing_hash)
+    monkeypatch.setattr(quote_service, "get_source_status", changing_status)
 
     response = client.post("/quotes/zone-preview", json=preview_payload())
 
     assert response.status_code == 503
-    assert "source_data_changed_during_calculation" in response.json()["reasons"]
+    assert "source_generation_changed_during_calculation" in response.json()["reasons"]
 
 
 def test_zone_preview_returns_no_price_for_missing_zone(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -673,7 +683,7 @@ def test_zone_preview_returns_no_price_for_zone_conflict(monkeypatch: pytest.Mon
                 "province": "ON",
                 "origin": "toronto",
                 "zone": 5,
-                "match_level": "test",
+                "match_level": "release",
                 "note": "",
             },
             {
@@ -682,7 +692,7 @@ def test_zone_preview_returns_no_price_for_zone_conflict(monkeypatch: pytest.Mon
                 "province": "ON",
                 "origin": "toronto",
                 "zone": 6,
-                "match_level": "test",
+                "match_level": "release",
                 "note": "",
             },
         ],
@@ -825,6 +835,9 @@ def build_spy_client() -> tuple[TestClient, list[SessionSpy]]:
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        ensure_source_generation_row(connection)
+        install_source_generation_triggers(connection)
     TestingSessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
     with TestingSessionLocal() as session:
@@ -846,7 +859,7 @@ def build_spy_client() -> tuple[TestClient, list[SessionSpy]]:
                 province="ON",
                 origin="toronto",
                 zone=2,
-                match_level="test",
+                match_level="release",
                 note="",
             )
         )
@@ -884,6 +897,9 @@ def build_spy_auth_client(
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        ensure_source_generation_row(connection)
+        install_source_generation_triggers(connection)
     TestingSessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
     from apps.api.db.models import APIKey
@@ -908,7 +924,7 @@ def build_spy_auth_client(
                 province="ON",
                 origin="toronto",
                 zone=2,
-                match_level="test",
+                match_level="release",
                 note="",
             )
         )

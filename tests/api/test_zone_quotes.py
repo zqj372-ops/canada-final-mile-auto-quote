@@ -16,10 +16,12 @@ from apps.api.db.models import (
     PostalZoneOverride,
     QuoteReleaseManifest,
     QuoteRuleConfig,
+    QuoteSourceGeneration,
     ZoneLookupRule,
     ZonePriceMatrix,
 )
 from apps.api.db.session import get_db
+from apps.api.db.source_generation import ensure_source_generation_row, install_source_generation_triggers
 from apps.api.main import app
 from apps.api.security.api_keys import hash_api_key
 
@@ -40,6 +42,9 @@ def build_client(
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        ensure_source_generation_row(connection)
+        install_source_generation_triggers(connection)
     TestingSessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
     with TestingSessionLocal() as session:
@@ -70,21 +75,23 @@ def build_client(
         valid_to = os.getenv("QUOTE_VALID_TO")
         if os.getenv("QUOTE_RELEASE_ID") and valid_from and valid_to:
             from apps.api.services.source_status_service import source_data_hash
+            from apps.api.services.source_status_service import _source_data_is_test_data
 
             snapshot_hash = source_data_hash(session)
-            configured_hash = os.getenv("QUOTE_RELEASE_HASH")
-            if configured_hash and configured_hash != "auto":
-                snapshot_hash = configured_hash
             manifest_values: dict[str, object] = {
                 "release_id": "release-20260812-a",
                 "snapshot_hash": snapshot_hash,
+                "source_generation": session.get(QuoteSourceGeneration, 1).generation,
                 "service_version": "0.1.0",
                 "rule_version": "zone-rules-20260728",
                 "data_version": "zone-data-20260728",
                 "published_at": datetime(2026, 8, 12, 10, tzinfo=timezone.utc),
                 "valid_from": date.fromisoformat(valid_from),
                 "valid_to": date.fromisoformat(valid_to),
-                "test_data": os.getenv("QUOTE_TEST_DATA", "false").lower() in {"1", "true", "yes", "on"},
+                "test_data": (
+                    os.getenv("QUOTE_TEST_DATA", "false").lower() in {"1", "true", "yes", "on"}
+                    or _source_data_is_test_data(session)
+                ),
                 "active": True,
             }
             manifest_values.update(manifest_overrides or {})
@@ -131,7 +138,7 @@ def default_zone_rules() -> list[dict[str, object]]:
             "province": "ON",
             "origin": "toronto",
             "zone": 2,
-            "match_level": "demo",
+            "match_level": "release",
             "note": "",
         },
         {
@@ -140,7 +147,7 @@ def default_zone_rules() -> list[dict[str, object]]:
             "province": "BC",
             "origin": "toronto",
             "zone": 5,
-            "match_level": "demo",
+            "match_level": "release",
             "note": "stale origin demo",
         },
         {
@@ -149,7 +156,7 @@ def default_zone_rules() -> list[dict[str, object]]:
             "province": "AB",
             "origin": "calgary",
             "zone": 1,
-            "match_level": "demo",
+            "match_level": "release",
             "note": "",
         },
         {
@@ -158,7 +165,7 @@ def default_zone_rules() -> list[dict[str, object]]:
             "province": "AB",
             "origin": "toronto",
             "zone": 9,
-            "match_level": "demo",
+            "match_level": "release",
             "note": "split demo",
         },
     ]

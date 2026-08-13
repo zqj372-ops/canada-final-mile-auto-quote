@@ -34,7 +34,6 @@ from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult,
 from apps.api.services.source_status_service import (
     SourceStatus,
     get_source_status,
-    source_data_hash,
     source_status_version_key,
 )
 
@@ -107,7 +106,6 @@ def calculate_zone_quote_preview(
     if not status.ready:
         return status, None, list(status.reasons)
 
-    before_data_hash = source_data_hash(db)
     try:
         result = calculate_zone_quote(
             db,
@@ -119,10 +117,10 @@ def calculate_zone_quote_preview(
         logger.exception("Read-only zone quote preview failed.")
         return status, None, ["quote_preview_failed"]
 
-    after_data_hash = source_data_hash(db)
-    if before_data_hash != after_data_hash:
-        return status, None, ["source_data_changed_during_calculation"]
-    if source_status_version_key(get_source_status(db)) != source_status_version_key(status):
+    after_status = get_source_status(db)
+    if source_status_version_key(after_status) != source_status_version_key(status):
+        if "release_manifest_source_generation_mismatch" in after_status.reasons:
+            return status, None, ["source_generation_changed_during_calculation"]
         return status, None, ["source_version_changed_during_calculation"]
     if result.origin is not None and normalize_origin(result.origin) != origin:
         return status, None, ["origin_mismatch"]

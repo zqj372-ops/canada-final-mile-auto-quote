@@ -15,12 +15,14 @@ from apps.api.db.models import (
     ManualQuoteTask,
     PostalCodeCityLookup,
     QuoteReleaseManifest,
+    QuoteSourceGeneration,
     SalesQuoteRecord,
     User,
     ZoneLookupRule,
     ZonePriceMatrix,
 )
 from apps.api.db.session import get_db
+from apps.api.db.source_generation import ensure_source_generation_row, install_source_generation_triggers
 from apps.api.main import app
 from apps.api.security.api_keys import API_KEY_PREFIX, hash_api_key
 from apps.api.security.passwords import hash_password
@@ -40,6 +42,9 @@ def build_client() -> TestClient:
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        ensure_source_generation_row(connection)
+        install_source_generation_triggers(connection)
     TestingSessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
     with TestingSessionLocal() as session:
@@ -142,7 +147,7 @@ def build_client() -> TestClient:
                 province="ON",
                 origin="toronto",
                 zone=2,
-                match_level="test",
+                match_level="release",
                 note="",
             )
         )
@@ -171,22 +176,24 @@ def build_client() -> TestClient:
         valid_to = os.getenv("QUOTE_VALID_TO")
         if os.getenv("QUOTE_RELEASE_ID") and valid_from and valid_to:
             from apps.api.services.source_status_service import source_data_hash
+            from apps.api.services.source_status_service import _source_data_is_test_data
 
             snapshot_hash = source_data_hash(session)
-            configured_hash = os.getenv("QUOTE_RELEASE_HASH")
-            if configured_hash and configured_hash != "auto":
-                snapshot_hash = configured_hash
             session.add(
                 QuoteReleaseManifest(
                     release_id="release-20260812-a",
                     snapshot_hash=snapshot_hash,
+                    source_generation=session.get(QuoteSourceGeneration, 1).generation,
                     service_version="0.1.0",
                     rule_version="zone-rules-20260728",
                     data_version="zone-data-20260728",
                     published_at=datetime(2026, 8, 12, 10, tzinfo=timezone.utc),
                     valid_from=date.fromisoformat(valid_from),
                     valid_to=date.fromisoformat(valid_to),
-                    test_data=os.getenv("QUOTE_TEST_DATA", "false").lower() in {"1", "true", "yes", "on"},
+                    test_data=(
+                        os.getenv("QUOTE_TEST_DATA", "false").lower() in {"1", "true", "yes", "on"}
+                        or _source_data_is_test_data(session)
+                    ),
                     active=True,
                 )
             )

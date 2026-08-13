@@ -1,7 +1,21 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -223,12 +237,26 @@ class QuoteRuleConfig(Base):
     )
 
 
+class QuoteSourceGeneration(Base):
+    __tablename__ = "quote_source_generation"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    generation: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class QuoteReleaseManifest(Base):
     __tablename__ = "quote_release_manifest"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     release_id: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
     snapshot_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_generation: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     service_version: Mapped[str] = mapped_column(String(128), nullable=False)
     rule_version: Mapped[str] = mapped_column(String(128), nullable=False)
     data_version: Mapped[str] = mapped_column(String(128), nullable=False)
