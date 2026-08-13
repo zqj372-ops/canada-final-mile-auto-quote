@@ -51,12 +51,33 @@ def configure_ready_status(monkeypatch: pytest.MonkeyPatch, *, test_data: str = 
 
 
 def preview_payload(**overrides: object) -> dict[str, object]:
+    quote = base_payload(**overrides)
+    quote.setdefault("is_stackable", False)
+    quote.setdefault("detention_minutes", 0)
     return {
         "tenant_id": "default",
         "origin": "toronto",
         "effective_date": date.today().isoformat(),
-        "quote": base_payload(**overrides),
+        "quote": quote,
     }
+
+
+def preview_v2_payload(**overrides: object) -> dict[str, object]:
+    origin = overrides.pop("origin", "toronto")
+    effective_date = overrides.pop("effective_date", date.today().isoformat())
+    tenant_id = overrides.pop("tenant_id", "default")
+    payload = preview_payload(**overrides)
+    payload["tenant_id"] = tenant_id
+    payload["origin"] = origin
+    payload["effective_date"] = effective_date
+    payload["quote"].setdefault("cbm", 4.2)
+    payload["quote"].setdefault("weight_kg", 850)
+    payload["quote"].setdefault("longest_side_cm", 100)
+    payload["quote"].setdefault("explicit_pallet_count", None)
+    payload["quote"].setdefault("is_stackable", False)
+    payload["quote"].setdefault("requires_pallet_jack", False)
+    payload["quote"].setdefault("detention_minutes", 0)
+    return payload
 
 
 def add_release_manifest(session: Session, *, test_data: bool = False) -> None:
@@ -148,7 +169,7 @@ def test_source_status_uses_explicit_deployment_evidence(monkeypatch: pytest.Mon
         "data_version": "zone-data-20260728",
         "published_at": "2026-08-12T10:00:00+00:00",
         "reasons": [],
-        "supported_operations": ["quote.zone_preview"],
+        "supported_operations": ["quote.zone_preview", "quote.zone_preview:quote-zone.v2"],
         "valid_from": "2026-07-28",
         "valid_to": "2026-12-31",
     }
@@ -480,6 +501,232 @@ def test_zone_preview_reuses_quote_engine_without_writes_or_notifications(
     assert spies[0].calls == {"add": 0, "flush": 0, "commit": 0}
 
 
+def test_zone_preview_v2_calculated_shape_is_contract_projectable(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_spy_client()[0]
+
+    response = client.post("/quotes/zone-preview", json=preview_v2_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["contract_version"] == "quote-zone.v2"
+    assert body["tenant"] == "default"
+    assert body["effective_date"] == date.today().isoformat()
+    assert body["ready"] is True
+    assert body["test_data"] is False
+    assert body["quote_status"] == "calculated"
+    assert body["currency"] == "USD"
+    assert body["total"] == {"amount": "212.00", "currency": "USD"}
+    assert body["line_items"]
+    assert body["source_ref_ids"] == [f"src:quote:snapshot:{body['snapshot_hash'][7:]}"]
+    assert all(item["source_ref_ids"] == body["source_ref_ids"] for item in body["line_items"])
+    assert sum(Decimal(item["amount"]["amount"]) for item in body["line_items"]) == Decimal(body["total"]["amount"])
+    assert body["sendable"] is False
+    assert body["origin"] == "toronto"
+    assert body["billing_pallets"] == 3
+    assert body["release_hash"] == body["snapshot_hash"]
+    assert body["release_id"]
+    assert body["service_version"]
+    assert body["published_at"]
+
+
+def test_zone_preview_quote_id_is_deterministic_and_release_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    payload = preview_v2_payload()
+
+    first = client.post("/quotes/zone-preview", json=payload).json()
+    repeat = client.post("/quotes/zone-preview", json=payload).json()
+    different_input = client.post(
+        "/quotes/zone-preview",
+        json=preview_v2_payload(cbm=4.3),
+    ).json()
+
+    assert first["quote_id"] == repeat["quote_id"]
+    assert first["quote_id"].startswith("preview:")
+    assert len(first["quote_id"]) == len("preview:") + 64
+    assert first["quote_id"] != different_input["quote_id"]
+
+    tenant_client, _spies = build_spy_auth_client(tenant_id="tenant-a")
+    different_tenant = tenant_client.post(
+        "/quotes/zone-preview",
+        json=preview_v2_payload(tenant_id="tenant-a"),
+        headers={"X-API-Key": SALES_KEY},
+    ).json()
+    assert first["quote_id"] != different_tenant["quote_id"]
+
+    snapshot_client = build_client(manifest_overrides={"snapshot_hash": "sha256:" + "b" * 64})
+    different_snapshot = snapshot_client.post("/quotes/zone-preview", json=payload).json()
+    assert first["quote_id"] != different_snapshot["quote_id"]
+
+    monkeypatch.setenv("QUOTE_RELEASE_ID", "release-20260812-b")
+    monkeypatch.setenv("DEPLOY_SHA", "release-20260812-b")
+    release_client = build_client(
+        manifest_overrides={
+            "release_id": "release-20260812-b",
+            "snapshot_hash": "sha256:" + "a" * 64,
+        }
+    )
+    different_release = release_client.post("/quotes/zone-preview", json=payload).json()
+    assert first["quote_id"] != different_release["quote_id"]
+
+
+def test_legacy_zone_quote_id_keeps_random_semantics(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+
+    first = client.post("/quotes/zone-calculate", json=base_payload()).json()
+    repeat = client.post("/quotes/zone-calculate", json=base_payload()).json()
+
+    assert first["quote_id"] != repeat["quote_id"]
+
+
+def test_zone_preview_v2_manual_review_has_null_total_and_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client(
+        zone_rules=[
+            {
+                "postal_prefix": "L4K",
+                "city": "OTHER CITY",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 9,
+                "match_level": "release",
+                "note": "",
+            }
+        ],
+    )
+
+    response = client.post("/quotes/zone-preview", json=preview_v2_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["contract_version"] == "quote-zone.v2"
+    assert body["quote_status"] == "manual_review"
+    assert body["total"] is None
+    assert body["line_items"] == []
+    assert body["ready"] is True
+    assert body["test_data"] is False
+    assert body["snapshot_hash"]
+    assert body["source_ref_ids"] == [f"src:quote:snapshot:{body['snapshot_hash'][7:]}"]
+    assert body["sendable"] is False
+
+
+def test_zone_preview_requested_origin_drives_lookup_and_price_not_destination_province(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client(
+        zone_rules=[
+            {
+                "postal_prefix": "L4K",
+                "city": "CONCORD",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 2,
+                "match_level": "release",
+                "note": "toronto route",
+            },
+            {
+                "postal_prefix": "L4K",
+                "city": "CONCORD",
+                "province": "ON",
+                "origin": "calgary",
+                "zone": 5,
+                "match_level": "release",
+                "note": "requested-origin route",
+            },
+        ],
+        prices=[
+            {
+                "origin": "toronto",
+                "zone": 2,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("120.00"),
+                "source": "release",
+            },
+            {
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("180.00"),
+                "source": "release",
+            },
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-preview",
+        json=preview_v2_payload(origin="calgary"),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["origin"] == "calgary"
+    assert body["zone"] == 5
+    assert body["fees"]["base"]["amount"] == "180.00"
+    assert body["total"]["amount"] == "293.00"
+
+
+def test_zone_preview_non_today_date_within_manifest_window_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    effective_date = date(2026, 8, 1)
+
+    response = client.post(
+        "/quotes/zone-preview",
+        json={**preview_v2_payload(), "effective_date": effective_date.isoformat()},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["effective_date"] == effective_date.isoformat()
+
+
+def test_zone_preview_date_outside_manifest_window_skips_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    calls = 0
+
+    def forbidden(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("out-of-window effective date must stop before engine")
+
+    monkeypatch.setattr(quote_service.ZoneQuoteEngine, "quote", forbidden)
+    response = client.post(
+        "/quotes/zone-preview",
+        json={**preview_v2_payload(), "effective_date": "2027-01-01"},
+    )
+
+    assert response.status_code == 422
+    assert calls == 0
+
+
+def test_zone_preview_v2_required_pricing_fields_reject_missing_or_zero() -> None:
+    payload = preview_v2_payload()
+    for field in ("cbm", "weight_kg", "longest_side_cm"):
+        invalid = {**payload, "quote": {**payload["quote"], field: 0}}
+        with pytest.raises(ValueError):
+            quote_routes.ZoneQuotePreviewRequest.model_validate(invalid)
+
+    with pytest.raises(ValueError):
+        quote_routes.ZoneQuotePreviewRequest.model_validate(
+            {**payload, "quote": {**payload["quote"], "explicit_pallet_count": 0}}
+        )
+    quote_routes.ZoneQuotePreviewRequest.model_validate(payload)
+    quote_routes.ZoneQuotePreviewRequest.model_validate(
+        {**payload, "quote": {**payload["quote"], "explicit_pallet_count": 1}}
+    )
+
+
+def test_zone_calculate_keeps_legacy_optional_cargo_fields() -> None:
+    client = build_client()
+
+    response = client.post("/quotes/zone-calculate", json=base_payload())
+
+    assert response.status_code == 200
+
+
 def test_zone_preview_is_unavailable_for_test_data(monkeypatch: pytest.MonkeyPatch) -> None:
     configure_ready_status(monkeypatch, test_data="true")
     client = build_client()
@@ -513,8 +760,13 @@ def test_zone_preview_uses_engine_origin_in_response(monkeypatch: pytest.MonkeyP
     client = build_client()
     original_preview = quote_routes.calculate_zone_quote_preview_service
 
-    def preview_with_engine_origin(db, payload, *, origin):
-        source_status, result, reasons = original_preview(db, payload, origin=origin)
+    def preview_with_engine_origin(db, payload, *, origin, effective_date=None):
+        source_status, result, reasons = original_preview(
+            db,
+            payload,
+            origin=origin,
+            effective_date=effective_date,
+        )
         assert result is not None
         return source_status, result.model_copy(update={"origin": "calgary"}), reasons
 
@@ -691,26 +943,91 @@ def test_zone_preview_rejects_noncanonical_origin_before_engine_lookup(
     assert calls == 0
 
 
-def test_zone_preview_rejects_origin_matrix_mismatch_before_engine_lookup(
+def test_zone_preview_requested_origin_without_rule_is_manual_review(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     configure_ready_status(monkeypatch)
     client = build_client()
-    calls = 0
-
-    def forbidden(*_args, **_kwargs):
-        nonlocal calls
-        calls += 1
-        raise AssertionError("origin mismatch must be rejected before quote lookup")
-
-    monkeypatch.setattr(quote_routes, "calculate_zone_quote_preview_service", forbidden)
-    payload = preview_payload()
-    payload["origin"] = "calgary"
+    payload = preview_v2_payload(origin="calgary")
 
     response = client.post("/quotes/zone-preview", json=payload)
 
-    assert response.status_code == 422
-    assert calls == 0
+    assert response.status_code == 200
+    body = response.json()
+    assert body["quote_status"] == "manual_review"
+    assert body["origin"] is None
+    assert body["total"] is None
+
+
+def test_zone_preview_requested_origin_preserves_postal_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client(
+        postal_overrides=[
+            {
+                "postal_code": "L4K 2N2",
+                "postal_prefix": "L4K",
+                "province": "ON",
+                "canonical_city": "CONCORD",
+                "origin": "calgary",
+                "zone": 5,
+                "confidence": 100,
+                "source": "release",
+            }
+        ],
+        prices=[
+            {
+                "origin": "calgary",
+                "zone": 5,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("180.00"),
+                "source": "release",
+            }
+        ],
+    )
+
+    response = client.post("/quotes/zone-preview", json=preview_v2_payload(origin="calgary"))
+
+    assert response.status_code == 200
+    assert response.json()["origin"] == "calgary"
+    assert response.json()["zone"] == 5
+
+
+def test_zone_preview_requested_origin_filters_city_fallback_to_manual(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client(
+        postal_records=[{"postal_code": "L1X 0P1", "preferred_city": "PICKERING", "province": "ON"}],
+        zone_rules=[
+            {
+                "postal_prefix": "L1V",
+                "city": "PICKERING",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 3,
+                "match_level": "release",
+                "note": "other origin only",
+            }
+        ],
+        prices=[
+            {
+                "origin": "toronto",
+                "zone": 3,
+                "billing_pallets": 3,
+                "base_price_usd": Decimal("130.00"),
+                "source": "release",
+            }
+        ],
+    )
+
+    response = client.post(
+        "/quotes/zone-preview",
+        json=preview_v2_payload(origin="calgary", postal_code="L1X 0P1"),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["quote_status"] == "manual_review"
+    assert body["origin"] is None
+    assert body["total"] is None
 
 
 def test_zone_preview_api_key_auth_does_not_commit_auth_metadata(

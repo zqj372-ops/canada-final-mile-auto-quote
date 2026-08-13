@@ -181,13 +181,18 @@ def lookup_zone(
     rules: Sequence[ZoneLookupRuleRecord],
     aliases: Sequence[CityAliasRecord],
     override: PostalZoneOverrideRecord | None = None,
+    requested_origin: str | None = None,
 ) -> ZoneLookupDecision:
     prefix = _normalize_prefix(postal_prefix)
     normalized_postal_code = normalize_postal_code(postal_code)
     normalized_province = normalize_province(province) or get_province_from_postal_code(normalized_postal_code)
+    normalized_requested_origin = normalize_origin(requested_origin)
     active_rules = [rule for rule in rules if rule.active]
     invalid_rules = [rule for rule in active_rules if zone_rule_quality_issue(rule)]
     active_rules = [rule for rule in active_rules if is_zone_rule_usable(rule)]
+    if normalized_requested_origin:
+        active_rules = [rule for rule in active_rules if normalize_origin(rule.origin) == normalized_requested_origin]
+        invalid_rules = [rule for rule in invalid_rules if normalize_origin(rule.origin) == normalized_requested_origin]
     prefix_rules = [rule for rule in active_rules if _normalize_prefix(rule.postal_prefix) == prefix]
     alias_map = _alias_map(aliases, normalized_province)
     city_candidates, alias_used = _city_candidates(input_city, preferred_city, alias_map)
@@ -209,6 +214,17 @@ def lookup_zone(
         )
 
     if override is not None:
+        if normalized_requested_origin and normalize_origin(override.origin) != normalized_requested_origin:
+            return ZoneLookupDecision(
+                manual_required=True,
+                matched_rule=(
+                    f"邮编 {normalized_postal_code or prefix} 没有 requested origin "
+                    f"{normalized_requested_origin} 的有效覆盖规则。"
+                ),
+                risk_tags=("origin_not_configured",),
+                matched_by="requested_origin_not_configured",
+                match_trace={**trace, "matched_by": "requested_origin_not_configured"},
+            )
         rule = ZoneLookupRuleRecord(
             postal_prefix=override.postal_prefix,
             city=override.canonical_city or input_city or preferred_city or "",
@@ -219,7 +235,7 @@ def lookup_zone(
             match_level="postal_zone_override",
             note=override.note,
         )
-        rule, risk_tags = _apply_origin_overrides(rule)
+        rule, risk_tags = _apply_origin_overrides(rule, preserve_origin=bool(normalized_requested_origin))
         trace.update(
             {
                 "matched_by": "postal_code_override",
@@ -265,13 +281,14 @@ def lookup_zone(
         )
 
     trace["province_filtered_count"] = len(province_rules)
-    expected_origin = ORIGIN_BY_PROVINCE.get(normalized_province or "")
+    expected_origin = normalized_requested_origin or ORIGIN_BY_PROVINCE.get(normalized_province or "")
     single_group = _single_group_decision(
         province_rules,
         prefix=prefix,
         matched_by="fsa_single_zone",
         confidence=90,
         trace=trace,
+        preserve_origin=bool(normalized_requested_origin),
     )
     if single_group is not None:
         return single_group
@@ -280,10 +297,10 @@ def lookup_zone(
     trace["city_filtered_count"] = len(city_filtered)
     if city_filtered:
         match_rules, origin_preference_applied = _prefer_expected_origin_rules(city_filtered, expected_origin)
-        groups = _unique_groups(match_rules)
+        groups = _unique_groups(match_rules, preserve_origin=bool(normalized_requested_origin))
         if len(groups) == 1:
             original = _choose_best_rule(match_rules)
-            rule, risk_tags = _apply_origin_overrides(original)
+            rule, risk_tags = _apply_origin_overrides(original, preserve_origin=bool(normalized_requested_origin))
             matched_by = "city_alias" if alias_used else "canonical_city"
             result_risk_tags = list(risk_tags)
             if origin_preference_applied:
@@ -360,9 +377,11 @@ def lookup_zone_by_city_province(
     province: str | None,
     rules: Sequence[ZoneLookupRuleRecord],
     requested_postal_prefix: str | None = None,
+    requested_origin: str | None = None,
 ) -> ZoneLookupDecision:
     normalized_city = _normalize_city_for_lookup(city)
     normalized_province = normalize_province(province)
+    normalized_requested_origin = normalize_origin(requested_origin)
     prefix = _normalize_prefix(requested_postal_prefix)
     if not normalized_city or not normalized_province:
         return ZoneLookupDecision(
@@ -381,6 +400,8 @@ def lookup_zone_by_city_province(
 
     invalid_rules = [rule for rule in rules if rule.active and zone_rule_quality_issue(rule)]
     filtered = _filter_rules(rules, city, province)
+    if normalized_requested_origin:
+        filtered = [rule for rule in filtered if normalize_origin(rule.origin) == normalized_requested_origin]
     if not filtered:
         if invalid_rules:
             invalid_rule = invalid_rules[0]
@@ -457,7 +478,7 @@ def lookup_zone_by_city_province(
         # not let an origin preference or another city anchor re-expand it.
         filtered = exact_prefix_rules
 
-    expected_origin = ORIGIN_BY_PROVINCE.get(normalized_province)
+    expected_origin = normalized_requested_origin or ORIGIN_BY_PROVINCE.get(normalized_province)
     if expected_origin and not any(normalize_origin(rule.origin) == expected_origin for rule in filtered):
         return ZoneLookupDecision(
             manual_required=True,
@@ -513,7 +534,7 @@ def lookup_zone_by_city_province(
 
     original = _choose_best_rule(match_rules)
 
-    rule, risk_tags = _apply_origin_overrides(original)
+    rule, risk_tags = _apply_origin_overrides(original, preserve_origin=bool(normalized_requested_origin))
     fallback_detail = "，使用城市分区"
     result_risk_tags = [*risk_tags, "city_zone_fallback"]
     if origin_preference_applied:
@@ -628,10 +649,14 @@ def _filter_rules_by_canonical_city(
     return [rule for rule in rules if _rule_city_for_lookup(rule, alias_map) in targets]
 
 
-def _unique_groups(rules: Sequence[ZoneLookupRuleRecord]) -> set[tuple[int, str | None, str]]:
+def _unique_groups(
+    rules: Sequence[ZoneLookupRuleRecord],
+    *,
+    preserve_origin: bool = False,
+) -> set[tuple[int, str | None, str]]:
     groups = set()
     for rule in rules:
-        overridden, _ = _apply_origin_overrides(rule)
+        overridden, _ = _apply_origin_overrides(rule, preserve_origin=preserve_origin)
         groups.add((overridden.zone, normalize_origin(overridden.origin), normalize_province(overridden.province) or ""))
     return groups
 
@@ -687,12 +712,13 @@ def _single_group_decision(
     matched_by: str,
     confidence: int,
     trace: dict[str, object],
+    preserve_origin: bool = False,
 ) -> ZoneLookupDecision | None:
-    groups = _unique_groups(rules)
+    groups = _unique_groups(rules, preserve_origin=preserve_origin)
     if len(groups) != 1:
         return None
     original = _choose_best_rule(rules)
-    rule, risk_tags = _apply_origin_overrides(original)
+    rule, risk_tags = _apply_origin_overrides(original, preserve_origin=preserve_origin)
     trace.update(
         {
             "matched_by": matched_by,
@@ -784,9 +810,15 @@ def _prefer_expected_origin_rules(
     return preferred, len(preferred) != len(rules)
 
 
-def _apply_origin_overrides(rule: ZoneLookupRuleRecord) -> tuple[ZoneLookupRuleRecord, list[str]]:
+def _apply_origin_overrides(
+    rule: ZoneLookupRuleRecord,
+    *,
+    preserve_origin: bool = False,
+) -> tuple[ZoneLookupRuleRecord, list[str]]:
     risk_tags: list[str] = []
     origin = normalize_origin(rule.origin)
+    if preserve_origin:
+        return replace(rule, origin=origin or rule.origin), risk_tags
     expected_origin = ORIGIN_BY_PROVINCE.get(normalize_province(rule.province) or "")
     if expected_origin and origin != expected_origin:
         origin = expected_origin

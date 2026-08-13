@@ -30,7 +30,8 @@ from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfi
 SCHEMA_VERSION = "source-status.v1"
 SYSTEM = "ai_quote"
 CONTRACT_VERSION = "quote-zone.v1"
-SUPPORTED_OPERATIONS = ["quote.zone_preview"]
+PREVIEW_CONTRACT_VERSION = "quote-zone.v2"
+SUPPORTED_OPERATIONS = ["quote.zone_preview", f"quote.zone_preview:{PREVIEW_CONTRACT_VERSION}"]
 _EXPECTED_RELEASE_ENV = "QUOTE_RELEASE_ID"
 _EXPECTED_DEPLOY_ENV = "DEPLOY_SHA"
 _PACKAGE_NAME = "canada-final-mile-auto-quote"

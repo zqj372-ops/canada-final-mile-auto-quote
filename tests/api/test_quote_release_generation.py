@@ -48,6 +48,18 @@ def _configure_release(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(source_status_service, "_installed_service_version", lambda: "0.1.0")
 
 
+def _preview_payload() -> dict[str, object]:
+    quote = base_payload()
+    quote["is_stackable"] = False
+    quote["detention_minutes"] = 0
+    return {
+        "tenant_id": "default",
+        "origin": "toronto",
+        "effective_date": date.today().isoformat(),
+        "quote": quote,
+    }
+
+
 def test_status_and_preview_do_not_scan_source_data(monkeypatch: pytest.MonkeyPatch) -> None:
     _configure_release(monkeypatch)
     client = build_client()
@@ -61,15 +73,7 @@ def test_status_and_preview_do_not_scan_source_data(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(source_status_service, "source_data_hash", forbidden)
 
     assert client.get("/status").status_code == 200
-    assert client.post(
-        "/quotes/zone-preview",
-        json={
-            "tenant_id": "default",
-            "origin": "toronto",
-            "effective_date": date.today().isoformat(),
-            "quote": base_payload(),
-        },
-    ).status_code == 200
+    assert client.post("/quotes/zone-preview", json=_preview_payload()).status_code == 200
     assert calls == 0
 
 
@@ -183,15 +187,7 @@ def test_source_table_change_invalidates_active_release(
         session.commit()
 
     assert client.get("/status").json()["ready"] is False
-    preview = client.post(
-        "/quotes/zone-preview",
-        json={
-            "tenant_id": "default",
-            "origin": "toronto",
-            "effective_date": date.today().isoformat(),
-            "quote": base_payload(),
-        },
-    )
+    preview = client.post("/quotes/zone-preview", json=_preview_payload())
     assert preview.status_code == 503
     assert "release_manifest_source_generation_mismatch" in preview.json()["reasons"]
 

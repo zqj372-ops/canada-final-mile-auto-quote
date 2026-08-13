@@ -52,7 +52,7 @@ class ZoneQuoteEngine:
         self.provider = provider
         self.pricing_config = pricing_config or ZonePricingConfig()
 
-    def quote(self, request: ZoneQuoteRequest) -> ZoneQuoteResult:
+    def quote(self, request: ZoneQuoteRequest, *, requested_origin: str | None = None) -> ZoneQuoteResult:
         postal_prefix = extract_fsa(request.postal_code)
         if not postal_prefix:
             return self._manual(
@@ -89,8 +89,9 @@ class ZoneQuoteEngine:
             rules=zone_rules,
             aliases=self.provider.list_city_aliases(province),
             override=self.provider.get_postal_zone_override(request.postal_code),
+            requested_origin=requested_origin,
         )
-        expected_origin = ORIGIN_BY_PROVINCE.get(province or "")
+        expected_origin = normalize_origin(requested_origin) or ORIGIN_BY_PROVINCE.get(province or "")
         origin_needs_repair = (
             not zone_decision.manual_required
             and expected_origin is not None
@@ -113,6 +114,7 @@ class ZoneQuoteEngine:
                 province=province,
                 rules=city_zone_rules,
                 requested_postal_prefix=postal_prefix,
+                requested_origin=requested_origin,
             )
             if not city_zone_decision.manual_required or zone_decision.manual_required:
                 zone_decision = city_zone_decision

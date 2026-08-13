@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from decimal import Decimal
 
 from apps.api.db.models import LearnedQuoteRule
@@ -57,10 +58,14 @@ def calculate_zone_quote(
     wecom_bot_id: int | None = None,
     persist_side_effects: bool = True,
     use_learned_rules: bool = True,
+    requested_origin: str | None = None,
 ) -> ZoneQuoteResult:
     validate_zone_quote_request(payload)
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
-    result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
+    result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(
+        payload,
+        requested_origin=requested_origin,
+    )
     if use_learned_rules:
         result = apply_learned_quote_if_available(
             db,
@@ -69,7 +74,7 @@ def calculate_zone_quote(
             mark_used=persist_side_effects,
             rollback_on_error=persist_side_effects,
         )
-    result = enforce_origin_matrix_safety(payload, result)
+    result = enforce_origin_matrix_safety(payload, result, expected_origin=normalize_origin(requested_origin))
     result = enforce_zone_price_switch(pricing_config, result)
     result = attach_zone_quote_logic(payload, result)
     if persist_side_effects:
@@ -102,11 +107,17 @@ def calculate_zone_quote_preview(
     payload: ZoneQuoteRequest,
     *,
     origin: str,
+    effective_date: date | None = None,
 ) -> tuple[SourceStatus, ZoneQuoteResult | None, list[str]]:
     validate_zone_quote_request(payload)
     status = get_source_status(db)
     if not status.ready:
         return status, None, list(status.reasons)
+    if status.valid_from and status.valid_to:
+        if effective_date is not None and not (
+            date.fromisoformat(status.valid_from) <= effective_date <= date.fromisoformat(status.valid_to)
+        ):
+            return status, None, ["effective_date_outside_release_window"]
 
     try:
         result = calculate_zone_quote(
@@ -114,6 +125,7 @@ def calculate_zone_quote_preview(
             payload,
             persist_side_effects=False,
             use_learned_rules=False,
+            requested_origin=origin,
         )
     except Exception:
         logger.exception("Read-only zone quote preview failed.")
@@ -169,13 +181,15 @@ def apply_learned_quote_if_available(
 def enforce_origin_matrix_safety(
     request: ZoneQuoteRequest,
     result: ZoneQuoteResult,
+    *,
+    expected_origin: str | None = None,
 ) -> ZoneQuoteResult:
     if result.matched_by == "origin_matrix_guard":
         return result
 
     postal_province = get_province_from_postal_code(request.postal_code)
     province = postal_province or result.province or request.province
-    expected_origin = ORIGIN_BY_PROVINCE.get(province or "")
+    expected_origin = expected_origin or ORIGIN_BY_PROVINCE.get(province or "")
     actual_origin = normalize_origin(result.origin)
     crossed_matrices = "stale_origin_overridden" in result.risk_tags
     origin_mismatch = actual_origin is not None and actual_origin != expected_origin
