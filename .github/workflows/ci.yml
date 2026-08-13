@@ -8,6 +8,33 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      quote_rule_version:
+        description: Published quote rule version
+        required: true
+        type: string
+      quote_data_version:
+        description: Published quote data version
+        required: true
+        type: string
+      quote_published_at:
+        description: UTC ISO-8601 publication timestamp
+        required: true
+        type: string
+      quote_valid_from:
+        description: First effective date (YYYY-MM-DD)
+        required: true
+        type: string
+      quote_valid_to:
+        description: Last effective date (YYYY-MM-DD)
+        required: true
+        type: string
+      quote_test_data:
+        description: Explicit test-data declaration
+        required: true
+        default: "false"
+        type: choice
+        options: ["false", "true"]
 
 permissions:
   contents: read
@@ -77,11 +104,7 @@ jobs:
   deploy:
     name: Deploy production
     needs: test
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' &&
-      (github.ref == 'refs/heads/main' ||
-      github.ref == 'refs/heads/codex/hermes-learning-checkpoint-20260707'))
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:
@@ -99,10 +122,28 @@ jobs:
       ENV_FILE: .env.prod
       DEPLOY_SHA: ${{ github.sha }}
       DEPLOY_REF: ${{ github.ref_name }}
+      QUOTE_RULE_VERSION: ${{ inputs.quote_rule_version || '' }}
+      QUOTE_DATA_VERSION: ${{ inputs.quote_data_version || '' }}
+      QUOTE_PUBLISHED_AT: ${{ inputs.quote_published_at || '' }}
+      QUOTE_VALID_FROM: ${{ inputs.quote_valid_from || '' }}
+      QUOTE_VALID_TO: ${{ inputs.quote_valid_to || '' }}
+      QUOTE_TEST_DATA: ${{ inputs.quote_test_data || '' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Require controlled quote release inputs
+        run: |
+          set -euo pipefail
+          for value in "$QUOTE_RULE_VERSION" "$QUOTE_DATA_VERSION" "$QUOTE_PUBLISHED_AT" "$QUOTE_VALID_FROM" "$QUOTE_VALID_TO" "$QUOTE_TEST_DATA"; do
+            test -n "$value"
+            case "$value" in *"'"*) echo "::error::quote release inputs may not contain single quotes."; exit 1 ;; esac
+          done
+          case "$QUOTE_TEST_DATA" in
+            true|false) ;;
+            *) echo "::error::quote_test_data must be true or false; automatic pushes must use workflow_dispatch with explicit release inputs."; exit 1 ;;
+          esac
 
       - name: Configure production SSH
         env:
@@ -166,10 +207,10 @@ jobs:
             --exclude='._*' \
             ./ "production:${DEPLOY_PATH}/"
 
-      - name: Rebuild production services
+      - name: Migrate and start production services
         run: |
           set -euo pipefail
-          ssh production "set -e; cd '${DEPLOY_PATH}'; sudo -n docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' up -d --build api web"
+          ssh production "set -e; cd '${DEPLOY_PATH}'; sudo -n env DEPLOY_SHA='${DEPLOY_SHA}' QUOTE_RELEASE_ID='${DEPLOY_SHA}' docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' up -d --build api web"
 
       - name: Verify production health
         run: |
@@ -177,14 +218,22 @@ jobs:
           ssh production "set -e; for attempt in \$(seq 1 24); do if curl -fsS --max-time 10 http://127.0.0.1:28000/health; then exit 0; fi; sleep 5; done; exit 1"
           curl --fail --silent --show-error --retry 5 --retry-delay 5 https://quote.freightclaw.net/api/health
 
+      - name: Publish controlled quote release
+        run: |
+          set -euo pipefail
+          ssh production "set -e; cd '${DEPLOY_PATH}'; service_version=\$(sudo -n env DEPLOY_SHA='${DEPLOY_SHA}' QUOTE_RELEASE_ID='${DEPLOY_SHA}' docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' exec -T api python -c 'from importlib import metadata; print(metadata.version(\"canada-final-mile-auto-quote\"))'); sudo -n env DEPLOY_SHA='${DEPLOY_SHA}' QUOTE_RELEASE_ID='${DEPLOY_SHA}' docker compose -p '${COMPOSE_PROJECT}' --env-file '${ENV_FILE}' -f '${COMPOSE_FILE}' exec -T api python scripts/publish_quote_release.py --release-id '${DEPLOY_SHA}' --service-version \"\$service_version\" --rule-version '${QUOTE_RULE_VERSION}' --data-version '${QUOTE_DATA_VERSION}' --published-at '${QUOTE_PUBLISHED_AT}' --valid-from '${QUOTE_VALID_FROM}' --valid-to '${QUOTE_VALID_TO}' --test-data '${QUOTE_TEST_DATA}'"
+
       - name: Verify quote release readiness
         env:
           QUOTE_READINESS_API_KEY: ${{ secrets.QUOTE_READINESS_API_KEY }}
         run: |
           set -euo pipefail
           test -n "$QUOTE_READINESS_API_KEY"
-          ssh production "curl --fail --silent --show-error --max-time 10 -H 'X-API-Key: ${QUOTE_READINESS_API_KEY}' http://127.0.0.1:28000/api/status" |
-            python3 -c 'import json, sys; body = json.load(sys.stdin); raise SystemExit(0 if body.get("ready") is True and body.get("test_data") is False else 1)'
+          check_readiness() {
+            DEPLOY_SHA="$DEPLOY_SHA" python3 -c 'import json, os, sys; body = json.load(sys.stdin); raise SystemExit(0 if body.get("ready") is True and body.get("test_data") is False and body.get("release_id") == os.environ["DEPLOY_SHA"] and isinstance(body.get("snapshot_hash"), str) else 1)'
+          }
+          ssh production "curl --fail --silent --show-error --max-time 10 -H 'X-API-Key: ${QUOTE_READINESS_API_KEY}' http://127.0.0.1:28000/status" | check_readiness
+          curl --fail --silent --show-error --max-time 10 -H "X-API-Key: ${QUOTE_READINESS_API_KEY}" https://quote.freightclaw.net/api/status | check_readiness
 
       - name: Record deployed revision
         run: |

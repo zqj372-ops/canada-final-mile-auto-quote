@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import date, datetime
 
 from sqlalchemy import select, update
@@ -35,11 +34,7 @@ def publish_quote_release(
         }.items()
     }
     normalized_published_at = source_status_service._manifest_published_at(published_at, reasons)
-    expected_release_id = _env("QUOTE_RELEASE_ID")
-    if not expected_release_id:
-        reasons.append("deployment_config_missing:QUOTE_RELEASE_ID")
-    elif values["release_id"] != expected_release_id:
-        reasons.append("deployment_config_mismatch:QUOTE_RELEASE_ID")
+    source_status_service._deployment_release_reasons(values["release_id"], reasons)
     installed_service_version = source_status_service._installed_service_version()
     if installed_service_version is None:
         reasons.append("service_version_metadata_unavailable")
@@ -91,8 +86,3 @@ def publish_quote_release(
     except Exception:
         db.rollback()
         raise
-
-
-def _env(name: str) -> str | None:
-    value = os.getenv(name)
-    return value.strip() if value and value.strip() else None

@@ -123,16 +123,17 @@ docker compose -f infra/docker-compose.yml up --build
 
 ### Quote release readiness
 
-`/health` 只表示进程存活；`/api/status` 才是报价发布就绪门禁，并且只接受带有
+`/health` 只表示进程存活；API 内部 `/status`（公网 Web 代理为 `/api/status`）才是报价发布就绪门禁，并且只接受带有
 `quote:preview` scope 的 `X-API-Key`。0026 迁移会停用旧 manifest；没有经过受控发布的
 active manifest 时，状态保持 `ready=false`，不会输出可用报价。
 
-生产 `.env.prod` 必须提供 `QUOTE_RELEASE_ID`，但本仓库不保存生产值。数据和构建完成后，
-由操作员在目标环境执行一次发布命令：
+生产 Compose 必须提供 `DEPLOY_SHA` 与 `QUOTE_RELEASE_ID`，且二者都必须是当前部署的精确
+commit SHA；本仓库不保存生产值。迁移启动后，由操作员提供规则/数据版本、有效窗口、UTC
+发布时间和显式 test-data 声明，再执行一次发布命令：
 
 ```bash
 python scripts/publish_quote_release.py \
-  --release-id "$QUOTE_RELEASE_ID" \
+  --release-id "$DEPLOY_SHA" \
   --service-version "$(python -c 'from importlib import metadata; print(metadata.version("canada-final-mile-auto-quote"))')" \
   --rule-version "<published-rule-version>" \
   --data-version "<published-data-version>" \
@@ -143,15 +144,16 @@ python scripts/publish_quote_release.py \
 ```
 
 发布事务只计算一次 source snapshot hash，并把显式 `--test-data` 与数据标记检测取逻辑或；
-检测到 demo、fixture、mock、sample 或 test 标记时仍会保持 `test_data=true`。发布后必须用
-`/api/status` 验证 `ready=true`、`test_data=false` 和 snapshot hash；CI 部署同时检查
-`/health` 与该 readiness 门禁。
+检测到 demo、fixture、mock、sample、test、`demo seed`、`unit-test` 或 `fixture data` 标记时仍会保持
+`test_data=true`。发布后必须用内网 `/status` 和公网 `/api/status` 验证 `ready=true`、
+`test_data=false`、release_id 等于部署 SHA 和 snapshot hash。
 
 ## GitHub 自动部署
 
-推送到生产分支后，GitHub Actions 会先运行完整测试、数据库迁移验证和前端构建；
-全部通过后自动同步到生产服务器、重建 API/Web 容器并检查公网健康状态。服务器无需
-手工 `git pull`。Secrets、分支策略、部署版本记录和回退方法见
+推送到生产分支后，GitHub Actions 只运行完整测试、数据库迁移验证和前端构建，不触碰生产。
+生产部署必须手动 dispatch 并填写受控发布参数；通过后才同步生产服务器、迁移并启动
+API/Web、发布 manifest、检查内外网 readiness。服务器无需手工 `git pull`。Secrets、
+分支策略、部署版本记录和回退方法见
 [GitHub 自动部署说明](docs/GITHUB_DEPLOYMENT.md)。
 
 本地 Compose 会在 API 启动前自动执行 `alembic upgrade head`。如需加载演示数据：
@@ -315,7 +317,7 @@ project name，避免影响同机其他容器：
 
 ```bash
 cp infra/.env.prod.example .env.prod
-# 修改 .env.prod 中的 POSTGRES_PASSWORD / DATABASE_URL / AI_CONFIG_SECRET / AUTH_TOKEN_SECRET / QUOTE_RELEASE_ID
+# 修改 .env.prod 中的 POSTGRES_PASSWORD / DATABASE_URL / AI_CONFIG_SECRET / AUTH_TOKEN_SECRET / DEPLOY_SHA / QUOTE_RELEASE_ID
 docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml up -d --build
 docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod.yml exec api \
   python scripts/create_user.py \

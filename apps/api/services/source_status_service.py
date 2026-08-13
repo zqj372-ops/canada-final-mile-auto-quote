@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Mapping
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -10,7 +11,7 @@ from importlib import metadata
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.db.models import (
@@ -31,8 +32,11 @@ SYSTEM = "ai_quote"
 CONTRACT_VERSION = "quote-zone.v1"
 SUPPORTED_OPERATIONS = ["quote.zone_preview"]
 _EXPECTED_RELEASE_ENV = "QUOTE_RELEASE_ID"
+_EXPECTED_DEPLOY_ENV = "DEPLOY_SHA"
 _PACKAGE_NAME = "canada-final-mile-auto-quote"
 _TEST_DATA_MARKERS = {"demo", "fixture", "mock", "sample", "test", "test_data"}
+_TEST_DATA_TOKENS = ("demo seed", "unit-test", "fixture data")
+_SNAPSHOT_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _MANIFEST_PLACEHOLDERS = {
     "latest",
     "unknown",
@@ -85,11 +89,7 @@ def get_source_status(db: Session | None = None) -> SourceStatus:
             manifest_values[field] = _manifest_text(getattr(manifest, field), field, reasons)
         published_at = _manifest_published_at(manifest.published_at, reasons)
 
-    expected_release_id = _env(_EXPECTED_RELEASE_ENV)
-    if not expected_release_id:
-        reasons.append("deployment_config_missing:QUOTE_RELEASE_ID")
-    elif manifest_values.get("release_id") != expected_release_id:
-        reasons.append("deployment_config_mismatch:QUOTE_RELEASE_ID")
+    _deployment_release_reasons(manifest_values.get("release_id"), reasons)
     installed_service_version = _installed_service_version()
     if installed_service_version is None:
         reasons.append("service_version_metadata_unavailable")
@@ -108,6 +108,8 @@ def get_source_status(db: Session | None = None) -> SourceStatus:
         if manifest.valid_to < today:
             reasons.append("effective_window_not_active:after_valid_to")
     snapshot_hash = _normalize_hash(manifest.snapshot_hash) if manifest is not None else None
+    if manifest is not None and snapshot_hash is None:
+        reasons.append("release_manifest_invalid:snapshot_hash")
     evidence_bound = (
         manifest is not None
         and source_generation is not None
@@ -298,6 +300,19 @@ def _env(name: str) -> str | None:
     return value.strip() if value and value.strip() else None
 
 
+def _deployment_release_reasons(release_id: str | None, reasons: list[str]) -> None:
+    expected_release_id = _env(_EXPECTED_RELEASE_ENV)
+    if not expected_release_id:
+        reasons.append("deployment_config_missing:QUOTE_RELEASE_ID")
+    elif release_id != expected_release_id:
+        reasons.append("deployment_config_mismatch:QUOTE_RELEASE_ID")
+    expected_deploy_sha = _env(_EXPECTED_DEPLOY_ENV)
+    if not expected_deploy_sha:
+        reasons.append("deployment_config_missing:DEPLOY_SHA")
+    elif expected_release_id != expected_deploy_sha:
+        reasons.append("deployment_config_mismatch:DEPLOY_SHA")
+
+
 def _installed_service_version() -> str | None:
     try:
         value = metadata.version(_PACKAGE_NAME).strip()
@@ -343,7 +358,13 @@ def _source_data_is_test_data(db: Session) -> bool:
     return any(
         db.scalar(
             select(column)
-            .where(func.lower(func.trim(column)).in_(markers), *conditions)
+            .where(
+                or_(
+                    func.lower(func.trim(column)).in_(markers),
+                    *(func.lower(column).contains(token) for token in _TEST_DATA_TOKENS),
+                ),
+                *conditions,
+            )
             .limit(1)
         )
         is not None
@@ -384,6 +405,7 @@ def _canonical_decimal(value: Decimal | None) -> str | None:
     return format(value, "f") if value is not None else None
 
 
-def _normalize_hash(value: str) -> str:
-    normalized = value.lower()
-    return normalized if normalized.startswith("sha256:") else f"sha256:{normalized}"
+def _normalize_hash(value: object) -> str | None:
+    if not isinstance(value, str) or _SNAPSHOT_HASH_RE.fullmatch(value) is None:
+        return None
+    return value

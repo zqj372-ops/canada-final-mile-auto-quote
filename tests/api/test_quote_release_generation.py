@@ -39,6 +39,7 @@ from tests.api.test_zone_quotes import base_payload, build_client
 
 def _configure_release(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("QUOTE_RELEASE_ID", "release-20260812-a")
+    monkeypatch.setenv("DEPLOY_SHA", "release-20260812-a")
     monkeypatch.setenv("QUOTE_VALID_FROM", date.today().isoformat())
     monkeypatch.setenv("QUOTE_VALID_TO", (date.today() + timedelta(days=30)).isoformat())
     monkeypatch.setenv("QUOTE_RELEASE_HASH", "auto")
@@ -59,7 +60,7 @@ def test_status_and_preview_do_not_scan_source_data(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(source_status_service, "source_data_hash", forbidden)
 
-    assert client.get("/api/status").status_code == 200
+    assert client.get("/status").status_code == 200
     assert client.post(
         "/quotes/zone-preview",
         json={
@@ -181,7 +182,7 @@ def test_source_table_change_invalidates_active_release(
             record.value = "36"
         session.commit()
 
-    assert client.get("/api/status").json()["ready"] is False
+    assert client.get("/status").json()["ready"] is False
     preview = client.post(
         "/quotes/zone-preview",
         json={
@@ -318,6 +319,67 @@ def test_publish_test_data_declaration_cannot_override_demo_rule(
         assert manifest.test_data is True
 
 
+@pytest.mark.parametrize(
+    ("record_type", "marker"),
+    [("postal", "Demo Seed"), ("rule", "UNIT-TEST"), ("price", "fixture data")],
+)
+def test_publish_detects_compound_test_data_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+    record_type: str,
+    marker: str,
+) -> None:
+    _configure_release(monkeypatch)
+    engine = create_engine("sqlite+pysqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        ensure_source_generation_row(connection)
+        install_source_generation_triggers(connection)
+    with Session(bind=engine) as session:
+        session.add(
+            PostalCodeCityLookup(
+                postal_code="L4K 2N2",
+                preferred_city="Concord",
+                province="ON",
+                source=marker if record_type == "postal" else "release",
+            )
+        )
+        session.add(
+            ZoneLookupRule(
+                postal_prefix="L4K",
+                city="CONCORD",
+                province="ON",
+                origin="toronto",
+                zone=2,
+                match_level=marker if record_type == "rule" else "release",
+            )
+        )
+        session.add(
+            ZonePriceMatrix(
+                origin="toronto",
+                zone=2,
+                billing_pallets=3,
+                base_price_usd=Decimal("120.00"),
+                source=marker if record_type == "price" else "release",
+            )
+        )
+        session.commit()
+        from apps.api.services.quote_release_service import publish_quote_release
+
+        manifest = publish_quote_release(
+            session,
+            release_id="release-20260812-a",
+            service_version="0.1.0",
+            rule_version="rules-1",
+            data_version="data-1",
+            published_at=datetime.now(timezone.utc),
+            valid_from=date.today(),
+            valid_to=date.today(),
+            test_data=False,
+        )
+
+        assert manifest.test_data is True
+
+
 def test_source_hash_is_stable_and_streaming() -> None:
     assert ".all(" not in inspect.getsource(source_status_service.source_data_hash)
     assert ".all(" not in inspect.getsource(source_status_service._hash_table)
@@ -376,7 +438,7 @@ def test_release_identity_must_match_installed_build(
         monkeypatch.delenv(env_key, raising=False)
     client = build_client(manifest_overrides=manifest_overrides)
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     assert response.json()["ready"] is False
@@ -390,11 +452,24 @@ def test_release_status_fails_closed_when_build_metadata_is_unavailable(
     monkeypatch.setattr(source_status_service, "_installed_service_version", lambda: None)
     client = build_client()
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     assert response.json()["ready"] is False
     assert "service_version_metadata_unavailable" in response.json()["reasons"]
+
+
+def test_release_status_requires_deployed_commit_binding(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_release(monkeypatch)
+    monkeypatch.delenv("DEPLOY_SHA")
+    missing = build_client().get("/status").json()
+    assert missing["ready"] is False
+    assert "deployment_config_missing:DEPLOY_SHA" in missing["reasons"]
+
+    monkeypatch.setenv("DEPLOY_SHA", "different-deploy-sha")
+    mismatched = build_client().get("/status").json()
+    assert mismatched["ready"] is False
+    assert "deployment_config_mismatch:DEPLOY_SHA" in mismatched["reasons"]
 
 
 def test_publish_rejects_missing_release_identity_or_service_metadata(
@@ -469,11 +544,30 @@ def test_pre_migration_active_manifest_is_not_ready_after_safety_update(
         session.execute(text("UPDATE quote_release_manifest SET active = FALSE WHERE active = TRUE"))
         session.commit()
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     assert response.json()["ready"] is False
     assert "release_manifest_missing" in response.json()["reasons"]
+
+
+def test_publish_rejects_deployed_commit_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    _configure_release(monkeypatch)
+    monkeypatch.setenv("DEPLOY_SHA", "different-deploy-sha")
+    from apps.api.services.quote_release_service import publish_quote_release
+
+    with pytest.raises(ValueError, match="deployment_config_mismatch:DEPLOY_SHA"):
+        publish_quote_release(
+            Session(),
+            release_id="release-20260812-a",
+            service_version="0.1.0",
+            rule_version="rules-1",
+            data_version="data-1",
+            published_at=datetime.now(timezone.utc),
+            valid_from=date.today(),
+            valid_to=date.today(),
+            test_data=False,
+        )
 
 
 def test_status_evidence_reads_do_not_take_postgres_locks() -> None:

@@ -24,6 +24,7 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:18080}
       AI_CONFIG_SECRET: ${AI_CONFIG_SECRET:?AI_CONFIG_SECRET is required}
       AUTH_TOKEN_SECRET: ${AUTH_TOKEN_SECRET:?AUTH_TOKEN_SECRET is required}
+      DEPLOY_SHA: ${DEPLOY_SHA:?DEPLOY_SHA is required}
       QUOTE_RELEASE_ID: ${QUOTE_RELEASE_ID:?QUOTE_RELEASE_ID is required}
       DEV_AUTH_DISABLED: ${DEV_AUTH_DISABLED:-false}
       POSTAL_HIT_TEST_OUTPUT_DIR: /app/outputs/postal_hit_tests

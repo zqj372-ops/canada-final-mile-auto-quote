@@ -5,19 +5,21 @@
 
 ```text
 git push
--> Python 测试 + Postgres 迁移验证 + Web 构建
+-> Python 测试 + Postgres 迁移验证 + Web 构建（不触碰生产）
+手动 workflow_dispatch + 明确发布参数
 -> SSH/rsync 同步代码
--> Docker Compose 重建 API 与 Web
--> 内网及公网健康检查
+-> Docker Compose 迁移并启动 API/Web
+-> 操作员提供发布参数并受控发布 quote manifest
+-> 内网 /status + 公网 /api/status readiness readback
 -> 记录线上 commit SHA
 ```
 
 ## 触发方式
 
-- 推送到 `main`：先运行完整 CI，CI 通过后自动部署生产服务器。
-- 当前过渡期也允许 `codex/hermes-learning-checkpoint-20260707` 自动部署；该分支合并后应以 `main` 作为唯一生产分支。
-- 在 GitHub Actions 手动运行 `CI & Deploy` workflow：可从指定分支手动部署。
+- 推送到 `main` 或过渡分支：只运行完整 CI，不自动触碰生产。
+- 生产部署必须在 GitHub Actions 手动运行 `CI & Deploy` workflow；该 workflow 要求填写规则版本、数据版本、UTC 发布时间、有效窗口和 test-data 声明。
 - 如果测试、数据库迁移或前端构建失败，部署 job 不会执行。
+- 缺少人工发布参数时 workflow 不会启动 production deploy；不会虚构规则、数据版本或时间。
 - 同一时间只执行一个生产部署；新提交会排队，不会中途取消正在运行的同步或容器重建。
 
 ## GitHub Secrets
@@ -27,6 +29,7 @@ git push
 ```text
 DEPLOY_SSH_KEY       # Oracle 生产机 opc 用户的私钥
 DEPLOY_JUMP_SSH_KEY  # 跳板机 tk-server 的 ubuntu 用户私钥
+QUOTE_READINESS_API_KEY # 只读 readiness 回读用 X-API-Key
 ```
 
 私钥只保存到 GitHub Secrets，不要写进仓库。使用 GitHub CLI 配置时可以直接从本机私钥文件读取：
@@ -48,7 +51,7 @@ Actions 通过跳板机连接 Oracle 服务器，将仓库同步到：
 /home/opc/canada-final-mile-auto-quote
 ```
 
-随后执行：
+随后执行迁移并启动服务（CI 用 `DEPLOY_SHA` 同时绑定 `QUOTE_RELEASE_ID`）：
 
 ```bash
 sudo -n docker compose \
@@ -59,8 +62,8 @@ sudo -n docker compose \
 ```
 
 同步时会保留服务器上的 `.env.prod`、Postgres 数据卷、`outputs/`、私有地址资料和
-`.deploy-state/`。部署完成后会检查 API 本机健康接口和公网 `/api/health`，两者都
-通过后才把线上版本记录到：
+`.deploy-state/`。受控发布 manifest 后，CI 检查 API 本机 `/status` 和公网 `/api/status`
+的 `ready`、`test_data`、`release_id` 和 snapshot hash；两者都通过后才把线上版本记录到：
 
 ```text
 /home/opc/canada-final-mile-auto-quote/.deploy-state/current-sha

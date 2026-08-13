@@ -16,7 +16,7 @@ from apps.api.services.quote_service import (
 )
 from apps.api.services.source_status_service import SourceStatus, quote_version
 from packages.quote_engine.models import QuoteResult, ShipmentInput
-from packages.quote_engine.zone_lookup import normalize_origin
+from packages.quote_engine.zone_lookup import ORIGIN_BY_PROVINCE, get_province_from_postal_code
 from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult
 
 
@@ -136,9 +136,7 @@ def preview_zone_quote(
     ),
     db: Session = Depends(get_db),
 ) -> ZoneQuotePreviewResponse | JSONResponse:
-    requested_origin = normalize_origin(payload.origin)
-    if requested_origin is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="origin is not supported.")
+    requested_origin = _validate_preview_origin(payload)
     if payload.effective_date != date.today():
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -156,6 +154,19 @@ def preview_zone_quote(
     if response.status == "unavailable":
         return JSONResponse(status_code=503, content=response.model_dump(mode="json"))
     return response
+
+
+def _validate_preview_origin(payload: ZoneQuotePreviewRequest) -> str:
+    requested_origin = payload.origin
+    if requested_origin not in {"toronto", "calgary"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="origin is not supported.")
+    province = get_province_from_postal_code(payload.quote.postal_code) or payload.quote.province
+    if ORIGIN_BY_PROVINCE.get(province or "") != requested_origin:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="origin does not match the current supported origin matrix.",
+        )
+    return requested_origin
 
 
 def _build_zone_preview_response(

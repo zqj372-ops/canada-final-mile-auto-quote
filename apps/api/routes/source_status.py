@@ -6,7 +6,7 @@ from apps.api.db.session import get_db
 from apps.api.services.source_status_service import SourceStatus, get_source_status
 
 
-router = APIRouter(prefix="/api", tags=["system"])
+router = APIRouter(tags=["system"])
 
 
 @router.get(

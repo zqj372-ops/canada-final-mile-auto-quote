@@ -2,6 +2,7 @@ from collections.abc import Generator
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,6 +37,7 @@ def configure_ready_status(monkeypatch: pytest.MonkeyPatch, *, test_data: str = 
         "QUOTE_TEST_DATA": test_data,
         "QUOTE_SERVICE_VERSION": "0.1.0",
         "QUOTE_RELEASE_ID": "release-20260812-a",
+        "DEPLOY_SHA": "release-20260812-a",
         "QUOTE_RELEASE_HASH": "auto",
         "QUOTE_RULE_VERSION": "zone-rules-20260728",
         "QUOTE_DATA_VERSION": "zone-data-20260728",
@@ -95,6 +97,7 @@ def test_source_status_is_not_ready_without_release_evidence(monkeypatch: pytest
         "QUOTE_TEST_DATA",
         "QUOTE_SERVICE_VERSION",
         "QUOTE_RELEASE_ID",
+        "DEPLOY_SHA",
         "QUOTE_RELEASE_HASH",
         "QUOTE_RULE_VERSION",
         "QUOTE_DATA_VERSION",
@@ -105,7 +108,7 @@ def test_source_status_is_not_ready_without_release_evidence(monkeypatch: pytest
         monkeypatch.delenv(key, raising=False)
     client = build_client()
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     body = response.json()
@@ -127,7 +130,7 @@ def test_source_status_uses_explicit_deployment_evidence(monkeypatch: pytest.Mon
     monkeypatch.setattr("apps.api.services.source_status_service._installed_service_version", lambda: "0.1.0")
     client = build_client()
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     body = response.json()
@@ -172,7 +175,7 @@ def test_preview_rejects_invalid_release_manifest_metadata(
     configure_ready_status(monkeypatch)
     client = build_client(manifest_overrides={field: value})
 
-    status_response = client.get("/api/status")
+    status_response = client.get("/status")
     preview_response = client.post("/quotes/zone-preview", json=preview_payload())
 
     assert status_response.status_code == 200
@@ -212,7 +215,7 @@ def test_source_status_normalizes_manifest_published_at_to_utc(monkeypatch: pyte
     published_at = datetime(2026, 8, 13, 8, tzinfo=timezone(timedelta(hours=8)))
     client = build_client(manifest_overrides={"published_at": published_at})
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     assert response.json()["ready"] is True
@@ -223,7 +226,7 @@ def test_source_status_rejects_test_data_as_not_ready(monkeypatch: pytest.Monkey
     configure_ready_status(monkeypatch, test_data="true")
     client = build_client()
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     body = response.json()
@@ -239,7 +242,7 @@ def test_source_status_reads_database_manifest_not_deployment_env(monkeypatch: p
     monkeypatch.setenv("QUOTE_TEST_DATA", "true")
     monkeypatch.setenv("QUOTE_RELEASE_HASH", "sha256:untrusted-env-value")
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     body = response.json()
@@ -264,7 +267,7 @@ def test_source_status_rejects_test_marked_quote_data(monkeypatch: pytest.Monkey
         ]
     )
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     body = response.json()
@@ -346,7 +349,7 @@ def test_source_status_rejects_static_release_hash_not_bound_to_db(monkeypatch: 
     monkeypatch.setenv("QUOTE_RELEASE_HASH", "8d69f9dc91f9c75febfbd02d7d5568a29af659ec")
     client = build_client()
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     body = response.json()
@@ -371,12 +374,31 @@ def test_zone_preview_rejects_static_release_hash_not_bound_to_db(monkeypatch: p
     assert "release_manifest_snapshot_mismatch" not in body["reasons"]
 
 
+@pytest.mark.parametrize("snapshot_hash", ["deadbeef", "sha256:short", "sha256:" + "G" * 64])
+def test_status_and_preview_reject_noncanonical_snapshot_hash(
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot_hash: str,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client(manifest_overrides={"snapshot_hash": snapshot_hash})
+
+    status_response = client.get("/status")
+    preview_response = client.post("/quotes/zone-preview", json=preview_payload())
+
+    assert status_response.status_code == 200
+    assert status_response.json()["ready"] is False
+    assert "release_manifest_invalid:snapshot_hash" in status_response.json()["reasons"]
+    assert preview_response.status_code == 503
+    assert preview_response.json()["status"] == "unavailable"
+    assert preview_response.json()["snapshot_hash"] is None
+
+
 def test_source_status_rejects_incomplete_effective_window(monkeypatch: pytest.MonkeyPatch) -> None:
     configure_ready_status(monkeypatch)
     monkeypatch.delenv("QUOTE_VALID_TO")
     client = build_client()
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     body = response.json()
@@ -389,7 +411,7 @@ def test_source_status_rejects_inactive_effective_window(monkeypatch: pytest.Mon
     monkeypatch.setenv("QUOTE_VALID_FROM", "2999-01-01")
     client = build_client()
 
-    response = client.get("/api/status")
+    response = client.get("/status")
 
     assert response.status_code == 200
     body = response.json()
@@ -402,8 +424,8 @@ def test_source_status_uses_existing_authentication(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
     client = build_auth_client()
 
-    missing = client.get("/api/status")
-    sales = client.get("/api/status", headers={"X-API-Key": SALES_KEY})
+    missing = client.get("/status")
+    sales = client.get("/status", headers={"X-API-Key": SALES_KEY})
 
     assert missing.status_code == 401
     assert sales.status_code == 200
@@ -551,6 +573,50 @@ def test_zone_preview_requires_explicit_context(monkeypatch: pytest.MonkeyPatch)
     response = client.post("/quotes/zone-preview", json={"quote": base_payload()})
 
     assert response.status_code == 422
+
+
+def test_zone_preview_rejects_noncanonical_origin_before_engine_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    calls = 0
+
+    def forbidden(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("unsupported origin must be rejected before quote lookup")
+
+    monkeypatch.setattr(quote_routes, "calculate_zone_quote_preview_service", forbidden)
+    payload = preview_payload()
+    payload["origin"] = "vancouver"
+
+    response = client.post("/quotes/zone-preview", json=payload)
+
+    assert response.status_code == 422
+    assert calls == 0
+
+
+def test_zone_preview_rejects_origin_matrix_mismatch_before_engine_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+    calls = 0
+
+    def forbidden(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("origin mismatch must be rejected before quote lookup")
+
+    monkeypatch.setattr(quote_routes, "calculate_zone_quote_preview_service", forbidden)
+    payload = preview_payload()
+    payload["origin"] = "calgary"
+
+    response = client.post("/quotes/zone-preview", json=payload)
+
+    assert response.status_code == 422
+    assert calls == 0
 
 
 def test_zone_preview_api_key_auth_does_not_commit_auth_metadata(
@@ -747,7 +813,7 @@ def test_preview_and_status_do_not_bypass_api_key_auth_in_dev(monkeypatch: pytes
     client = build_auth_client()
 
     preview = client.post("/quotes/zone-preview", json=preview_payload())
-    source_status = client.get("/api/status")
+    source_status = client.get("/status")
 
     assert preview.status_code == 401
     assert source_status.status_code == 401
@@ -756,7 +822,7 @@ def test_preview_and_status_do_not_bypass_api_key_auth_in_dev(monkeypatch: pytes
 def test_preview_openapi_matches_api_key_only_contract() -> None:
     schema = app.openapi()
     preview = schema["paths"]["/quotes/zone-preview"]["post"]
-    source_status = schema["paths"]["/api/status"]["get"]
+    source_status = schema["paths"]["/status"]["get"]
 
     assert preview["security"] == [{"APIKeyHeader": []}]
     assert source_status["security"] == [{"APIKeyHeader": []}]
@@ -779,6 +845,32 @@ def test_existing_auth_openapi_keeps_header_contract() -> None:
         operation = schema["paths"][path][method]
         assert "security" not in operation
         assert {parameter["name"] for parameter in operation["parameters"]} >= {"Authorization", "X-API-Key"}
+
+
+def test_status_backend_and_public_proxy_paths_are_explicit() -> None:
+    schema = app.openapi()
+    nginx = Path("apps/web/nginx.conf").read_text()
+
+    assert "/status" in schema["paths"]
+    assert "/api/status" not in schema["paths"]
+    assert "location /api/" in nginx
+    assert "proxy_pass http://api:8000/;" in nginx
+
+
+def test_production_deploy_requires_dispatch_inputs_before_ssh() -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text()
+    deploy = workflow[workflow.index("  deploy:"):]
+    input_gate = deploy.index("Require controlled quote release inputs")
+    first_ssh = deploy.index("ssh ")
+
+    assert "if: github.event_name == 'workflow_dispatch'" in deploy
+    assert "github.event_name == 'push'" not in deploy
+    assert input_gate < first_ssh
+    assert "scripts/publish_quote_release.py" in deploy
+    assert "http://127.0.0.1:28000/status" in deploy
+    assert "https://quote.freightclaw.net/api/status" in deploy
+    assert "DEPLOY_SHA: ${DEPLOY_SHA:?DEPLOY_SHA is required}" in Path("infra/docker-compose.prod.yml").read_text()
+    assert "QUOTE_RELEASE_ID=<deployment-commit-sha>" in Path("infra/.env.prod.example").read_text()
 
 
 def test_zone_preview_fails_closed_when_versions_switch(monkeypatch: pytest.MonkeyPatch) -> None:
