@@ -99,7 +99,6 @@ jobs:
       - name: Audit web dependencies
         working-directory: apps/web
         run: npm audit --audit-level=moderate
-        continue-on-error: true
 
   deploy:
     name: Deploy production
