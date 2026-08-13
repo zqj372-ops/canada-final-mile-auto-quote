@@ -574,6 +574,20 @@ def test_zone_preview_quote_id_is_deterministic_and_release_bound(monkeypatch: p
     assert first["quote_id"] != different_release["quote_id"]
 
 
+def test_zone_preview_quote_id_normalizes_decimal_scale(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    client = build_client()
+
+    quote_ids = [
+        client.post("/quotes/zone-preview", json=preview_v2_payload(cbm=value)).json()["quote_id"]
+        for value in ("4.2", "4.20", "4.200")
+    ]
+    changed = client.post("/quotes/zone-preview", json=preview_v2_payload(cbm="4.201")).json()
+
+    assert len(set(quote_ids)) == 1
+    assert changed["quote_id"] != quote_ids[0]
+
+
 def test_legacy_zone_quote_id_keeps_random_semantics(monkeypatch: pytest.MonkeyPatch) -> None:
     configure_ready_status(monkeypatch)
     client = build_client()
@@ -885,6 +899,66 @@ def test_zone_preview_v2_response_model_rejects_invalid_available_combinations(
     for invalid_body in invalid_bodies:
         with pytest.raises(ValueError):
             quote_routes.ZoneQuotePreviewCalculatedResponse.model_validate(invalid_body)
+
+
+def test_zone_preview_response_fee_and_source_ref_invariants(monkeypatch: pytest.MonkeyPatch) -> None:
+    configure_ready_status(monkeypatch)
+    calculated_body = build_client().post("/quotes/zone-preview", json=preview_v2_payload()).json()
+    quote_routes.ZoneQuotePreviewCalculatedResponse.model_validate(calculated_body)
+
+    invalid_bodies = [
+        {**calculated_body, "fees": {}},
+        {
+            **calculated_body,
+            "fees": {key: value for key, value in calculated_body["fees"].items() if key != "base"},
+        },
+        {
+            **calculated_body,
+            "fees": {
+                **calculated_body["fees"],
+                "total": {"amount": "211.00", "currency": "USD"},
+            },
+        },
+        {
+            **calculated_body,
+            "fees": {
+                **calculated_body["fees"],
+                "base": {"amount": "121.00", "currency": "USD"},
+            },
+        },
+        {
+            **calculated_body,
+            "line_items": [
+                {
+                    **calculated_body["line_items"][0],
+                    "source_ref_ids": [calculated_body["source_ref_ids"][0]] * 2,
+                },
+                *calculated_body["line_items"][1:],
+            ],
+        },
+    ]
+    for invalid_body in invalid_bodies:
+        with pytest.raises(ValueError):
+            quote_routes.ZoneQuotePreviewCalculatedResponse.model_validate(invalid_body)
+
+    manual_body = build_client(
+        zone_rules=[
+            {
+                "postal_prefix": "L4K",
+                "city": "OTHER CITY",
+                "province": "ON",
+                "origin": "toronto",
+                "zone": 9,
+                "match_level": "release",
+                "note": "",
+            }
+        ],
+    ).post("/quotes/zone-preview", json=preview_v2_payload()).json()
+    quote_routes.ZoneQuotePreviewManualResponse.model_validate(manual_body)
+    with pytest.raises(ValueError):
+        quote_routes.ZoneQuotePreviewManualResponse.model_validate(
+            {**manual_body, "fees": {"base": {"amount": "120.00", "currency": "USD"}}}
+        )
 
 
 def test_zone_calculate_keeps_legacy_optional_cargo_fields() -> None:
@@ -1540,6 +1614,9 @@ def test_preview_openapi_matches_api_key_only_contract() -> None:
     assert preview_quote["properties"]["detention_minutes"]["maximum"] == 10080.0
     calculated = schemas["ZoneQuotePreviewCalculatedResponse"]
     manual = schemas["ZoneQuotePreviewManualResponse"]
+    assert calculated["properties"]["fees"]["minProperties"] == 3
+    assert manual["properties"]["fees"]["maxProperties"] == 0
+    assert schemas["ZoneQuotePreviewLineItem"]["properties"]["source_ref_ids"]["uniqueItems"] is True
     assert calculated["properties"]["status"]["const"] == "quoted"
     assert calculated["properties"]["manual_review_required"]["const"] is False
     assert manual["properties"]["status"]["const"] == "manual_required"

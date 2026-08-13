@@ -157,7 +157,13 @@ class ZoneQuotePreviewLineItem(BaseModel):
     label: str = Field(min_length=1, max_length=200)
     amount: ZoneQuotePreviewFee
     pricing_basis: str = Field(min_length=1, max_length=500)
-    source_ref_ids: list[SourceRefId] = Field(min_length=1)
+    source_ref_ids: list[SourceRefId] = Field(min_length=1, json_schema_extra={"uniqueItems": True})
+
+    @model_validator(mode="after")
+    def validate_source_refs(self):
+        if len(set(self.source_ref_ids)) != len(self.source_ref_ids):
+            raise ValueError("line source_ref_ids must be unique")
+        return self
 
 
 class _ZoneQuotePreviewAvailableBase(BaseModel):
@@ -212,6 +218,13 @@ class ZoneQuotePreviewCalculatedResponse(_ZoneQuotePreviewAvailableBase):
     status: Literal["quoted"]
     manual_review_required: Literal[False]
     quote_status: Literal["calculated"]
+    fees: dict[str, ZoneQuotePreviewFee] = Field(
+        min_length=3,
+        json_schema_extra={
+            "minProperties": 3,
+            "x-required-keys": ["base", "fuel", "total"],
+        },
+    )
     total: ZoneQuotePreviewFee
     line_items: list[ZoneQuotePreviewLineItem] = Field(min_length=1)
     billing_pallets: int = Field(ge=1)
@@ -220,6 +233,16 @@ class ZoneQuotePreviewCalculatedResponse(_ZoneQuotePreviewAvailableBase):
     def validate_line_items(self):
         if self.status != "quoted" or self.manual_review_required:
             raise ValueError("calculated response must be quoted and not require manual review")
+        if not {"base", "fuel", "total"} <= self.fees.keys():
+            raise ValueError("calculated fees must include base, fuel, and total")
+        if Decimal(self.fees["total"].amount) != Decimal(self.total.amount):
+            raise ValueError("fees.total must equal total")
+        fee_sum = sum(
+            (Decimal(fee.amount) for name, fee in self.fees.items() if name != "total"),
+            Decimal("0"),
+        )
+        if fee_sum != Decimal(self.total.amount):
+            raise ValueError("non-total fees must equal total")
         line_ids = [item.line_id for item in self.line_items]
         if len(line_ids) != len(set(line_ids)):
             raise ValueError("calculated line_ids must be unique")
@@ -237,6 +260,11 @@ class ZoneQuotePreviewManualResponse(_ZoneQuotePreviewAvailableBase):
     status: Literal["manual_required"]
     manual_review_required: Literal[True]
     quote_status: Literal["manual_review", "not_calculable"]
+    fees: dict[str, ZoneQuotePreviewFee] = Field(
+        default_factory=dict,
+        max_length=0,
+        json_schema_extra={"maxProperties": 0},
+    )
     total: Literal[None] = None
     line_items: list[ZoneQuotePreviewLineItem] = Field(default_factory=list, max_length=0)
     billing_pallets: int | None = Field(default=None, ge=1)
@@ -646,7 +674,7 @@ def _preview_quote_id(
         "tenant": tenant,
         "origin": origin,
         "effective_date": effective_date.isoformat(),
-        "quote": quote.model_dump(mode="json"),
+        "quote": _canonical_preview_quote(quote),
         "quote_version": quote_version(source_status),
         "release_id": source_status.release_id,
         "release_hash": source_status.release_hash,
@@ -654,6 +682,15 @@ def _preview_quote_id(
     }
     encoded = json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return f"preview:{sha256(encoded).hexdigest()}"
+
+
+def _canonical_preview_quote(quote: ZoneQuoteRequest) -> dict[str, object]:
+    payload = quote.model_dump(mode="python")
+    for field in ("cbm", "weight_kg", "longest_side_cm"):
+        value = payload[field]
+        if isinstance(value, Decimal):
+            payload[field] = format(value.normalize(), "f")
+    return payload
 
 
 def _preview_line_items(result: ZoneQuoteResult, source_ref_ids: list[str]) -> list[ZoneQuotePreviewLineItem]:
