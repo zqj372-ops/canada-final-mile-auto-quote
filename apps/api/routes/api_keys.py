@@ -19,6 +19,8 @@ class APIKeyCreate(BaseModel):
 
     name: str = Field(min_length=1, max_length=128)
     role: str = Field(pattern="^(admin|operator|sales|viewer)$")
+    tenant_id: str = Field(default="default", min_length=1, max_length=128)
+    scopes: list[str] = Field(default_factory=list)
     enabled: bool = True
 
 
@@ -27,6 +29,8 @@ class APIKeyUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=128)
     role: str | None = Field(default=None, pattern="^(admin|operator|sales|viewer)$")
+    tenant_id: str | None = Field(default=None, min_length=1, max_length=128)
+    scopes: list[str] | None = None
     enabled: bool | None = None
 
 

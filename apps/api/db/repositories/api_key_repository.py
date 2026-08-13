@@ -19,6 +19,8 @@ class APIKeyRepository:
         *,
         name: str,
         role: str,
+        tenant_id: str = "default",
+        scopes: list[str] | None = None,
         enabled: bool = True,
     ) -> tuple[APIKey, str]:
         if role not in ALLOWED_API_KEY_ROLES:
@@ -28,6 +30,8 @@ class APIKeyRepository:
             name=name,
             key_hash=hash_api_key(plain_key),
             role=role,
+            tenant_id=tenant_id,
+            scopes=scopes or [],
             enabled=enabled,
         )
         self.session.add(record)
@@ -47,6 +51,8 @@ class APIKeyRepository:
         *,
         name: str | None = None,
         role: str | None = None,
+        tenant_id: str | None = None,
+        scopes: list[str] | None = None,
         enabled: bool | None = None,
     ) -> APIKey | None:
         record = self.get_key(key_id)
@@ -58,18 +64,24 @@ class APIKeyRepository:
             record.name = name
         if role is not None:
             record.role = role
+        if tenant_id is not None:
+            record.tenant_id = tenant_id
+        if scopes is not None:
+            record.scopes = scopes
         if enabled is not None:
             record.enabled = enabled
         self.session.commit()
         self.session.refresh(record)
         return record
 
-    def authenticate(self, api_key: str) -> APIKey | None:
+    def authenticate(self, api_key: str, *, update_last_used: bool = True) -> APIKey | None:
         record = self.session.scalars(
             select(APIKey).where(APIKey.key_hash == hash_api_key(api_key), APIKey.enabled.is_(True))
         ).first()
         if record is None:
             return None
+        if not update_last_used:
+            return record
         record.last_used_at = datetime.now(timezone.utc)
         self.session.commit()
         self.session.refresh(record)
@@ -81,6 +93,8 @@ class APIKeyRepository:
             "name": record.name,
             "masked_api_key": mask_api_key(plain_key),
             "role": record.role,
+            "tenant_id": record.tenant_id,
+            "scopes": list(record.scopes or []),
             "enabled": record.enabled,
             "created_at": record.created_at.isoformat() if record.created_at else None,
             "updated_at": record.updated_at.isoformat() if record.updated_at else None,

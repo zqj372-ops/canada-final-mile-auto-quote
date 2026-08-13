@@ -31,6 +31,12 @@ from packages.quote_engine.zone_lookup import (
     origin_label,
 )
 from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult, ZoneQuoteSourceType
+from apps.api.services.source_status_service import (
+    SourceStatus,
+    get_source_status,
+    source_data_hash,
+    source_status_version_key,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -50,48 +56,87 @@ def calculate_zone_quote(
     email_config_id: int | None = None,
     notify_wecom: bool = False,
     wecom_bot_id: int | None = None,
+    persist_side_effects: bool = True,
 ) -> ZoneQuoteResult:
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
-    result = apply_learned_quote_if_available(db, payload, result)
-    result = enforce_origin_matrix_safety(payload, result)
-    result = enforce_zone_price_switch(pricing_config, result)
-    result = attach_zone_quote_logic(payload, result)
-    record_zone_quote_side_effects(
+    result = apply_learned_quote_if_available(
         db,
         payload,
         result,
-        source="zone_quote",
-        manual_email_config_id=email_config_id,
-        manual_wecom_bot_id=wecom_bot_id,
+        mark_used=persist_side_effects,
+        rollback_on_error=persist_side_effects,
     )
-    if (notify_email or notify_wecom) and not result.manual_review_required:
-        try_notification(
-            "quote_success",
-            lambda: notify_quote_success(
-                db,
-                result=result,
-                request=payload,
-                bot_id=wecom_bot_id,
-                email_config_id=email_config_id,
-                channels=requested_notification_channels(email=notify_email, wecom=notify_wecom),
-            ),
-            result.quote_id,
+    result = enforce_origin_matrix_safety(payload, result)
+    result = enforce_zone_price_switch(pricing_config, result)
+    result = attach_zone_quote_logic(payload, result)
+    if persist_side_effects:
+        record_zone_quote_side_effects(
+            db,
+            payload,
+            result,
+            source="zone_quote",
+            manual_email_config_id=email_config_id,
+            manual_wecom_bot_id=wecom_bot_id,
         )
+        if (notify_email or notify_wecom) and not result.manual_review_required:
+            try_notification(
+                "quote_success",
+                lambda: notify_quote_success(
+                    db,
+                    result=result,
+                    request=payload,
+                    bot_id=wecom_bot_id,
+                    email_config_id=email_config_id,
+                    channels=requested_notification_channels(email=notify_email, wecom=notify_wecom),
+                ),
+                result.quote_id,
+            )
     return result
+
+
+def calculate_zone_quote_preview(
+    db: Session,
+    payload: ZoneQuoteRequest,
+    *,
+    origin: str,
+) -> tuple[SourceStatus, ZoneQuoteResult | None, list[str]]:
+    status = get_source_status(db)
+    if not status.ready:
+        return status, None, list(status.reasons)
+
+    before_data_hash = source_data_hash(db)
+    try:
+        result = calculate_zone_quote(db, payload, persist_side_effects=False)
+    except Exception:
+        logger.exception("Read-only zone quote preview failed.")
+        return status, None, ["quote_preview_failed"]
+
+    after_data_hash = source_data_hash(db)
+    if before_data_hash != after_data_hash:
+        return status, None, ["source_data_changed_during_calculation"]
+    if source_status_version_key(get_source_status(db)) != source_status_version_key(status):
+        return status, None, ["source_version_changed_during_calculation"]
+    if result.origin is not None and normalize_origin(result.origin) != origin:
+        return status, None, ["origin_mismatch"]
+    return status, result, []
 
 
 def apply_learned_quote_if_available(
     db: Session,
     payload: ZoneQuoteRequest,
     result: ZoneQuoteResult,
+    *,
+    mark_used: bool = True,
+    rollback_on_error: bool = True,
 ) -> ZoneQuoteResult:
     try:
         repository = LearnedQuoteRuleRepository(db)
         candidate = repository.find_best_candidate(payload, result)
     except Exception:
         logger.exception("Failed to query learned quote rules.", extra={"quote_id": result.quote_id})
-        db.rollback()
+        if rollback_on_error:
+            db.rollback()
         return result
 
     if candidate is None:
@@ -101,7 +146,8 @@ def apply_learned_quote_if_available(
         return result
     if not _should_apply_learned_rule(result, learned_rule, match_score):
         return result
-    repository.mark_used(learned_rule)
+    if mark_used:
+        repository.mark_used(learned_rule)
     return _result_from_learned_rule(payload, result, learned_rule, match_score=match_score)
 
 

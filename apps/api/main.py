@@ -18,6 +18,7 @@ from apps.api.routes.quote_configs import router as quote_configs_router
 from apps.api.routes.quotes import router as quotes_router
 from apps.api.routes.sales_records import router as sales_records_router
 from apps.api.routes.search_configs import router as search_configs_router
+from apps.api.routes.source_status import router as source_status_router
 from apps.api.routes.users import router as users_router
 from apps.api.routes.wecom_configs import router as wecom_configs_router
 
@@ -58,6 +59,7 @@ app.include_router(imports_router)
 app.include_router(quote_configs_router)
 app.include_router(ai_configs_router)
 app.include_router(search_configs_router)
+app.include_router(source_status_router)
 app.include_router(email_configs_router)
 app.include_router(wecom_configs_router)
 app.include_router(api_keys_router)

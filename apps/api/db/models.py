@@ -533,6 +533,10 @@ class APIKey(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
     role: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    tenant_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, default="default", server_default="default", index=True
+    )
+    scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

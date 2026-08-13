@@ -1,3 +1,4 @@
+import os
 from decimal import Decimal
 from collections.abc import Generator
 
@@ -50,6 +51,10 @@ def build_client(
         for record in quote_rule_configs or []:
             session.add(QuoteRuleConfig(**record))
         session.commit()
+        if os.getenv("QUOTE_RELEASE_HASH") == "auto":
+            from apps.api.services.source_status_service import source_data_hash
+
+            os.environ["QUOTE_RELEASE_HASH"] = source_data_hash(session)
 
     def override_get_db() -> Generator[Session]:
         with TestingSessionLocal() as session:

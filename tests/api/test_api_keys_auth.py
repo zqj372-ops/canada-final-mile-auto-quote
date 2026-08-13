@@ -1,4 +1,5 @@
 from collections.abc import Generator
+import os
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -47,7 +48,16 @@ def build_client() -> TestClient:
             ("Viewer", VIEWER_KEY, "viewer", True),
             ("Disabled", DISABLED_KEY, "admin", False),
         ]:
-            session.add(APIKey(name=name, key_hash=hash_api_key(plain_key), role=role, enabled=enabled))
+            session.add(
+                APIKey(
+                    name=name,
+                    key_hash=hash_api_key(plain_key),
+                    role=role,
+                    enabled=enabled,
+                    tenant_id="default",
+                    scopes=["quote:preview"] if role == "sales" else [],
+                )
+            )
 
         sales_user = User(
             username="sales@example.com",
@@ -155,6 +165,10 @@ def build_client() -> TestClient:
             )
         )
         session.commit()
+        if os.getenv("QUOTE_RELEASE_HASH") == "auto":
+            from apps.api.services.source_status_service import source_data_hash
+
+            os.environ["QUOTE_RELEASE_HASH"] = source_data_hash(session)
 
     def override_get_db() -> Generator[Session]:
         with TestingSessionLocal() as session:
