@@ -8,6 +8,9 @@ from packages.ai_assistant.quote_extractor import (
     apply_deterministic_extraction,
     extract_quote_draft,
     extract_quote_draft_with_agents,
+    _sanitize_address_agent_data,
+    _sanitize_extraction_data,
+    _strip_extracted_address_noise,
 )
 
 
@@ -40,6 +43,66 @@ class RepairingDualAIClient(FakeDualAIClient):
             return AIResponse(content=self.address)
         self.cargo_calls += 1
         return AIResponse(content="not json" if self.cargo_calls == 1 else self.cargo)
+
+
+def test_strip_extracted_address_noise_removes_confirmed_field_fragments() -> None:
+    assert (
+        _strip_extracted_address_noise(
+            "1055 Flagship Way, unit A detention_minutes=0 requires_liftgate=false"
+        )
+        == "1055 Flagship Way, unit A"
+    )
+    assert _strip_extracted_address_noise("Calgary detention_minutes=0") == "Calgary"
+    assert _strip_extracted_address_noise(None) is None
+    assert _strip_extracted_address_noise("detention_minutes=0") is None
+
+
+def test_sanitizers_clean_llm_leaked_address_noise() -> None:
+    agent = _sanitize_address_agent_data(
+        {
+            "address_line": "436 route 275 detention_minutes=0",
+            "city": "Sainte-Marguerite de dorchester requires_appointment=false",
+            "postal_code": "G0S 2X0",
+            "province": "Québec",
+        }
+    )
+    assert agent["address_line"] == "436 route 275"
+    assert agent["city"] == "Sainte-Marguerite de dorchester"
+
+    single = _sanitize_extraction_data(
+        {
+            "address_line": "1055 Flagship Way, unit A detention_minutes=0",
+            "city": "Pickering detention_minutes=0",
+            "postal_code": "L1X 0P2",
+            "province": "ON",
+        }
+    )
+    assert single["address_line"] == "1055 Flagship Way, unit A"
+    assert single["city"] == "Pickering"
+
+
+def test_extract_quote_draft_cleans_model_leaked_confirmed_block() -> None:
+    payload = """
+    {
+      "address_line": "---\\n前台已确认字段，仅用于字段提取，不允许 AI 计算价格：\\ndetention_minutes=0\\n1055 Flagship Way, unit A",
+      "postal_code": "L1X 0P2",
+      "city": "Pickering detention_minutes=0",
+      "province": "ON",
+      "address_type": "commercial",
+      "requires_liftgate": false,
+      "requires_pallet_jack": false,
+      "requires_appointment": false,
+      "detention_minutes": 0,
+      "missing_fields": [],
+      "confidence": 97
+    }
+    """
+    draft = extract_quote_draft(
+        "1055 Flagship Way, unit A, Pickering ON L1X 0P2",
+        FakeAIClient(content=payload),
+    )
+    assert draft.address_line == "1055 Flagship Way, unit A"
+    assert draft.city == "Pickering"
 
 
 @pytest.mark.parametrize(

@@ -118,6 +118,30 @@ REQUIRED_FIELDS = {
     "packaging_type",
     "address_type",
 }
+CONFIRMED_FIELD_NAMES = frozenset(
+    {
+        "address_line",
+        "postal_code",
+        "city",
+        "province",
+        "packaging_type",
+        "address_type",
+        "requires_liftgate",
+        "requires_pallet_jack",
+        "requires_appointment",
+        "detention_minutes",
+        "explicit_pallet_count",
+        "is_stackable",
+    }
+)
+_CONFIRMED_FIELD_TOKEN_RE = re.compile(
+    r"(?:^|[\s,，;；|/])"
+    r"(?:packaging_type|address_type|requires_liftgate|requires_pallet_jack|"
+    r"requires_appointment|detention_minutes|explicit_pallet_count|is_stackable|"
+    r"postal_code|city|province)"
+    r"\s*=\s*[^\s,，;；|]+",
+    re.IGNORECASE,
+)
 ALLOWED_PACKAGING_TYPES = {"carton", "wooden_crate", "pallet", "woven_bag", "flexible_packaging", "unknown"}
 ALLOWED_ADDRESS_TYPES = {"commercial", "residential", "private", "rural_residential"}
 POSTAL_CODE_PATTERN = re.compile(r"[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d")
@@ -199,6 +223,7 @@ def extract_quote_draft(customer_message: str, client: BaseAIClient) -> AIExtrac
         model_type=AIExtractedQuoteDraft,
     )
     draft = apply_deterministic_extraction(draft, customer_message)
+    _clear_extracted_address_noise(draft)
     draft.missing_fields = sorted(missing_required_fields(draft))
     return draft
 
@@ -230,6 +255,7 @@ def extract_quote_draft_with_agents(customer_message: str, client: BaseAIClient)
     draft = _merge_agent_draft_with_fallback(draft, fallback)
     draft = _reconcile_with_explicit_facts(draft, fallback, customer_message)
     draft = _validate_cargo_items_and_totals(draft)
+    _clear_extracted_address_noise(draft)
     if errors:
         draft.validation_notes.extend(errors)
     draft.missing_fields = sorted(missing_required_fields(draft))
@@ -764,6 +790,8 @@ def _parse_json_object(content: str) -> dict[str, Any]:
 
 def _sanitize_extraction_data(data: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(data)
+    normalized["address_line"] = _strip_extracted_address_noise(data.get("address_line"))
+    normalized["city"] = _strip_extracted_address_noise(data.get("city"))
     for field in ["requires_liftgate", "requires_pallet_jack", "requires_appointment"]:
         normalized[field] = _coerce_bool(normalized.get(field), default=False)
     normalized["detention_minutes"] = _coerce_int(normalized.get("detention_minutes"), default=0)
@@ -809,9 +837,9 @@ def _sanitize_address_agent_data(data: dict[str, Any]) -> dict[str, Any]:
     postal_code = data.get("postal_code")
     province = data.get("province")
     normalized = {
-        "address_line": _none_if_placeholder(data.get("address_line")),
+        "address_line": _strip_extracted_address_noise(data.get("address_line")),
         "postal_code": _find_postal_code(str(postal_code)) if postal_code else None,
-        "city": _none_if_placeholder(data.get("city")),
+        "city": _strip_extracted_address_noise(data.get("city")),
         "province": _find_province(str(province)) or (str(province).upper() if province and not _is_placeholder_value(str(province)) else None),
         "country": _none_if_placeholder(data.get("country")),
         "address_type": _none_if_placeholder(data.get("address_type")),
@@ -824,6 +852,42 @@ def _sanitize_address_agent_data(data: dict[str, Any]) -> dict[str, Any]:
         "extraction_notes": _none_if_placeholder(data.get("extraction_notes")),
     }
     return normalized
+
+
+def _strip_extracted_address_noise(value: Any) -> str | None:
+    """Strip UI confirmed-field fragments the model may leak into address fields."""
+    if value is None:
+        return None
+    kept: list[str] = []
+    for raw_line in str(value).splitlines():
+        line = raw_line.strip()
+        lowered = line.lower()
+        if (
+            lowered.startswith("---")
+            or "前台已确认字段" in lowered
+            or "仅用于字段提取" in lowered
+            or "不允许 ai 计算价格" in lowered
+        ):
+            continue
+        label_match = re.match(r"^\s*address_line\s*=\s*(.+)$", line, re.IGNORECASE)
+        if label_match and label_match.group(1).strip():
+            line = label_match.group(1).strip()
+        elif (
+            re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\s*=", line)
+            and line.split("=", 1)[0].strip().lower() in CONFIRMED_FIELD_NAMES
+        ):
+            continue
+        cleaned = _CONFIRMED_FIELD_TOKEN_RE.sub(" ", line).strip(" ,，;；|/-")
+        if cleaned:
+            kept.append(cleaned)
+    if not kept:
+        return None
+    return ", ".join(dict.fromkeys(kept))
+
+
+def _clear_extracted_address_noise(draft: AIExtractedQuoteDraft) -> None:
+    draft.address_line = _strip_extracted_address_noise(draft.address_line)
+    draft.city = _strip_extracted_address_noise(draft.city)
 
 
 def _sanitize_cargo_items(value: Any) -> list[dict[str, Any]]:
@@ -1852,20 +1916,7 @@ def _find_province(customer_message: str) -> str | None:
 
 def _parse_confirmed_fields(customer_message: str) -> dict[str, str]:
     fields: dict[str, str] = {}
-    allowed = {
-        "address_line",
-        "postal_code",
-        "city",
-        "province",
-        "packaging_type",
-        "address_type",
-        "requires_liftgate",
-        "requires_pallet_jack",
-        "requires_appointment",
-        "detention_minutes",
-        "explicit_pallet_count",
-        "is_stackable",
-    }
+    allowed = CONFIRMED_FIELD_NAMES
     for line in customer_message.splitlines():
         match = re.match(r"\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.*?)\s*$", line)
         if match and match.group(1) in allowed:

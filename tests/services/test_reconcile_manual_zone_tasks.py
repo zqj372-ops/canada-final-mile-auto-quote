@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from packages.quote_engine.zone_models import ZoneQuoteResult, ZoneQuoteSourceType
 from scripts.reconcile_manual_zone_tasks import (
+    _migration_rank,
     mark_cancelled_reconciliation,
     require_exact_match_before_cancelling,
 )
@@ -110,3 +111,9 @@ def test_cancelled_reconciliation_never_says_result_can_be_sent_to_customer() ->
     assert "可发客户" not in quote_logic["next_action"]
     assert "禁止直接发送" in quote_logic["next_action"]
     assert "未发送客户" in reconciled.sales_note
+
+
+def test_migration_rank_accepts_zone_integrity_and_later_heads() -> None:
+    assert _migration_rank("0020_zone_reference_integrity") == 20
+    assert _migration_rank("0023_repair_oversize_snapshot_indexes") == 23
+    assert _migration_rank("not_a_migration") == -1

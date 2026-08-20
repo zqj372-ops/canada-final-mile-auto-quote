@@ -61,6 +61,7 @@ SAFE_INFORMATIONAL_RISK_TAGS = {
     "rural_fsa_secondary_confirmation",
 }
 REQUIRED_MIGRATION = "0020_zone_reference_integrity"
+MIN_REQUIRED_MIGRATION_RANK = 20
 
 
 def should_recheck(task: ManualQuoteTask, *, scope: str) -> bool:
@@ -434,6 +435,14 @@ def _id_hash(ids: list[int]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _migration_rank(version: str) -> int:
+    prefix = version.split("_", 1)[0]
+    try:
+        return int(prefix)
+    except ValueError:
+        return -1
+
+
 def _json_hash(value: object) -> str:
     return hashlib.sha256(
         json.dumps(
@@ -484,9 +493,10 @@ def verify_runtime_integrity(
             )
         )
     version = session.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-    if version != REQUIRED_MIGRATION:
+    if _migration_rank(version) < MIN_REQUIRED_MIGRATION_RANK:
         raise RuntimeError(
-            f"required migration {REQUIRED_MIGRATION} is not active; found {version}"
+            f"required migration {REQUIRED_MIGRATION} (or a later head) is not active; "
+            f"found {version}"
         )
 
     invalid_ids: list[int] = []
