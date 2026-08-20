@@ -120,6 +120,7 @@ AI 提取完成但尚未确认报价，不是正式报价记录，也不是人�
     "validation_notes": []
   },
   "field_provenance": {
+    "address_line": "customer_original",
     "postal_code": "customer_original",
     "city": "ai_extracted",
     "province": "deterministic_extracted",
@@ -127,7 +128,11 @@ AI 提取完成但尚未确认报价，不是正式报价记录，也不是人�
     "weight_kg": "customer_original",
     "piece_count": "deterministic_extracted",
     "packaging_type": "ai_extracted",
-    "address_type": "ai_extracted"
+    "address_type": "ai_extracted",
+    "requires_liftgate": "deterministic_extracted",
+    "requires_pallet_jack": "deterministic_extracted",
+    "requires_appointment": "ai_extracted",
+    "detention_minutes": "deterministic_extracted"
   },
   "extraction_missing_fields": [],
   "draft_validation_errors": [],
@@ -146,6 +151,8 @@ AI 提取完成但尚未确认报价，不是正式报价记录，也不是人�
 - `human_edited`：仅在用户明确编辑结构化字段后由前端设置。
 
 提取服务需要在 AI 输出与确定性解析/fallback 合并时一并产生这份 provenance；不能在 React 层事后反推。
+
+对 `ai-extract` 响应和 `confirmed-calculate` 请求，所有非 null 或显式提供的报价输入字段都必须有对应 provenance；其中 `false` 和 `0` 也属于显式值。只有允许为空且当前为 `null` 的字段可以省略 provenance。由确定性默认值补出的 `false` 或 `0` 统一标记为 `deterministic_extracted`。
 
 #### `field_provenance` 的允许键
 
@@ -224,12 +231,19 @@ AI 模型失败时，可以沿用当前确定性解析 fallback，返回没有�
   "extraction_snapshot": null,
   "supersedes_quote_id": null,
   "field_provenance": {
+    "address_line": "customer_original",
     "postal_code": "human_edited",
+    "city": "ai_extracted",
+    "province": "deterministic_extracted",
     "cbm": "ai_extracted",
     "weight_kg": "customer_original",
     "piece_count": "deterministic_extracted",
     "packaging_type": "ai_extracted",
-    "address_type": "human_edited"
+    "address_type": "human_edited",
+    "requires_liftgate": "deterministic_extracted",
+    "requires_pallet_jack": "deterministic_extracted",
+    "requires_appointment": "ai_extracted",
+    "detention_minutes": "deterministic_extracted"
   }
 }
 ```
@@ -241,7 +255,7 @@ AI 模型失败时，可以沿用当前确定性解析 fallback，返回没有�
 - `extraction_snapshot` 和 `field_provenance` 只用于审计/UI 回显，不得参与金额计算；
 - `field_provenance` 的值限定为 `customer_original`、`ai_extracted`、`deterministic_extracted`、`human_edited`；
 - `field_provenance` 只能使用上一节列出的输入字段键，未知键返回 422；不得出现 `system_derived`；
-- `confirmed-calculate` 对当前 `quote` 中有值或显式提供的输入字段要求有对应 provenance；可选的 null 字段可以省略；
+- `confirmed-calculate` 对当前 `quote` 中有值或显式提供的输入字段要求有对应 provenance；`false` 和 `0` 也是显式值，不能省略；可选的 null 字段可以省略；
 - `supersedes_quote_id` 只用于替代一条仍处于待处理状态的人工复核报价，默认为空；
 - 后端不能从 `customer_message`、`extraction_snapshot` 或 `field_provenance` 再推导或覆盖 `quote`。
 
@@ -288,15 +302,18 @@ AI 模型失败时，可以沿用当前确定性解析 fallback，返回没有�
 服务层必须沿用统一 Zone Quote Engine 管道：
 
 ```text
+开启核心 SQLAlchemy transaction
+→ 如有 supersedes_quote_id，锁定旧 sales_quote_record 和旧 manual_quote_task
 ZoneQuoteEngine.quote(confirmed_quote)
-→ apply_learned_quote_if_available()
+→ apply_learned_quote_if_available()（实际复用时只暂存 usage_count 更新）
 → enforce_origin_matrix_safety()
 → enforce_zone_price_switch()
 → attach_zone_quote_logic()
-→ 核心事务：写 quote audit
-→ 核心事务：manual_review_required 时创建 manual_quote_task
-→ 核心事务：创建 sales_quote_record
-→ 核心事务提交
+→ 如有替代关系：取消旧 task，并把旧 sales record 标为 superseded
+→ 写 quote audit
+→ manual_review_required 时创建新 manual_quote_task
+→ 创建新 sales_quote_record
+→ 一次提交核心事务
 → 提交后 best effort 写 Hermes diagnostic
 ```
 
@@ -312,10 +329,13 @@ Phase 1 的权限边界继续有效：只有原始 Quote Engine 结果为 `manua
 
 ```text
 校验旧 sales_quote_record 的归属/权限
-→ 查找旧 quote_id 对应的 pending manual_quote_task
+→ 在同一事务中锁定旧 sales_quote_record 和旧 quote_id 对应的 manual_quote_task
+→ 确认旧 task.status 仍为 pending
 → 计算新报价并获得新 quote_id
 → 同一核心事务内将旧 task.status 标记为 cancelled
-→ 在旧 task.resolved_note 和 request_json 中记录 superseded_by_quote_id
+→ 在旧 task.resolved_note 和 result_json 中记录 superseded_by_quote_id
+→ 将旧 sales_quote_record.status 标记为 superseded
+→ 在旧 sales_quote_record.result_json 中记录 superseded_by_quote_id
 → 写入新 audit、sales_quote_record 和必要的新 manual_quote_task
 → 一次提交
 ```
@@ -325,12 +345,16 @@ Phase 1 的权限边界继续有效：只有原始 Quote Engine 结果为 `manua
 - `sales` 只能替代自己创建的旧销售记录；`admin/operator` 按现有报价写权限处理；
 - 找不到旧销售记录、旧任务不存在或旧任务不是 `pending` 时返回 HTTP 409，不静默创建替代关系；
 - 已经 `resolved`、已取消或已经进入其他处理状态的任务不能被静默取消；用户必须新建独立报价或走明确的人工操作；
+- 旧销售记录保留原始 customer message、request/result 快照和审计关联，但状态改为 `superseded`，前端不再把它显示为当前待人工复核；
+- `superseded` 纳入销售记录 API 的状态过滤、前端类型、计数和展示文案（显示为“已被替代”），不改变旧 `quoted/manual_required` 记录的既有含义；
 - 新报价成功后响应返回 `superseded_quote_id` 和 `superseded_task_id`，便于右栏显示替代关系；
 - `QUOTED` 结果默认不使用 `supersedes_quote_id`，除非未来另行定义报价版本关系。
 
+并发控制使用数据库行锁：在核心事务内对旧销售记录和旧人工任务执行 `SELECT ... FOR UPDATE`，重新检查任务仍为 `pending` 后才允许取消。第二个并发替代请求获得锁后必须看到非 `pending` 状态并返回 409；不能依赖前端状态或无锁的先查后改。
+
 #### 事务边界
 
-`quote_audit`、`sales_quote_record`、必要的 `manual_quote_task` 以及旧任务的取消必须在同一个 SQLAlchemy session transaction 中原子提交。现有 repository 的内部 `commit()` 不能直接用于这个流程；实现需要增加 transaction-aware 的 `flush`/`commit=False` 路径，或由 confirmed calculate service 直接编排模型写入。
+旧人工任务取消、实际复用时的学习规则 `usage_count` 更新、`quote_audit`、`sales_quote_record`、必要的新的 `manual_quote_task` 以及旧销售记录标记为 `superseded`，必须在同一个 SQLAlchemy session transaction 中原子提交。现有 repository 的内部 `commit()` 不能直接用于这个流程；实现需要增加 transaction-aware 的 `flush`/`commit=False` 路径，或由 confirmed calculate service 直接编排模型写入。
 
 如果上述核心写入任一失败：
 
@@ -339,7 +363,7 @@ Phase 1 的权限边界继续有效：只有原始 Quote Engine 结果为 `manua
 - 不返回 `quote_result`、`sales_record_id` 或 `manual_task_id` 作为成功结果；
 - 不允许前端把“计算成功但任务不存在”显示成完整报价。
 
-`hermes_diagnostic_queue` 选择在核心事务提交后 best effort 写入。写入失败不回滚已经提交的正式报价，但必须记录结构化错误日志/补偿标记，并通过 `diagnostic_queued=false` 告知前端；它不能改变报价金额或正式报价状态。`apply_learned_quote_if_available()` 在该流程中也必须使用不提前提交的 `usage_count` 更新路径，避免核心写入失败后留下孤立的学习规则使用记录。
+`hermes_diagnostic_queue` 选择在核心事务提交后 best effort 写入。写入失败不回滚已经提交的正式报价，但必须记录结构化错误日志和可观测事件，并通过 `diagnostic_queued=false` 告知前端；本阶段不新增持久化补偿标记、Outbox 或自动重试队列。诊断失败不能改变报价金额或正式报价状态。`apply_learned_quote_if_available()` 在该流程中也必须使用不提前提交的 `usage_count` 更新路径，避免核心写入失败后留下孤立的学习规则使用记录。
 
 #### 记录状态
 
@@ -347,6 +371,7 @@ Phase 1 的权限边界继续有效：只有原始 Quote Engine 结果为 `manua
 | --- | --- | --- | --- |
 | `manual_review_required=false` 且有金额 | `quoted` | 否 | 是 |
 | `manual_review_required=true` | `manual_required` | 是 | 是 |
+| 旧人工复核报价被新报价替代 | `superseded` | 旧任务取消；新结果按实际情况创建 | 是（旧记录更新，新记录创建） |
 | 系统异常、没有 `ZoneQuoteResult` | 不写 | 否 | 否 |
 
 系统异常不允许落成 `manual_required`，因为那会把依赖故障与业务复核混为一谈。
@@ -363,11 +388,11 @@ Phase 1 的权限边界继续有效：只有原始 Quote Engine 结果为 `manua
 
 ```text
 EMPTY → EXTRACTING
-           ├─ extraction_missing_fields / draft_validation_errors → NEEDS_INPUT
-           ├─ current draft valid                              → READY_TO_QUOTE → QUOTING
-           │                                      ├─ quoted  → QUOTED
-           │                                      └─ review  → REVIEW_REQUIRED
-           └─ request error   → SYSTEM_ERROR
+           ├─ draft_validation_errors 非空 → NEEDS_INPUT
+           ├─ draft_validation_errors 为空 → READY_TO_QUOTE → QUOTING
+           │                                  ├─ quoted  → QUOTED
+           │                                  └─ review  → REVIEW_REQUIRED
+           └─ request error               → SYSTEM_ERROR
 
 QUOTED / REVIEW_REQUIRED ──编辑报价字段──→ STALE
 STALE ──重新报价成功──→ QUOTED 或 REVIEW_REQUIRED
@@ -379,7 +404,7 @@ STALE ──重新报价成功──→ QUOTED 或 REVIEW_REQUIRED
 | --- | --- | --- | --- |
 | `EMPTY` | 没有客户原文或尚未开始 | 空状态 | 粘贴原文 |
 | `EXTRACTING` | 正在调用 AI 提取 | 显示处理中 | 取消/等待 |
-| `NEEDS_INPUT` | 提取字段缺失或当前草稿校验不通过 | 不显示金额 | 编辑字段、重新解析/确认 |
+| `NEEDS_INPUT` | 当前草稿校验不通过 | 不显示金额 | 编辑字段、重新解析/确认 |
 | `READY_TO_QUOTE` | 必需字段已齐，等待人工确认后报价 | 显示待报价 | 确认并计算报价 |
 | `QUOTING` | 正在调用 Quote Engine | 显示计算中 | 禁止重复提交 |
 | `QUOTED` | 正式报价成功且当前输入未变化 | 显示金额和来源 | 复制、导出、查看风险 |
@@ -391,9 +416,10 @@ STALE ──重新报价成功──→ QUOTED 或 REVIEW_REQUIRED
 
 ### 5.2 关键转移规则
 
-- `EXTRACTING` 成功但有 `extraction_missing_fields` 或 `draft_validation_errors` → `NEEDS_INPUT`；不创建人工任务；
+- `EXTRACTING` 成功但当前草稿有 `draft_validation_errors` → `NEEDS_INPUT`；不创建人工任务；
 - `EXTRACTING` 成功且当前草稿重新校验无 `draft_validation_errors` → `READY_TO_QUOTE`；仍不自动调用 Quote Engine；
-- `READY_TO_QUOTE` 的判定不直接依赖 AI 返回的 `extraction_missing_fields`；每次中栏编辑后都重新校验当前 `ConfirmedQuoteDraft`；
+- `extraction_missing_fields` 只作为提取反馈展示，说明 AI 原本没有提取出哪些字段；它不参与当前状态计算，确定性 fallback 或用户补齐后仍可进入 `READY_TO_QUOTE`；
+- `READY_TO_QUOTE` 的判定只依赖当前 `ConfirmedQuoteDraft` 的 `draft_validation_errors`；每次中栏编辑后都重新校验；
 - 用户编辑任何进入 `ZoneQuoteRequest` 的字段：
   - `QUOTED` 或 `REVIEW_REQUIRED` → `STALE`；
   - 清空/修改字段时保留上一份 `quote_result` 和报价输入快照用于对比；
@@ -432,7 +458,8 @@ Phase 2A+B 的新工作台进入 `READY_TO_QUOTE` 至少需要：
 - `packaging_type`：在现有允许集合内；
 - `address_type`：在现有允许集合内；
 - `detention_minutes`：非负整数；
-- `requires_liftgate`、`requires_pallet_jack`、`requires_appointment`、`is_stackable`：布尔值；
+- `requires_liftgate`、`requires_pallet_jack`、`requires_appointment`：布尔值；
+- `is_stackable`：当 `packaging_type` 为 `woven_bag` 或 `flexible_packaging` 时必须明确为 `true/false`；其他包装类型允许为 `null`；
 - `explicit_pallet_count`：如果存在，必须是至少为 1 的整数；`longest_side_cm` 如果存在，必须通过非负数校验。
 
 本阶段选择将完整地址、城市和省份作为新确认工作台的输入硬性要求；这不改变旧 `/quotes/zone-calculate` 和旧 `/quotes/ai-auto-quote` 的兼容行为。邮编格式合法但本地邮编库查不到时，不把“查不到”伪装成输入缺失；允许进入 Quote Engine，由其通过 `REVIEW_REQUIRED`/风险信息表达无法确定的业务状态。
@@ -445,6 +472,7 @@ CBM、重量和显式托数的关系固定为：
 - `explicit_pallet_count` 只有在客户原文明确给出或用户明确确认时才传入；前端不得从 CBM/重量自行推导并写回这个字段；
 - 没有显式托数时，由 Quote Engine 根据 CBM、重量、包装和现有规则计算 `billing_pallets`；
 - 有显式托数时，也仍由 Quote Engine 决定最终 `billing_pallets`、价格和风险；前端不能把它当作最终计费托数；
+- 柔性包装没有明确 `is_stackable` 时，草稿校验失败；纸箱、木箱、托盘等其他包装不因该字段为 `null` 而阻断；
 - 如果 `cargo_items` 存在，其汇总与 `cbm`/`weight_kg` 无法按现有确定性规则协调时，加入 `draft_validation_errors`，不静默选择其中一个值。
 
 `draft_validation_errors` 必须是结构化对象或稳定错误代码列表，而不是只给销售看的自然语言。例如：
@@ -522,6 +550,7 @@ Zone、计费托数、燃油、附加费和金额不显示为输入字段来源�
 - 为报价审计、销售记录、人工任务和学习规则 usage 更新增加 transaction-aware 的 `flush`/`commit=False` 路径；不能让 repository 内部 `commit()` 打破 confirmed calculate 的核心事务；
 - 为 `record_zone_quote_side_effects` 增加明确的通知开关或等价的无通知调用路径，不能用隐式全局开关；confirmed calculate 需要把诊断写入和核心事务分开；
 - 为 `manual_quote_tasks` 增加按 `quote_id` 查询、pending 替代和 cancelled 记录能力，沿用现有字段，不新增表或迁移；
+- 为销售记录 API 状态过滤、前端 `SalesQuoteRecord` 类型、筛选计数和状态标签增加 `superseded`；字符串状态字段不需要迁移，但所有读路径必须同步识别它；
 - 不修改价格矩阵数据，不新增数据库迁移。
 
 不把所有代码继续堆回一个超大 `QuotePage.tsx`，也不在本阶段重构记录、异常中心和设置页的信息架构。
@@ -538,14 +567,15 @@ Zone、计费托数、燃油、附加费和金额不显示为输入字段来源�
 4. `confirmed-calculate` 不调用 AI 提取；
 5. `confirmed-calculate` 使用确认后的结构化字段，即使原始消息内容不同也不重新推导；
 6. 未知 `field_provenance` 键、`system_derived` 值或 result-derived 字段返回 422；
-7. `READY_TO_QUOTE` 只在当前草稿校验通过后出现，且覆盖地址、CBM/重量/件数/包装/地址类型/显式托数关系；
-8. 成功结果写入 `sales_quote_records.status="quoted"`，并保留原始 source、金额、matched_rule；
-9. 最终人工复核结果创建 `manual_quote_tasks` 和 `sales_quote_records.status="manual_required"`，返回真实 `manual_task_id`，但不发送默认通知；
-10. 核心事务任一表写入失败时整体回滚、返回非 2xx，不返回部分成功结果；
-11. `REVIEW_REQUIRED` 重新报价能取消同一待处理旧任务并记录 `superseded_by_quote_id`；旧任务已 resolved/cancelled 时返回 409；
-12. 系统异常不创建销售记录或人工任务，也不返回 `manual_required`；
-13. Phase 1 learned rule 边界继续通过：成功的 Zone Matrix 结果不被学习规则覆盖，原始 manual result 仍可尝试复用；
-14. 旧 `auto_submit_when_complete=false` 响应不再产生 `quoted` 的空报价记录。
+7. `READY_TO_QUOTE` 只在当前草稿校验通过后出现，且覆盖地址、CBM/重量/件数/包装/地址类型/显式托数关系和柔性包装 `is_stackable` 条件；
+8. 纸箱/木箱/托盘等包装的 `is_stackable=null` 不阻断；`woven_bag/flexible_packaging` 的 `is_stackable=null` 返回结构化校验错误，`false/0` 等显式值都有 provenance；
+9. 成功结果写入 `sales_quote_records.status="quoted"`，并保留原始 source、金额、matched_rule；
+10. 最终人工复核结果创建 `manual_quote_tasks` 和 `sales_quote_records.status="manual_required"`，返回真实 `manual_task_id`，但不发送默认通知；
+11. 核心事务任一表写入失败时整体回滚、返回非 2xx，不返回部分成功结果；
+12. `REVIEW_REQUIRED` 重新报价能在行锁保护下取消同一待处理旧任务、把旧销售记录改为 `superseded` 并记录 `superseded_by_quote_id`；旧任务已 resolved/cancelled 时返回 409；并发第二请求不能重复替代；
+13. 系统异常不创建销售记录或人工任务，也不返回 `manual_required`；
+14. Phase 1 learned rule 边界继续通过：成功的 Zone Matrix 结果不被学习规则覆盖，原始 manual result 仍可尝试复用；
+15. 旧 `auto_submit_when_complete=false` 响应不再产生 `quoted` 的空报价记录。
 
 ### 8.2 前端验证
 
@@ -566,8 +596,6 @@ Zone、计费托数、燃油、附加费和金额不显示为输入字段来源�
 
 然后至少执行：
 
-- `npm run build`；
-- 浏览器验证完整链路：空状态 → 解析 → 缺字段 → 编辑确认 → 计算 → 成功；
 - `npm run build`；
 - 浏览器验证完整链路：空状态 → 解析 → 缺字段 → 编辑确认 → 计算 → 成功；
 - 浏览器验证 `REVIEW_REQUIRED` 和 `SYSTEM_ERROR` 不混淆；
