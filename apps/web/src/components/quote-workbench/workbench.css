@@ -75,9 +75,35 @@
 .qw-details > :not(summary) { margin: 12px; }
 .qw-details pre { max-height: 220px; overflow: auto; white-space: pre-wrap; font-size: 11px; }
 .qw-details ul { padding-left: 16px; font-size: 12px; }
-.qw-cargo-lines { font-size: 12px; }
-.qw-cargo-lines > div { border-top: 1px solid var(--qw-line); padding: 8px 0; }
-.qw-cargo-lines blockquote { margin: 4px 0; padding-left: 8px; border-left: 2px solid var(--qw-line); color: var(--qw-muted); overflow-wrap: anywhere; }
+.qw-cargo { margin: 0 0 24px; border-top: 1px solid var(--qw-line); padding-top: 18px; }
+.qw-cargo h3, .qw-calculation h3 { margin: 0 0 12px; font-size: 15px; font-weight: 650; }
+.qw-cargo-totals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0 0 12px; }
+.qw-cargo-totals div { min-width: 0; padding: 10px 8px; border: 1px solid var(--qw-line); border-radius: 6px; background: #f8fafc; }
+.qw-cargo-totals dt { font-size: 11px; color: var(--qw-muted); }
+.qw-cargo-totals dd { margin: 4px 0 0; font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.qw-cargo-items { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+.qw-cargo-items > li { min-width: 0; padding: 12px; border: 1px solid var(--qw-line); border-radius: 6px; }
+.qw-cargo-items header { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.qw-cargo-items h4 { margin: 0; font-weight: 650; }
+.qw-cargo-size { margin: 8px 0; font-size: 12px; overflow-wrap: anywhere; }
+.qw-cargo-items table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 11px; }
+.qw-cargo-items th, .qw-cargo-items td { padding: 7px 3px; border-bottom: 1px solid var(--qw-line); text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.qw-cargo-items th { color: var(--qw-muted); font-weight: 500; }
+.qw-cargo-items th:first-child { text-align: left; }
+.qw-cargo-formulas { margin-top: 10px; font-size: 11px; line-height: 1.7; color: var(--qw-muted); overflow-wrap: anywhere; }
+.qw-cargo-formulas p { margin: 5px 0; }
+.qw-cargo-source { margin-top: 10px; font-size: 11px; color: var(--qw-muted); }
+.qw-cargo-source summary { cursor: pointer; }
+.qw-cargo-source blockquote { margin: 8px 0 0; padding-left: 8px; border-left: 2px solid var(--qw-line); overflow-wrap: anywhere; white-space: pre-wrap; }
+.qw-calculation { border-top: 1px solid var(--qw-line); padding-top: 16px; }
+.qw-calculation .qw-note { margin-bottom: 12px; }
+.qw-pallet-calculation { display: grid; gap: 7px; margin: 14px 0; font-size: 12px; }
+.qw-pallet-calculation div { display: flex; gap: 10px; justify-content: space-between; }
+.qw-pallet-calculation dt { color: var(--qw-muted); }
+.qw-pallet-calculation dd { margin: 0; font-weight: 550; font-variant-numeric: tabular-nums; }
+.qw-billing-total { display: flex; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid var(--qw-line); font-size: 13px; }
+.qw-billing-total strong { color: var(--qw-accent); }
+.qw-price-formula { margin: 10px 0 0; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
 .qw-submit { width: 100%; margin-top: 8px; }
 .qw-address-evidence { color: var(--qw-muted); font-size: 12px; }
 .qw-address-evidence p { margin: 8px 0; }

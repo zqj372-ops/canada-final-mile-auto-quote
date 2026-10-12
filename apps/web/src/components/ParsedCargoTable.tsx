@@ -1,112 +1,76 @@
-import type { ParsedQuoteInput } from "../utils/quoteParser";
+import type { AIExtractedCargoItem, AIExtractedQuoteDraft, MoneyValue } from "../api/client";
+import type { Draft } from "./quote-workbench/state";
 
-export default function ParsedCargoTable({
-  parsed,
-  isAwaitingAI = false,
-}: {
-  parsed: ParsedQuoteInput;
-  isAwaitingAI?: boolean;
-}) {
-  return (
-    <section className="panel min-w-0 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase text-slate-500">
-            AI 识别结果
-          </p>
-          <h2 className="mt-2 section-title text-lg">货物信息</h2>
-        </div>
-        <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-          {isAwaitingAI ? "待 AI 解析" : `${parsed.piece_count || "待确认"} 件`}
-        </span>
-      </div>
+type CargoTotals = Pick<AIExtractedQuoteDraft, "piece_count" | "weight_kg" | "cbm">;
 
-      <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
-        <Metric label="总体积" value={isAwaitingAI ? "待 AI 解析" : parsed.total_cbm ? `${parsed.total_cbm.toFixed(3)} CBM` : "待确认"} />
-        <Metric label="总重量" value={isAwaitingAI ? "待 AI 解析" : parsed.total_weight_kg ? `${parsed.total_weight_kg.toFixed(1)} KG` : "待确认"} />
-        <Metric
-          label="计费密度"
-          value={isAwaitingAI ? "待 AI 解析" : parsed.density_kg_per_cbm !== null ? `${parsed.density_kg_per_cbm.toFixed(1)} KG/CBM` : "待确认"}
-        />
-        <Metric
-          label="最大单件"
-          value={
-            isAwaitingAI
-              ? "待 AI 解析"
-              : parsed.max_dimensions_cm
-                ? `${parsed.max_dimensions_cm.join(" × ")} cm`
-                : parsed.piece_count || parsed.total_cbm || parsed.total_weight_kg
-                  ? "原文未提供尺寸"
-                  : "待确认"
-          }
-        />
-      </div>
+export function CargoSummary({ cargo }: { cargo: CargoTotals }) {
+  return <dl className="qw-cargo-totals">
+    <div><dt>件数</dt><dd>{formatValue(cargo.piece_count, 0, "件")}</dd></div>
+    <div><dt>毛重</dt><dd>{formatValue(cargo.weight_kg, 2, "kg")}</dd></div>
+    <div><dt>体积</dt><dd>{formatValue(cargo.cbm, 3, "CBM", true)}</dd></div>
+  </dl>;
+}
 
-      <div className="mt-3 overflow-x-auto rounded-md border border-slate-200">
-        <table className="w-full min-w-[460px] text-left text-sm">
-          <thead className="bg-slate-50 text-xs text-slate-600">
-            <tr>
-              <th className="px-3 py-2 font-semibold">序号</th>
-              <th className="px-3 py-2 font-semibold">数量</th>
-              <th className="px-3 py-2 font-semibold">长</th>
-              <th className="px-3 py-2 font-semibold">宽</th>
-              <th className="px-3 py-2 font-semibold">高</th>
-              <th className="px-3 py-2 font-semibold">单件重量</th>
-              <th className="px-3 py-2 font-semibold">单件体积</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200 text-slate-700">
-            {parsed.cargo_items.length ? (
-              parsed.cargo_items.map((item) => (
-                <tr key={item.id} title={item.source_span ?? undefined}>
-                  <td className="px-3 py-2 tabular-nums">{hasDimensions(item) ? item.id : "汇总"}</td>
-                  <td className="px-3 py-2 tabular-nums">{item.quantity} 件</td>
-                  <td className="px-3 py-2 tabular-nums">{formatDimension(item.length_cm)}</td>
-                  <td className="px-3 py-2 tabular-nums">{formatDimension(item.width_cm)}</td>
-                  <td className="px-3 py-2 tabular-nums">{formatDimension(item.height_cm)}</td>
-                  <td className="px-3 py-2 tabular-nums">
-                    {item.weight_kg !== null
-                      ? `${hasDimensions(item) ? "" : "约 "}${item.weight_kg.toFixed(2)} KG`
-                      : "未提供"}
-                  </td>
-                  <td className="px-3 py-2 tabular-nums">
-                    {item.cbm !== null
-                      ? `${hasDimensions(item) ? "" : "约 "}${item.cbm.toFixed(3)} CBM`
-                      : "未提供"}
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td className="px-3 py-5 text-center text-slate-500" colSpan={7}>
-                  {isAwaitingAI
-                    ? "点击开始智能报价后，由后台大模型解析并回填货物信息"
-                    : parsed.piece_count || parsed.total_cbm || parsed.total_weight_kg
-                      ? "已识别汇总数据，但原文没有可拆分的尺寸明细"
-                      : "未能识别货物数据，请检查原始询价格式"}
-                </td>
-              </tr>
-            )}
-          </tbody>
+export default function ParsedCargoTable({ extraction, draft }: { extraction: AIExtractedQuoteDraft; draft: Draft | null }) {
+  const modified = draft && (["piece_count", "weight_kg", "cbm"] as const).some((field) => {
+    const current = draft[field].trim();
+    const original = extraction[field];
+    return current === "" ? original != null : original == null || Number(current) !== Number(original);
+  });
+  return <section className="qw-cargo" aria-labelledby="cargo-parsed-heading">
+    <h3 id="cargo-parsed-heading">件毛体解析</h3>
+    <CargoSummary cargo={extraction} />
+    {modified && <p className="qw-warning">汇总已人工修改。以下保留原始解析明细，报价按中栏确认值计算。</p>}
+    <p className="qw-note">尺寸统一为 cm，重量统一为 kg；单件重量可能为均重。</p>
+    {extraction.cargo_items.length ? <ol className="qw-cargo-items">
+      {extraction.cargo_items.map((item, index) => <li key={index}>
+        <header><h4>货物 {index + 1}</h4><strong>{item.quantity} 件</strong></header>
+        <p className="qw-cargo-size">长 × 宽 × 高：{[item.length_cm, item.width_cm, item.height_cm].every((v) => v != null)
+          ? `${[item.length_cm, item.width_cm, item.height_cm].map((v) => formatValue(v, 1)).join(" × ")} cm`
+          : "尺寸未齐全"}</p>
+        <table><caption className="sr-only">货物 {index + 1} 的重量与体积</caption>
+          <thead><tr><th scope="col">项目</th><th scope="col">毛重 (kg)</th><th scope="col">体积 (CBM)</th></tr></thead>
+          <tbody><tr><th scope="row">单件 / 均值</th><td>{formatValue(item.weight_kg, 2)}</td><td>{formatValue(item.cbm, 6)}</td></tr>
+            <tr><th scope="row">本项合计</th><td>{formatValue(item.total_weight_kg, 2)}</td><td>{formatValue(item.total_cbm, 3, "", true)}</td></tr></tbody>
         </table>
-      </div>
-    </section>
-  );
+        <div className="qw-cargo-formulas">
+          {dimensionCalculation(item) && <p>{dimensionCalculation(item)}</p>}
+          <p>{calculation(item, "weight_kg", "total_weight_kg", "毛重", "kg", 2, 0.005, 0.05)}</p>
+          <p>{calculation(item, "cbm", "total_cbm", "体积", "CBM", 6, 0.0000005, 0.0005)}</p>
+        </div>
+        {item.source_span && <details className="qw-cargo-source"><summary>对应原文</summary><blockquote>{item.source_span}</blockquote></details>}
+      </li>)}
+    </ol> : <p className="qw-note">未返回可拆分的货物明细，请核对上方件毛体汇总。</p>}
+  </section>;
 }
 
-function hasDimensions(item: ParsedQuoteInput["cargo_items"][number]): boolean {
-  return item.length_cm !== null && item.width_cm !== null && item.height_cm !== null;
+function formatValue(value: MoneyValue, decimals: number, unit = "", fixed = false): string {
+  if (value === null || value === "" || !Number.isFinite(Number(value))) return "未提供";
+  const formatted = Number(value).toLocaleString("en-CA", { maximumFractionDigits: decimals, minimumFractionDigits: fixed ? decimals : 0 });
+  return `${formatted}${unit ? ` ${unit}` : ""}`;
 }
 
-function formatDimension(value: number | null): string {
-  return value === null ? "未提供" : `${value} cm`;
+function calculation(item: AIExtractedCargoItem, unitKey: "weight_kg" | "cbm", totalKey: "total_weight_kg" | "total_cbm",
+  label: string, unit: string, precision: number, perPieceTolerance: number, totalTolerance: number): string {
+  const perPiece = item[unitKey];
+  const total = item[totalKey];
+  if (perPiece == null || total == null) return `${label}计算：明细未齐全，待核对`;
+  // Display the API's totals. Never replace them with frontend arithmetic;
+  // rounded per-piece averages can differ from the declared shipment total.
+  const expression = `${formatValue(perPiece, precision)} ${unit}/件 × ${item.quantity} 件`;
+  const difference = Math.abs(Number(perPiece) * item.quantity - Number(total));
+  const tolerance = item.quantity * perPieceTolerance + totalTolerance;
+  if (difference > tolerance + 1e-9) return `${label}计算：${expression}，与合计 ${formatValue(total, 3, unit)} 不一致，请核对`;
+  return `${label}计算：${expression} ≈ ${formatValue(total, unit === "CBM" ? 3 : 2, unit, unit === "CBM")}`;
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-slate-200 bg-white p-2.5">
-      <dt className="text-xs font-medium text-slate-500">{label}</dt>
-      <dd className="mt-1 text-sm font-semibold text-slate-900 tabular-nums">{value}</dd>
-    </div>
-  );
+function dimensionCalculation(item: AIExtractedCargoItem): string | null {
+  const dimensions = [item.length_cm, item.width_cm, item.height_cm];
+  if (dimensions.some((value) => value == null) || item.cbm == null) return null;
+  const expression = dimensions.map((value) => formatValue(value, 6)).join(" × ") + " ÷ 1,000,000";
+  const calculated = dimensions.reduce<number>((product, value) => product * Number(value), 1) / 1_000_000;
+  if (Math.abs(calculated - Number(item.cbm)) > 0.0000005 + 1e-9) {
+    return `尺寸计算：${expression}，与单件体积 ${formatValue(item.cbm, 6, "CBM")} 不一致，请核对`;
+  }
+  return `单件体积：${expression} ≈ ${formatValue(item.cbm, 6, "CBM")}`;
 }

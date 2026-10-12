@@ -48,18 +48,11 @@ export default function DraftForm({ draft, config, sources, extraction, busy, on
       </fieldset>
       <fieldset disabled={disabled}>
         <legend>货物信息</legend>
-        <div className="qw-fields">{field("cbm")}{field("weight_kg")}{field("piece_count")}{field("packaging_type")}</div>
+        <div className="qw-fields">{field("piece_count")}{field("weight_kg")}{field("cbm")}{field("packaging_type")}</div>
       </fieldset>
       <details className="qw-details" open={Boolean(errors.is_stackable)}>
-        <summary>尺寸明细与计费条件</summary>
+        <summary>补充计费条件</summary>
         <div className="qw-fields">{field("longest_side_cm")}{field("explicit_pallet_count")}{field("is_stackable")}{field("detention_minutes")}</div>
-        {extraction?.extraction.cargo_items.length ? <div className="qw-cargo-lines">
-          <p>原文尺寸明细 · 报价使用上方确认的汇总值</p>
-          {extraction.extraction.cargo_items.map((item, index) => <div key={index}>
-            <strong>{item.quantity} 件 · {[item.length_cm, item.width_cm, item.height_cm].every((n) => n != null) ? `${item.length_cm} × ${item.width_cm} × ${item.height_cm} cm` : "未提供尺寸"}</strong>
-            {item.source_span && <blockquote>{item.source_span}</blockquote>}
-          </div>)}
-        </div> : null}
       </details>
       <fieldset disabled={disabled}>
         <legend>附加服务</legend>
