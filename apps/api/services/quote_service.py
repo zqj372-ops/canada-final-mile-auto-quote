@@ -53,7 +53,7 @@ def calculate_zone_quote(
 ) -> ZoneQuoteResult:
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(payload)
-    result = apply_learned_quote_if_available(db, payload, result)
+    result = apply_learned_quote_if_available(db, payload, result, pricing_config=pricing_config)
     result = enforce_origin_matrix_safety(payload, result)
     result = enforce_zone_price_switch(pricing_config, result)
     result = attach_zone_quote_logic(payload, result)
@@ -85,11 +85,16 @@ def apply_learned_quote_if_available(
     db: Session,
     payload: ZoneQuoteRequest,
     result: ZoneQuoteResult,
+    *, commit: bool = True, pricing_config: ZonePricingConfig | None = None,
 ) -> ZoneQuoteResult:
+    if not result.manual_review_required or "zone_price_disabled" in result.risk_tags:
+        return result
     try:
         repository = LearnedQuoteRuleRepository(db)
         candidate = repository.find_best_candidate(payload, result)
     except Exception:
+        if not commit:
+            raise
         logger.exception("Failed to query learned quote rules.", extra={"quote_id": result.quote_id})
         db.rollback()
         return result
@@ -99,9 +104,10 @@ def apply_learned_quote_if_available(
     learned_rule, match_score = candidate
     if not _origin_matches_expected_route(payload, result, learned_rule.origin, learned_rule.zone):
         return result
-    if not _should_apply_learned_rule(result, learned_rule, match_score):
+    pricing_config = pricing_config or QuoteRuleConfigRepository(db).get_zone_pricing_config()
+    if learned_rule.origin is not None and learned_rule.zone is not None and not pricing_config.zone_price_enabled_for(learned_rule.origin, learned_rule.zone):
         return result
-    repository.mark_used(learned_rule)
+    repository.mark_used(learned_rule, commit=commit)
     return _result_from_learned_rule(payload, result, learned_rule, match_score=match_score)
 
 
@@ -278,14 +284,10 @@ def _result_from_learned_rule(
     *,
     match_score: int,
 ) -> ZoneQuoteResult:
-    is_corrective_override = not original.manual_review_required
     total_price = Decimal(rule.total_price_usd).quantize(Decimal("0.01"))
-    base_price = Decimal(rule.base_price_usd or rule.total_price_usd).quantize(Decimal("0.01"))
     risk_tags = ["learned_quote_reused", "learned_from_manual_task"]
     risk_tags.extend(rural_fsa_risk_tags(request.postal_code))
-    if is_corrective_override:
-        risk_tags.extend(original.risk_tags)
-        risk_tags.append("hermes_corrective_override")
+    risk_tags.append("all_in_price_components_unknown")
     result = ZoneQuoteResult(
         quote_id=original.quote_id,
         source_type=ZoneQuoteSourceType.LEARNED_MANUAL_QUOTE,
@@ -299,8 +301,8 @@ def _result_from_learned_rule(
         zone=rule.zone if rule.zone is not None else original.zone,
         billing_pallets=rule.billing_pallets,
         pallet_breakdown=original.pallet_breakdown,
-        base_price_usd=base_price,
-        fuel_usd=Decimal("0.00"),
+        base_price_usd=None,
+        fuel_usd=None,
         accessorials={},
         total_price_usd=total_price,
         risk_tags=sorted(set(risk_tags)),
@@ -309,11 +311,9 @@ def _result_from_learned_rule(
             f"learned_manual_quote + task {rule.source_task_id} + score {match_score} + {rule.scope} + "
             f"{rule.postal_code or rule.postal_prefix or 'unknown'} + {rule.billing_pallets} pallets"
         ),
-        internal_note=(
-            "已审核人工学习规则在报价时被复用；不是 AI 计算，也没有改写 Zone 价格表。"
-            if is_corrective_override
-            else "报价来自人工确认后的学习库，不是 AI 计算；建议运营定期复核并转入正式 Zone 价格表。"
-        ),
+        internal_note="人工审核一口价；基础运费、燃油及附加费未拆分。仅适用于审核时的地址、货物、服务及有效期。",
+        match_trace={"price_type": "all_in", "learned_rule_id": rule.id,
+                     "price_terms": (rule.conditions_json or {}).get("price_terms", {})},
     )
     result.sales_note = _build_learned_sales_note(request, result)
     return result
@@ -322,6 +322,13 @@ def _result_from_learned_rule(
 def _build_learned_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult) -> str:
     origin = origin_label(result.origin) or "人工确认线路"
     zone = f"（Zone {result.zone}）" if result.zone is not None else ""
+    services = [name for name, needed in [
+        ("尾板", request.requires_liftgate), ("手叉车", request.requires_pallet_jack),
+        ("预约", request.requires_appointment),
+    ] if needed]
+    if request.detention_minutes:
+        services.append(f"等待 {request.detention_minutes} 分钟")
+    service_note = "- 已确认服务：" + ("、".join(services) if services else "未要求尾板、手叉车或预约")
     rural_confirmation_lines = (
         ["- 该地址为乡村邮编，完整地址、卡车准入及可能附加费需再次核实"]
         if RURAL_FSA_SECONDARY_CONFIRMATION_TAG in result.risk_tags
@@ -334,40 +341,9 @@ def _build_learned_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult
             f"计费托数：{result.billing_pallets}托",
             f"报价：${result.total_price_usd} USD {origin}派送{zone}",
             "",
-            "备注：此报价来源于此前人工确认后的学习记录，金额已由后端锁定，AI 不参与改价。",
-            "- 送货到门口路边，不含其他任何操作",
+            "备注：本报价为人工审核整口价，适用于本次确认的地址、货物和服务。",
+            service_note,
             "- 如地址类型、卸货条件、复重复尺变化，费用可能需要重新确认",
             *rural_confirmation_lines,
         ]
     )
-
-
-def _should_apply_learned_rule(result: ZoneQuoteResult, rule: LearnedQuoteRule, match_score: int) -> bool:
-    if result.manual_review_required:
-        return True
-    if match_score >= 100:
-        return True
-    if match_score >= 90 and _has_correctable_zone_risk(result) and _learned_rule_differs_from_zone_result(result, rule):
-        return True
-    return False
-
-
-def _has_correctable_zone_risk(result: ZoneQuoteResult) -> bool:
-    correctable_tags = {
-        "city_zone_fallback",
-        "city_zone_prefix_family_fallback",
-        "postal_family_fallback",
-        "nearest_postal_prefix_fallback",
-        "stale_origin_overridden",
-    }
-    return bool(correctable_tags.intersection(result.risk_tags))
-
-
-def _learned_rule_differs_from_zone_result(result: ZoneQuoteResult, rule: LearnedQuoteRule) -> bool:
-    if rule.origin and result.origin and rule.origin != result.origin:
-        return True
-    if rule.zone is not None and result.zone is not None and rule.zone != result.zone:
-        return True
-    if rule.total_price_usd is not None and result.total_price_usd is not None:
-        return Decimal(rule.total_price_usd).quantize(Decimal("0.01")) != Decimal(result.total_price_usd).quantize(Decimal("0.01"))
-    return False

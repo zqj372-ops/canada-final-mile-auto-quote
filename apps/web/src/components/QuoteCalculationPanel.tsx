@@ -52,7 +52,7 @@ export default function QuoteCalculationPanel({
               : "border-emerald-200 bg-emerald-50 text-emerald-700"
           }`}
         >
-          {waitingForAI ? "待解析" : `报价可信度 ${result?.confidence ?? parsed.confidence}%`}
+          {waitingForAI ? "待解析" : result?.source_type === "learned_manual_quote" ? "人工审核" : `匹配评分 ${result?.confidence ?? parsed.confidence}/100`}
         </span>
       </div>
 

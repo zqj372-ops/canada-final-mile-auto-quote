@@ -12,7 +12,7 @@ class ManualQuoteTaskRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_from_zone_quote(self, request: ZoneQuoteRequest, result: ZoneQuoteResult) -> ManualQuoteTask:
+    def create_from_zone_quote(self, request: ZoneQuoteRequest, result: ZoneQuoteResult, *, commit: bool = True) -> ManualQuoteTask:
         record = ManualQuoteTask(
             quote_id=result.quote_id,
             reason=result.matched_rule,
@@ -22,8 +22,11 @@ class ManualQuoteTaskRepository:
             status="pending",
         )
         self.session.add(record)
-        self.session.commit()
-        self.session.refresh(record)
+        if commit:
+            self.session.commit()
+            self.session.refresh(record)
+        else:
+            self.session.flush()
         return record
 
     def create_ai_review_task(
@@ -50,22 +53,23 @@ class ManualQuoteTaskRepository:
 
     def list_tasks(self) -> list[ManualQuoteTask]:
         return list(
-            self.session.scalars(select(ManualQuoteTask).order_by(ManualQuoteTask.created_at.desc(), ManualQuoteTask.id.desc()))
+            self.session.scalars(select(ManualQuoteTask).where(ManualQuoteTask.scope_kind == "legacy").order_by(ManualQuoteTask.created_at.desc(), ManualQuoteTask.id.desc()))
         )
 
     def get(self, task_id: int) -> ManualQuoteTask | None:
-        return self.session.get(ManualQuoteTask, task_id)
+        return self.session.scalar(select(ManualQuoteTask).where(ManualQuoteTask.id == task_id, ManualQuoteTask.scope_kind == "legacy"))
 
     def update(
         self,
         task_id: int,
         *,
+        commit: bool = True,
         status: str | None = None,
         assigned_to: str | None = None,
         resolved_price_usd: Decimal | None = None,
         resolved_note: str | None = None,
     ) -> ManualQuoteTask | None:
-        record = self.get(task_id)
+        record = self.session.scalar(select(ManualQuoteTask).where(ManualQuoteTask.scope_kind == "legacy").where(ManualQuoteTask.id == task_id).with_for_update())
         if record is None:
             return None
         if status is not None:
@@ -76,6 +80,9 @@ class ManualQuoteTaskRepository:
             record.resolved_price_usd = resolved_price_usd
         if resolved_note is not None:
             record.resolved_note = resolved_note
-        self.session.commit()
-        self.session.refresh(record)
+        if commit:
+            self.session.commit()
+            self.session.refresh(record)
+        else:
+            self.session.flush()
         return record

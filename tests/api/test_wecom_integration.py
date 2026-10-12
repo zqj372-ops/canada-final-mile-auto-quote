@@ -128,6 +128,8 @@ def complete_extraction() -> AIExtractedQuoteDraft:
         packaging_type="carton",
         longest_side_cm=Decimal("100"),
         address_type="commercial",
+        requires_liftgate=False,
+        requires_pallet_jack=False,
         requires_appointment=True,
         missing_fields=[],
         confidence=95,

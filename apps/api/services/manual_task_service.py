@@ -43,15 +43,19 @@ def update_manual_quote_task(
     email_config_id = update.pop("email_config_id", None)
     notify_wecom = bool(update.pop("notify_wecom", False))
     wecom_bot_id = update.pop("wecom_bot_id", None)
-    task = ManualQuoteTaskRepository(db).update(task_id, **update)
-    if task is None:
-        raise HTTPException(status_code=404, detail="Manual quote task not found.")
-    if task.status == "resolved" and task.resolved_price_usd is not None:
-        try:
-            HermesLearningCandidateRepository(db).create_from_manual_task(task)
-        except Exception:
-            logger.exception("Failed to create Hermes learning candidate from resolved manual quote task.", extra={"task_id": task.id})
-            db.rollback()
+    try:
+        task = ManualQuoteTaskRepository(db).update(task_id, commit=False, **update)
+        if task is None:
+            raise HTTPException(status_code=404, detail="Manual quote task not found.")
+        HermesLearningCandidateRepository(db).create_from_manual_task(task, commit=False)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Manual task and learning evidence transaction failed", extra={"task_id": task_id})
+        raise HTTPException(status_code=503, detail="人工单未保存，请稍后重试。") from exc
     if (notify_email or notify_wecom) and payload.status == "resolved":
         try_notification(
             "manual_resolved",

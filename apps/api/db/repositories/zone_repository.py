@@ -1,6 +1,6 @@
 from collections import Counter
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import tuple_, func, or_, select
 from sqlalchemy.orm import Session
 
 from apps.api.db.models import CityAlias, PostalCodeCityLookup, PostalZoneOverride, ZoneLookupRule, ZonePriceMatrix
@@ -139,7 +139,7 @@ class ZoneRepository:
         records = self.session.scalars(query).all()
         return [self._rule_record(record) for record in records]
 
-    def list_postal_family_zone_rules(self, postal_prefix: str, province: str | None) -> list[ZoneLookupRuleRecord]:
+    def list_postal_family_zone_rules(self, postal_prefix: str, province: str | None, *, limit: int | None = None) -> list[ZoneLookupRuleRecord]:
         prefix = extract_fsa(postal_prefix) or postal_prefix.upper().replace(" ", "")[:3]
         family = prefix[:2] if len(prefix) >= 2 else prefix[:1]
         if not family:
@@ -155,6 +155,8 @@ class ZoneRepository:
         normalized_province = normalize_province(province)
         if normalized_province:
             query = query.where(ZoneLookupRule.province == normalized_province)
+        if limit is not None:
+            query = query.limit(max(1, min(limit, 200)))
         records = self.session.scalars(query).all()
         return [self._rule_record(record) for record in records]
 
@@ -193,3 +195,14 @@ class ZoneRepository:
             source=record.source,
             last_updated=record.last_updated,
         )
+
+    def get_zone_prices(self, keys: list[tuple[str, int, int]]) -> dict[tuple[str, int, int], ZonePriceRecord]:
+        if not keys:
+            return {}
+        records = self.session.scalars(select(ZonePriceMatrix).where(tuple_(
+            ZonePriceMatrix.origin, ZonePriceMatrix.zone, ZonePriceMatrix.billing_pallets
+        ).in_(set(keys))))
+        return {(row.origin, row.zone, row.billing_pallets): ZonePriceRecord(
+            origin=row.origin, zone=row.zone, billing_pallets=row.billing_pallets,
+            base_price_usd=row.base_price_usd, source=row.source, last_updated=row.last_updated,
+        ) for row in records}

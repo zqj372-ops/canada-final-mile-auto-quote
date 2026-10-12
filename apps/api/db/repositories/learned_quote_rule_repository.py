@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
-from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from apps.api.db.models import HermesLearningCandidate, LearnedQuoteRule, ManualQuoteTask
+from apps.api.db.models import HermesLearningCandidate, LearnedQuoteRule
 from packages.address_normalizer import extract_fsa, normalize_city, normalize_postal_code, normalize_province
+from packages.quote_engine.learning_policy import quote_conditions_match, valid_price_terms
 from packages.quote_engine.zone_models import ZoneQuoteRequest, ZoneQuoteResult
 
 
@@ -16,70 +15,29 @@ class LearnedQuoteRuleRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def upsert_from_manual_task(self, task: ManualQuoteTask) -> LearnedQuoteRule | None:
-        if task.status != "resolved" or task.resolved_price_usd is None:
-            return None
-
-        data = self._learning_data_from_task(task)
-        if data is None:
-            return None
-
-        record = self._find_existing(data)
-        if record is None:
-            record = LearnedQuoteRule(**data)
-            self.session.add(record)
-        else:
-            record.source_task_id = data["source_task_id"]
-            record.quote_id = data["quote_id"]
-            record.total_price_usd = data["total_price_usd"]
-            record.base_price_usd = data["base_price_usd"]
-            record.conditions_json = data["conditions_json"]
-            record.origin = data["origin"]
-            record.zone = data["zone"]
-            record.confidence = max(record.confidence, data["confidence"])
-            record.status = "active"
-            record.note = data["note"]
-        self.session.commit()
-        self.session.refresh(record)
-        return record
-
     def upsert_from_candidate(self, candidate: HermesLearningCandidate) -> LearnedQuoteRule:
+        """Participates in the caller's approval transaction; never commits."""
         data = {
-            "source_task_id": candidate.source_task_id,
-            "quote_id": candidate.quote_id,
-            "scope": candidate.scope,
-            "postal_code": candidate.postal_code,
-            "postal_prefix": candidate.postal_prefix,
-            "city": candidate.city,
-            "province": candidate.province,
-            "origin": candidate.origin,
-            "zone": candidate.zone,
+            "source_task_id": candidate.source_task_id, "quote_id": candidate.quote_id,
+            "scope": candidate.scope, "postal_code": candidate.postal_code,
+            "postal_prefix": candidate.postal_prefix, "city": candidate.city,
+            "province": candidate.province, "origin": candidate.origin, "zone": candidate.zone,
             "billing_pallets": candidate.billing_pallets,
-            "conditions_json": _conditions_from_candidate(candidate),
+            "conditions_json": {**candidate.proposal_json["conditions"],
+                                "price_terms": candidate.proposal_json["price_terms"]},
             "total_price_usd": candidate.resolved_total_price_usd,
-            "base_price_usd": candidate.resolved_base_price_usd or candidate.resolved_total_price_usd,
-            "confidence": candidate.confidence,
-            "status": "active",
-            "usage_count": 0,
-            "note": candidate.review_note or f"Approved from Hermes candidate {candidate.id}.",
+            "base_price_usd": None, "confidence": 0, "status": "active",
+            "usage_count": 0, "note": candidate.review_note,
         }
-        record = self._find_existing(data)
+        record = self.session.get(LearnedQuoteRule, candidate.promoted_rule_id) if candidate.promoted_rule_id else None
         if record is None:
             record = LearnedQuoteRule(**data)
             self.session.add(record)
         else:
-            record.source_task_id = data["source_task_id"]
-            record.quote_id = data["quote_id"]
-            record.total_price_usd = data["total_price_usd"]
-            record.base_price_usd = data["base_price_usd"]
-            record.conditions_json = data["conditions_json"]
-            record.origin = data["origin"]
-            record.zone = data["zone"]
-            record.confidence = max(record.confidence, data["confidence"])
-            record.status = "active"
-            record.note = data["note"]
-        self.session.commit()
-        self.session.refresh(record)
+            for key, value in data.items():
+                if key != "usage_count":
+                    setattr(record, key, value)
+        self.session.flush()
         return record
 
     def find_best_candidate(self, request: ZoneQuoteRequest, result: ZoneQuoteResult) -> tuple[LearnedQuoteRule, int] | None:
@@ -97,6 +55,8 @@ class LearnedQuoteRuleRepository:
                 select(LearnedQuoteRule).where(
                     LearnedQuoteRule.status == "active",
                     LearnedQuoteRule.billing_pallets == billing_pallets,
+                    LearnedQuoteRule.scope == "exact_address",
+                    LearnedQuoteRule.postal_code == postal_code,
                 )
             )
         )
@@ -109,7 +69,10 @@ class LearnedQuoteRuleRepository:
         if not scored:
             return None
 
-        scored.sort(key=lambda item: (item[0], item[1].confidence, item[1].updated_at or item[1].created_at), reverse=True)
+        # Multiple live prices for identical conditions are not resolved by recency.
+        if len({record.total_price_usd for _, record in scored}) > 1:
+            return None
+        scored.sort(key=lambda item: (item[0], item[1].updated_at or item[1].created_at), reverse=True)
         return scored[0][1], scored[0][0]
 
     def find_match(self, request: ZoneQuoteRequest, result: ZoneQuoteResult) -> LearnedQuoteRule | None:
@@ -120,15 +83,20 @@ class LearnedQuoteRuleRepository:
         self.mark_used(record)
         return record
 
-    def mark_used(self, record: LearnedQuoteRule) -> LearnedQuoteRule:
+    def mark_used(self, record: LearnedQuoteRule, *, commit: bool = True) -> LearnedQuoteRule:
         record.usage_count += 1
         record.last_used_at = datetime.now(timezone.utc)
-        self.session.commit()
-        self.session.refresh(record)
+        if commit:
+            self.session.commit()
+            self.session.refresh(record)
+        else:
+            self.session.flush()
         return record
 
     def count_active(self) -> int:
-        return self.session.scalar(select(func.count(LearnedQuoteRule.id)).where(LearnedQuoteRule.status == "active")) or 0
+        return sum(1 for rule in self.session.scalars(select(LearnedQuoteRule).where(
+            LearnedQuoteRule.status == "active", LearnedQuoteRule.scope == "exact_address"
+        )) if valid_price_terms((rule.conditions_json or {}).get("price_terms")))
 
     def list_recent(self, limit: int = 10) -> list[LearnedQuoteRule]:
         safe_limit = max(1, min(limit, 50))
@@ -138,68 +106,6 @@ class LearnedQuoteRuleRepository:
                 .order_by(LearnedQuoteRule.updated_at.desc(), LearnedQuoteRule.id.desc())
                 .limit(safe_limit)
             )
-        )
-
-    def _learning_data_from_task(self, task: ManualQuoteTask) -> dict[str, Any] | None:
-        request_json = task.request_json or {}
-        result_json = task.result_json or {}
-        postal_code = normalize_postal_code(_string(request_json.get("postal_code")) or _string(result_json.get("postal_code")))
-        postal_prefix = (
-            _string(result_json.get("postal_prefix"))
-            or extract_fsa(postal_code)
-            or extract_fsa(_string(request_json.get("postal_code")))
-        )
-        city = normalize_city(_string(result_json.get("city")) or _string(request_json.get("city")))
-        province = normalize_province(_string(result_json.get("province")) or _string(request_json.get("province")))
-        if province is None and postal_code:
-            province = _province_from_postal_initial(postal_code)
-
-        billing_pallets = _int_value(result_json.get("billing_pallets"))
-        if billing_pallets is None or (postal_code is None and postal_prefix is None):
-            return None
-
-        scope = "postal_prefix_city" if postal_prefix and city and province else "postal_prefix"
-        total_price = Decimal(task.resolved_price_usd).quantize(Decimal("0.01"))
-        base_price = _decimal_value(result_json.get("base_price_usd")) or total_price
-
-        return {
-            "source_task_id": task.id,
-            "quote_id": task.quote_id,
-            "scope": scope,
-            "postal_code": postal_code,
-            "postal_prefix": postal_prefix,
-            "city": city,
-            "province": province,
-            "origin": _string(result_json.get("origin")),
-            "zone": _int_value(result_json.get("zone")),
-            "billing_pallets": billing_pallets,
-            "conditions_json": quote_conditions_from_mapping(request_json),
-            "total_price_usd": total_price,
-            "base_price_usd": base_price,
-            "confidence": 62 if scope == "postal_prefix" else 68,
-            "status": "active",
-            "usage_count": 0,
-            "note": task.resolved_note or "Learned from resolved manual quote task.",
-        }
-
-    def _find_existing(self, data: dict[str, Any]) -> LearnedQuoteRule | None:
-        query = select(LearnedQuoteRule).where(
-            LearnedQuoteRule.scope == data["scope"],
-            LearnedQuoteRule.billing_pallets == data["billing_pallets"],
-            LearnedQuoteRule.status == "active",
-        )
-        for field in ("postal_code", "postal_prefix", "city", "province"):
-            column = getattr(LearnedQuoteRule, field)
-            value = data[field]
-            query = query.where(column == value if value is not None else column.is_(None))
-        expected_conditions = normalize_quote_conditions(data.get("conditions_json"))
-        return next(
-            (
-                record
-                for record in self.session.scalars(query)
-                if normalize_quote_conditions(record.conditions_json) == expected_conditions
-            ),
-            None,
         )
 
 
@@ -229,111 +135,7 @@ def learned_quote_rule_to_dict(record: LearnedQuoteRule) -> dict[str, object]:
     }
 
 
-def _match_score(
-    record: LearnedQuoteRule,
-    postal_code: str | None,
-    postal_prefix: str | None,
-    city: str | None,
-    province: str | None,
-) -> int:
-    if record.postal_code and postal_code and record.postal_code == postal_code:
-        return 100
-    if record.postal_prefix and postal_prefix and record.postal_prefix == postal_prefix:
-        if record.city and city and record.city == city and record.province == province:
-            return 90
-        if record.city is None and record.province and record.province == province:
-            return 80
-    return 0
-
-
-_QUOTE_CONDITION_DEFAULTS: dict[str, object] = {
-    "address_type": "commercial",
-    "requires_liftgate": False,
-    "requires_pallet_jack": False,
-    "requires_appointment": False,
-    "detention_minutes": 0,
-}
-
-
-def quote_conditions_from_mapping(values: dict[str, object]) -> dict[str, object]:
-    return {
-        "address_type": str(values.get("address_type") or "commercial"),
-        "requires_liftgate": bool(values.get("requires_liftgate", False)),
-        "requires_pallet_jack": bool(values.get("requires_pallet_jack", False)),
-        "requires_appointment": bool(values.get("requires_appointment", False)),
-        "detention_minutes": max(0, _nonnegative_int(values.get("detention_minutes"))),
-    }
-
-
-def normalize_quote_conditions(values: object) -> dict[str, object] | None:
-    if not isinstance(values, dict):
-        return None
-    return quote_conditions_from_mapping(values)
-
-
-def quote_conditions_match(values: object, request: ZoneQuoteRequest) -> bool:
-    stored = normalize_quote_conditions(values)
-    if stored is None:
-        return False
-    return stored == quote_conditions_from_mapping(request.model_dump(mode="json"))
-
-
-def _conditions_from_candidate(candidate: HermesLearningCandidate) -> dict[str, object] | None:
-    proposal = candidate.proposal_json or {}
-    return normalize_quote_conditions(proposal.get("conditions"))
-
-
-def _nonnegative_int(value: object) -> int:
-    try:
-        return max(0, int(value or 0))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _string(value: object) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _int_value(value: object) -> int | None:
-    if value is None or value == "":
-        return None
-    try:
-        number = int(Decimal(str(value)))
-    except (InvalidOperation, ValueError):
-        return None
-    return number if number >= 1 else None
-
-
-def _decimal_value(value: object) -> Decimal | None:
-    if value is None or value == "":
-        return None
-    try:
-        return Decimal(str(value)).quantize(Decimal("0.01"))
-    except (InvalidOperation, ValueError):
-        return None
-
-
-def _province_from_postal_initial(postal_code: str) -> str | None:
-    return {
-        "A": "NL",
-        "B": "NS",
-        "C": "PE",
-        "E": "NB",
-        "G": "QC",
-        "H": "QC",
-        "J": "QC",
-        "K": "ON",
-        "L": "ON",
-        "M": "ON",
-        "N": "ON",
-        "P": "ON",
-        "R": "MB",
-        "S": "SK",
-        "T": "AB",
-        "V": "BC",
-        "X": "NT",
-        "Y": "YT",
-    }.get(postal_code[:1].upper())
+def _match_score(record: LearnedQuoteRule, postal_code: str | None,
+                 postal_prefix: str | None, city: str | None, province: str | None) -> int:
+    return 100 if (record.scope == "exact_address" and record.postal_code == postal_code
+                   and record.city == city and record.province == province) else 0

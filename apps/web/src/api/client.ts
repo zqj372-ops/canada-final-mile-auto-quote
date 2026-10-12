@@ -129,9 +129,9 @@ export interface AIExtractedQuoteDraft {
   explicit_pallet_count: number | null;
   is_stackable: boolean | null;
   address_type: string | null;
-  requires_liftgate: boolean;
-  requires_pallet_jack: boolean;
-  requires_appointment: boolean;
+  requires_liftgate: boolean | null;
+  requires_pallet_jack: boolean | null;
+  requires_appointment: boolean | null;
   detention_minutes: number;
   missing_fields: string[];
   confidence: number;
@@ -175,6 +175,50 @@ export interface AIAutoQuoteResponse {
   manual_review_required: boolean;
   search_context: QuoteSearchContext | null;
   address_validation: LocalAddressValidation | null;
+}
+
+export type QuoteField = keyof ZoneQuoteRequest;
+export type FieldSource = "customer_original" | "ai_extracted" | "deterministic_extracted" | "human_edited";
+export type CorrectionReason = "extraction_error" | "customer_update" | "business_decision";
+export type CorrectionReasons = Partial<Record<QuoteField, CorrectionReason>>;
+export type FieldProvenance = Partial<Record<QuoteField, FieldSource>>;
+export interface AIExtractResponse {
+  extraction: AIExtractedQuoteDraft;
+  field_provenance: FieldProvenance;
+  extraction_missing_fields: string[];
+  draft_validation_errors: Array<{ field: string; code: string }>;
+  address_validation: LocalAddressValidation | null;
+  search_context: QuoteSearchContext | null;
+  extraction_mode: "local" | "ai" | "fallback";
+  duration_ms: number;
+  extraction_metadata?: Record<string, JsonValue>;
+  extraction_receipt?: string | null;
+}
+export interface ConfirmedCalculateResponse {
+  quote_result: ZoneQuoteResult;
+  sales_record_id: number;
+  manual_task_id: number | null;
+  superseded_quote_id: string | null;
+  superseded_task_id: number | null;
+  diagnostic_queued: boolean;
+}
+
+export function extractQuote(customer_message: string, signal?: AbortSignal, force_ai = false): Promise<AIExtractResponse> {
+  return request("/quotes/ai-extract", {
+    method: "POST", body: JSON.stringify({ customer_message, force_ai }), signal,
+  }, "quote");
+}
+
+export function calculateConfirmedQuote(payload: {
+  customer_message: string;
+  quote: ZoneQuoteRequest;
+  field_provenance: FieldProvenance;
+  extraction_snapshot: AIExtractedQuoteDraft | null;
+  extraction_receipt?: string | null;
+  correction_reasons?: CorrectionReasons;
+  supersedes_quote_id: string | null;
+}): Promise<ConfirmedCalculateResponse> {
+  return request("/quotes/confirmed-calculate", { method: "POST", body: JSON.stringify(payload) }, "quote");
 }
 
 export interface AIModelConfigPublic {
@@ -660,6 +704,11 @@ export interface BatchDiagnosticReportDetail extends BatchDiagnosticReportSummar
 
 export interface HermesCandidateReviewPayload {
   review_note?: string | null;
+  supplier?: string | null;
+  source_reference?: string | null;
+  valid_from?: string | null;
+  valid_until?: string | null;
+  expected_evidence_version?: string | null;
 }
 
 export interface HermesApproveResponse {
@@ -1617,4 +1666,14 @@ export function setStoredAuthToken(token: string): void {
 
 export function clearStoredAuthToken(): void {
   window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+}
+
+
+export function reviewExtractionFeedback(quoteId: string, payload: {
+  expected_version: string; approved_fields: string[]; note: string;
+  evaluation_group: string; split: "train" | "validation" | "test";
+}): Promise<Record<string, unknown>> {
+  return request(`/quotes/audit/${encodeURIComponent(quoteId)}/extraction-feedback`, {
+    method: "PATCH", body: JSON.stringify(payload),
+  });
 }

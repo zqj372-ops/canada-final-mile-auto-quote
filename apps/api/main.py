@@ -1,4 +1,7 @@
 import os
+from contextlib import asynccontextmanager
+
+from packages.ai_assistant.http_pool import close_model_http_clients
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +25,23 @@ from apps.api.routes.users import router as users_router
 from apps.api.routes.wecom_configs import router as wecom_configs_router
 
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    worker = None
+    if os.getenv("HERMES_CONTEXT_WORKER_ENABLED", "false").lower() in {"1", "true", "yes"}:
+        from apps.api.services.diagnostic_context_worker import start_context_worker
+        worker = start_context_worker()
+    yield
+    if worker:
+        stop, thread = worker
+        stop.set()
+        thread.join(timeout=5)
+    close_model_http_clients()
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="Canada Final Mile Auto Quote API",
     version="0.1.0",
     description="Deterministic quote API for Canada final-mile truck delivery.",

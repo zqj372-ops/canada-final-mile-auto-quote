@@ -98,7 +98,7 @@ def reconcile_tasks(
 ) -> dict[str, Any]:
     scanned_tasks = list(
         session.scalars(
-            select(ManualQuoteTask)
+            select(ManualQuoteTask).where(ManualQuoteTask.scope_kind == "legacy")
             .where(ManualQuoteTask.status.in_(("pending", "in_progress")))
             .order_by(ManualQuoteTask.id.asc())
         )
@@ -127,7 +127,7 @@ def reconcile_tasks(
         candidate_ids = [task.id for task in eligible_preview]
         tasks = list(
             session.scalars(
-                select(ManualQuoteTask)
+                select(ManualQuoteTask).where(ManualQuoteTask.scope_kind == "legacy")
                 .where(
                     ManualQuoteTask.id.in_(candidate_ids),
                     ManualQuoteTask.status == "pending",

@@ -1,87 +1,63 @@
 # Hermes 自学习候选机制
 
-Hermes 是报价经验学习层，不是报价引擎。它只能从人工复核结果中生成候选建议，不能直接计算、修改或放行价格。
-旧的同步 Agent 纠错能力已降级为“LLM 辅助建议”，不再接入主报价链路。
+Hermes 从人工复核结果生成候选建议。金额由确定性报价引擎或人工审核规则提供，模型不负责算价。
 
-## 核心边界
+## 价格权威与复用范围
 
-- AI/Hermes 不直接报价。
-- Hermes 不直接修改 `zone_price_matrix`。
-- Hermes 不覆盖正常 `zone_matrix` 成功报价。
-- 人工任务 resolved 后只生成 `pending_review` 候选。
-- 只有后台 operator/admin 批准后，候选才会发布为 `learned_quote_rules.active`。
-- 学习规则只在原始 Quote Engine 返回 `manual_required` 后尝试复用。
-- 搜索和地图结果只能确认地址情况，不能作为价格来源。
-- `hermes_diagnostic_queue` 是 Hermes Agent 的只读输入队列；Agent 建议不能直接改变报价结果。
+- 所有 Zone 报价入口的正常矩阵价优先；只有 `manual_review_required=true` 才尝试学习规则。
+- 价格总开关、始发仓和分区开关仍然生效，学习规则不能绕过。
+- 新规则只适用于相同完整邮编、城市、省份、街道，以及完全一致的货物和服务条件。
+  重量、体积、件数、包装、最长边、托数、可堆叠、地址类型、尾板、手叉车、预约和等待时间均参与匹配。
+  不再把单票价格扩展到相邻邮编或同一 FSA。
+- 审核需填写供应商、价格来源、带时区的生效和到期时间。当前只支持 USD 整口价。
+  基础运费、燃油和附加费没有独立证据时为 null，不把总价冒充基础运费。
+- 旧候选、旧规则保留；缺少 v2 严格条件或有效期的记录不会自动复用。旧人工单需重新核对、保存，
+  生成 v2 候选后再审核，不能直接重新启用旧宽范围规则。
 
-## 数据流
+## 人工单、证据与审核
 
-```text
-客户询价
-  -> AI/规则解析字段
-  -> Zone Quote Engine 确定性报价
-  -> 成功则返回 zone_matrix
-  -> 成功/失败都写入 hermes_diagnostic_queue
-  -> Hermes Agent 只读诊断包并输出建议
-  -> 未命中则 manual_required + manual_quote_tasks
-  -> 运营人工处理并填写 resolved_price_usd
-  -> Hermes 生成 hermes_learning_candidates.pending_review
-  -> 后台审核
-  -> 批准后写入 learned_quote_rules.active
-  -> 后续同类 manual_required 可复用学习规则
+`manual_quote_tasks`、`hermes_learning_candidates`、`learned_quote_rules` 继续使用原表。
+
+1. 人工单 resolved 且金额有效后生成候选。按相同条件聚合，不按价格覆盖旧证据。
+2. `support_count` 统计不同的有效人工单。同一单调整处理人或备注不会累计次数。
+3. 每单证据保存在 `evidence_json.cases`，历史修改保存在 revisions。金额不一致时标记冲突并阻止批准。
+4. 来源单撤回、重开或改价时，受影响的已发布规则被禁用，候选回到待审核；人工单和证据同事务提交。
+5. operator/admin 批准时须提供 `expected_evidence_version`。旧页面或并发修改会返回 409，需刷新核对。
+6. 候选批准与规则发布只提交一次。失败回滚，重复批准不会生成第二条规则。
+7. 已批准候选不能直接改成“拒绝”。先禁用学习规则，再核对来源、条件和有效期重新批准。
+
+价格一致、支持次数或调用次数均不等于准确率。审核界面显示独立人工单和来源，不显示虚构的正确概率。
+
+## 诊断队列
+
+报价阶段只保存原文、解析字段、报价结果和最小快照，`context_status=pending`。
+相邻 FSA、历史人工确认和私有参考包由后台补齐，准备完成后为 ready；失败为 failed，可显式重试。
+`context_collected_at` 是参考上下文采集时间；原报价结果仍是原始快照，不能用后查到的价格替换。
+
+```bash
+# 可作为单次本地/受控运维作业运行，不调用模型
+python scripts/prepare_quote_diagnostics.py --limit 20
 ```
 
-诊断包包含原始输入、解析结果、邮编、城市、省份、Zone 命中、价格矩阵、失败原因、
-相邻 FSA、历史人工确认和私有地址参考小上下文。报价接口不会等待 Hermes Agent，
-避免外部模型慢响应影响销售前台。
+持续处理可设置 `HERMES_CONTEXT_WORKER_ENABLED=true`。默认应用不开启；演示脚本和示例环境文件开启。
+后台每 2 秒检查队列；PostgreSQL 使用行锁和 skip locked，避免多个 worker 同时占用一条记录。
+失败记录不会无限自动重试。`POST /quotes/hermes-diagnostics/{id}/prepare` 可以重试，无模型调用。
+原有 `/run` 才会按配置调用诊断模型，而且会先检查参考上下文准备成功。
 
-## 候选状态
+确认报价接口把诊断快照、审计、销售记录和人工任务放在同一个事务。旧 Zone 接口的审计/通知容错方式保留。
+相邻 FSA 上下文限制 18 条规则，并批量查询价格；历史人工单先筛选地区，再限制结果数量。
 
-- `pending_review`: 待审核，默认状态，不参与报价。
-- `approved`: 已批准，并已发布为学习规则。
-- `rejected`: 已拒绝，不参与报价。
+## 解析纠错
 
-## 发布后的复用条件
-
-学习规则必须满足：
-
-- `status = active`
-- `billing_pallets` 一致
-- `postal_code` 精确一致，或 `postal_prefix + city + province` 一致
-
-复用结果的 `source_type` 为 `learned_manual_quote`，并保留风险标签：
-
-- `learned_quote_reused`
-- `learned_from_manual_task`
-
-## 操作建议
-
-- 单票价格异常但没有可复用规律：拒绝候选或保持待审。
-- 同一 FSA/城市/托数多次人工结果一致：批准候选。
-- 已发布规则发现不准：在 Hermes 页面禁用对应学习规则。
-- 需要长期正式化的规则：后续再人工迁移到 `zone_lookup_rules` 或 `zone_price_matrix`，不要由 Hermes 自动写入。
+解析改进使用审计中的人工修改，不从人工确认价格推测解析答案。
+服务端解析回执、修改原因、运营复核、JSONL 导出和离线评测流程见 [优化与学习说明](EXTRACTION_LEARNING.md)。
 
 ## 随机邮编命中测试
 
-可以用脚本让服务侧诊断 Agent 随机抽样邮编，批量跑 Quote Engine，整理哪些区域依赖模糊命中、哪些区域缺 Zone 或价格矩阵。
+现有 `scripts/postal_hit_test_agent.py` 用于价格/区域覆盖率诊断，不代表解析准确率。
 
 ```bash
-python scripts/postal_hit_test_agent.py \
-  --sample-size 5000 \
-  --profiles 1p \
-  --persist-diagnostics \
-  --persist-only manual
+python scripts/postal_hit_test_agent.py --sample-size 5000 --profiles 1p --persist-diagnostics --persist-only manual
 ```
 
-输出：
-
-- `outputs/postal_hit_tests/postal_hit_test_*.json`
-- `outputs/postal_hit_tests/postal_hit_test_*.md`
-
-规则边界：
-
-- 脚本不会修改 `zone_price_matrix`。
-- 脚本不会发布 `learned_quote_rules`。
-- `--persist-diagnostics --persist-only manual` 只把无法自动报价的样本写入 `hermes_diagnostic_queue`，避免后台被大量成功回退样本刷屏。
-- 成功但依赖模糊回退的样本仍会进入报告的规则整理建议。
-- 真正学习规则仍然必须来自人工任务 resolved 后生成的候选，并经后台审核批准。
+该命令的持久化开关会写诊断队列。它不修改价格矩阵，不发布学习规则，也不能代替真实询价评测。

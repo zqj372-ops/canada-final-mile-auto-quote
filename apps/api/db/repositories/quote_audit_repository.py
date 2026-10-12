@@ -9,7 +9,7 @@ class QuoteAuditRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def create_for_zone_quote(self, request: ZoneQuoteRequest, result: ZoneQuoteResult) -> QuoteAuditLog:
+    def create_for_zone_quote(self, request: ZoneQuoteRequest, result: ZoneQuoteResult, *, commit: bool = True) -> QuoteAuditLog:
         record = QuoteAuditLog(
             quote_id=result.quote_id,
             request_json=request.model_dump(mode="json"),
@@ -28,8 +28,11 @@ class QuoteAuditRepository:
             risk_tags=result.risk_tags,
         )
         self.session.add(record)
-        self.session.commit()
-        self.session.refresh(record)
+        if commit:
+            self.session.commit()
+            self.session.refresh(record)
+        else:
+            self.session.flush()
         return record
 
     def get_by_quote_id(self, quote_id: str) -> QuoteAuditLog | None:

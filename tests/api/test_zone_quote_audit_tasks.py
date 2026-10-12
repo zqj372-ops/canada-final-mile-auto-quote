@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from collections.abc import Generator
 
@@ -96,6 +97,13 @@ def payload(**overrides: object) -> dict[str, object]:
     return data
 
 
+
+def approval_payload(candidate):
+    return {"review_note": "Fixture supplier confirmation", "supplier": "Fixture Carrier",
+            "source_reference": "Fixture quote 001",
+            "valid_until": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+            "expected_evidence_version": candidate["proposal_json"]["evidence_version"]}
+
 def test_zone_calculate_success_writes_audit_log() -> None:
     client = build_client()
 
@@ -121,7 +129,11 @@ def test_zone_calculate_success_writes_audit_log() -> None:
     diagnostic_package = diagnostics[0]["diagnostic_package"]
     assert diagnostics[0]["quote_status"] == "quoted"
     assert diagnostic_package["quote_result"]["source_type"] == "zone_matrix"
-    assert diagnostic_package["price_matrix"]["exact_price_found"] is True
+    assert diagnostic_package["context_status"] == "pending"
+    assert diagnostic_package["price_matrix"]["exact_price_found"] is None
+    prepared = client.post(f"/quotes/hermes-diagnostics/{diagnostics[0]['id']}/prepare").json()
+    assert prepared["diagnostic_package"]["context_status"] == "ready"
+    assert prepared["diagnostic_package"]["price_matrix"]["exact_price_found"] is True
 
 
 def test_manual_required_writes_audit_log() -> None:
@@ -223,7 +235,7 @@ def test_resolved_manual_task_creates_candidate_and_reuses_only_after_approval()
     candidates = client.get("/quotes/learning-candidates").json()
     approval = client.post(
         f"/quotes/learning-candidates/{candidates[0]['id']}/approve",
-        json={"review_note": "Approved by operator after supplier confirmation."},
+        json=approval_payload(candidates[0]),
     )
     second_quote_after_approval = client.post("/quotes/zone-calculate", json=payload()).json()
     tasks = client.get("/quotes/manual-tasks").json()
@@ -260,7 +272,7 @@ def test_resolved_manual_task_learning_respects_billing_pallets() -> None:
         json={"status": "resolved", "resolved_price_usd": "250.00"},
     )
     candidate = client.get("/quotes/learning-candidates").json()[0]
-    client.post(f"/quotes/learning-candidates/{candidate['id']}/approve", json={})
+    assert client.post(f"/quotes/learning-candidates/{candidate['id']}/approve", json=approval_payload(candidate)).status_code == 200
 
     response = client.post(
         "/quotes/zone-calculate",
@@ -318,7 +330,11 @@ def test_zone_gap_creates_hermes_diagnostic_without_changing_quote() -> None:
     assert diagnostic["status"] == "pending"
     assert diagnostic["quote_status"] == "manual_required"
 
-    package = diagnostic["diagnostic_package"]
+    assert diagnostic["diagnostic_package"]["context_status"] == "pending"
+    prepared = client.post(f"/quotes/hermes-diagnostics/{diagnostic['id']}/prepare")
+    assert prepared.status_code == 200
+    package = prepared.json()["diagnostic_package"]
+    assert package["context_status"] == "ready"
     assert package["raw_input"] is None
     assert package["address"]["postal_prefix"] == "R3T"
     assert package["address"]["expected_origin_by_province"] == "calgary"
@@ -496,7 +512,7 @@ def test_bound_hermes_model_repairs_invalid_json_and_drops_unsafe_fields(monkeyp
     assert audit["total_price_usd"] is None
 
 
-def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:
+def test_exact_postal_legacy_learning_does_not_override_matrix() -> None:
     client = build_client(
         learned_rows=[
             {
@@ -530,15 +546,13 @@ def test_exact_postal_learned_rule_corrects_zone_quote_at_quote_time() -> None:
     response = client.post("/quotes/zone-calculate", json=payload())
 
     body = response.json()
-    assert body["source_type"] == "learned_manual_quote"
+    assert body["source_type"] == "zone_matrix"
     assert body["manual_review_required"] is False
-    assert body["total_price_usd"] == "250.00"
-    assert body["matched_rule"].startswith("learned_manual_quote")
-    assert "score 100" in body["matched_rule"]
-    assert "hermes_corrective_override" in body["risk_tags"]
+    assert body["total_price_usd"] == "212.00"
+    assert "hermes_corrective_override" not in body["risk_tags"]
 
 
-def test_zone_switch_blocks_learned_rule_from_reactivating_zone_8() -> None:
+def test_stale_zone_8_learning_does_not_replace_current_matrix_route() -> None:
     client = build_client(
         learned_rows=[
             {
@@ -573,15 +587,10 @@ def test_zone_switch_blocks_learned_rule_from_reactivating_zone_8() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "manual_required"
-    assert body["matched_by"] == "zone_price_disabled"
-    assert body["match_trace"]["previous_source_type"] == "learned_manual_quote"
+    assert body["source_type"] == "zone_matrix"
     assert body["origin"] == "toronto"
-    assert body["zone"] == 8
-    assert body["base_price_usd"] is None
-    assert body["total_price_usd"] is None
-    assert body["manual_review_required"] is True
-    assert "zone_price_disabled" in body["risk_tags"]
+    assert body["zone"] == 2
+    assert body["total_price_usd"] == "212.00"
 
 
 def test_exact_learned_rule_cannot_cross_origin_price_matrices() -> None:

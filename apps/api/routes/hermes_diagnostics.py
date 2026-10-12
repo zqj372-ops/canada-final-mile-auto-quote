@@ -12,6 +12,7 @@ from apps.api.services.hermes_diagnostic_service import (
     get_hermes_diagnostic,
     list_hermes_diagnostics,
     run_hermes_diagnostic,
+    prepare_hermes_context,
     submit_hermes_diagnostic_suggestion,
 )
 from apps.api.services.batch_diagnostic_report_service import (
@@ -78,3 +79,12 @@ def fail_diagnostic(
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     return fail_hermes_diagnostic(db, diagnostic_id, error=payload.error)
+
+
+@router.post("/hermes-diagnostics/{diagnostic_id}/prepare", dependencies=[Depends(require_roles(*LEARNING_WRITE_ROLES))])
+def prepare_diagnostic(diagnostic_id: int, db: Session = Depends(get_db)) -> dict[str, object]:
+    from fastapi import HTTPException
+    record = prepare_hermes_context(db, diagnostic_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Diagnostic not found or busy.")
+    return record

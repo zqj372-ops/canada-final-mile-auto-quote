@@ -215,7 +215,7 @@ def calculate_ai_auto_quote(
     zone_request = _zone_request_from_extraction(extraction)
     pricing_config = QuoteRuleConfigRepository(db).get_zone_pricing_config()
     quote_result = ZoneQuoteEngine(ZoneRepository(db), pricing_config=pricing_config).quote(zone_request)
-    quote_result = apply_learned_quote_if_available(db, zone_request, quote_result)
+    quote_result = apply_learned_quote_if_available(db, zone_request, quote_result, pricing_config=pricing_config)
     quote_result = enforce_origin_matrix_safety(zone_request, quote_result)
     quote_result = enforce_zone_price_switch(pricing_config, quote_result)
     quote_result = attach_zone_quote_logic(zone_request, quote_result)
@@ -284,7 +284,7 @@ def _record_sales_response(
     payload: AIAutoQuoteRequest,
     response: AIAutoQuoteResponse,
 ) -> AIAutoQuoteResponse:
-    if actor is None:
+    if actor is None or (response.quote_result is None and not response.manual_review_required):
         return response
     try:
         SalesQuoteRecordRepository(db).create_record(

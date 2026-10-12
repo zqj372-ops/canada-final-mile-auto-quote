@@ -17,6 +17,7 @@ class HermesDiagnosticRepository:
         quote_status: str,
         source_type: str,
         diagnostic_package_json: dict[str, object],
+        commit: bool = True,
     ) -> HermesDiagnosticQueue:
         record = HermesDiagnosticQueue(
             quote_id=quote_id,
@@ -26,8 +27,11 @@ class HermesDiagnosticRepository:
             diagnostic_package_json=diagnostic_package_json,
         )
         self.session.add(record)
-        self.session.commit()
-        self.session.refresh(record)
+        if commit:
+            self.session.commit()
+            self.session.refresh(record)
+        else:
+            self.session.flush()
         return record
 
     def list_records(

@@ -24,7 +24,7 @@ class ManualPriceOverrideRequest(BaseModel):
 
 @router.get("/sales-records")
 def list_sales_quote_records(
-    status: str | None = Query(default=None, pattern="^(quoted|manual_required)$"),
+    status: str | None = Query(default=None, pattern="^(quoted|manual_required|superseded)$"),
     limit: int = 50,
     db: Session = Depends(get_db),
     actor: CurrentActor = Depends(require_roles(*ALL_ROLES)),

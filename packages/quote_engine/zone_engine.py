@@ -280,7 +280,7 @@ class ZoneQuoteEngine:
             match_trace=zone_decision.match_trace,
             internal_note="Base price came from zone_price_matrix. AI may explain but must not change price.",
         )
-        result.sales_note = build_zone_sales_note(request, result)
+        result.sales_note = build_zone_sales_note(request, result, self.pricing_config)
         return result
 
     def _manual(
@@ -330,7 +330,8 @@ class ZoneQuoteEngine:
         )
 
 
-def build_zone_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult) -> str:
+def build_zone_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult, config: ZonePricingConfig | None = None) -> str:
+    pricing = config or ZonePricingConfig()
     amount = _format_money(result.total_price_usd)
     density = _format_density(request.weight_kg, request.cbm)
     cargo_line = f"共{request.piece_count}件，{request.cbm} CBM，{request.weight_kg} KG"
@@ -353,11 +354,15 @@ def build_zone_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult) ->
             f"货物总计：{cargo_line}",
             f"报价：USD {amount}（{origin_label(result.origin)}派送）",
             *rural_confirmation_lines,
-            "注：不带尾板，自卸货",
+            "注：已含尾板服务费" if request.requires_liftgate else "注：不带尾板，自卸货",
             "- 送货到门口路边，不含其他操作",
-            "- 无卸货平台需尾板 +50USD/票",
-            "- 需手叉车配合 +50USD/票",
-            "- 免费等待30分钟，超时35USD/半小时",
+            (f"- 已含尾板费 USD {_format_money(result.accessorials.get('liftgate_fee_usd'))}"
+             if request.requires_liftgate else f"- 无卸货平台需尾板 +{_format_money(pricing.liftgate_fee_usd)}USD/票"),
+            (f"- 已含手叉车费 USD {_format_money(result.accessorials.get('pallet_jack_fee_usd'))}"
+             if request.requires_pallet_jack else f"- 需手叉车配合 +{_format_money(pricing.pallet_jack_fee_usd)}USD/票"),
+            *([f"- 已含预约费 USD {_format_money(result.accessorials.get('appointment_fee_usd'))}"] if request.requires_appointment else []),
+            *([f"- 已含等待费 USD {_format_money(result.accessorials['detention_fee_usd'])}"] if 'detention_fee_usd' in result.accessorials else []),
+            f"- 免费等待{pricing.detention_free_minutes}分钟，超时{_format_money(pricing.detention_half_hour_fee_usd)}USD/半小时",
             "- 价格以供应商实测地址及卡车准入情况为准",
             "- 下单引用单号，未引用加收50人民币/票服务费",
         ]
