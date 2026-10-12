@@ -586,3 +586,60 @@ def test_sales_cannot_manage_zone_city_rules(monkeypatch: pytest.MonkeyPatch) ->
     )
 
     assert response.status_code == 403
+
+
+def test_city_rule_counts_keep_same_named_cities_in_different_provinces_separate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client(zone_rules=[
+        {"postal_prefix": "N8N", "city": "WINDSOR", "province": "ON", "origin": "toronto", "zone": 6, "active": True},
+        {"postal_prefix": "J1S", "city": "WINDSOR", "province": "QC", "origin": "toronto", "zone": 9, "active": True},
+        {"postal_prefix": "N9G", "city": "WINDSOR", "province": "ON", "origin": "toronto", "zone": 6, "active": False},
+    ])
+    response = client.get("/quote-configs/zone-city-rules?limit=1", headers={"X-API-Key": ADMIN_KEY})
+    assert response.status_code == 200
+    assert len(response.json()["records"]) == 1
+    assert response.json()["total"] == 2
+    assert response.json()["city_count"] == 2
+    assert response.json()["postal_prefix_count"] == 2
+    filtered = client.get("/quote-configs/zone-city-rules?zone=6", headers={"X-API-Key": ADMIN_KEY})
+    assert filtered.json()["city_count"] == 1
+
+
+@pytest.mark.parametrize("mode", ["rename", "partial", "foreign", "missing_source_province"])
+def test_city_group_rename_checks_original_group_and_complete_membership(
+    monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    monkeypatch.setenv("DEV_AUTH_DISABLED", "false")
+    client = build_client(zone_rules=[
+        {"postal_prefix": "L6T", "city": "BRAMPTON", "canonical_city": "BRAMPTON", "province": "ON", "origin": "toronto", "zone": 1, "priority": 10, "active": True},
+        {"postal_prefix": "L6W", "city": "BRAMPTON", "canonical_city": "BRAMPTON", "province": "ON", "origin": "toronto", "zone": 2, "priority": 100, "active": True},
+        {"postal_prefix": "L5T", "city": "MISSISSAUGA", "canonical_city": "MISSISSAUGA", "province": "ON", "origin": "toronto", "zone": 3, "priority": 100, "active": True},
+    ])
+    headers = {"X-API-Key": ADMIN_KEY}
+    before = client.get("/quote-configs/zone-city-rules", headers=headers).json()["records"]
+    rules = [
+        {key: row[key] for key in ("id", "postal_prefix", "origin", "zone", "priority")}
+        for row in before if row["city"] == "BRAMPTON"
+    ]
+    payload = {
+        "city": "Brampton Updated", "canonical_city": "Brampton Updated", "province": "ON",
+        "source_city": "Brampton", "source_province": "Ontario", "rules": rules,
+    }
+    if mode == "partial":
+        payload["rules"] = rules[:1]
+    elif mode == "foreign":
+        payload["deactivate_ids"] = [row["id"] for row in before if row["city"] == "MISSISSAUGA"]
+    elif mode == "missing_source_province":
+        payload.pop("source_province")
+    result = client.put("/quote-configs/zone-city-rule-groups", headers=headers, json=payload)
+    after = client.get("/quote-configs/zone-city-rules", headers=headers).json()["records"]
+    if mode == "rename":
+        assert result.status_code == 200
+        assert result.json()["updated_count"] == 2
+        assert {row["postal_prefix"] for row in after if row["canonical_city"] == "BRAMPTON UPDATED"} == {"L6T", "L6W"}
+        assert {row["postal_prefix"]: (row["zone"], row["priority"]) for row in after} == {"L6T": (1, 10), "L6W": (2, 100), "L5T": (3, 100)}
+    else:
+        assert result.status_code == 422
+        assert after == before

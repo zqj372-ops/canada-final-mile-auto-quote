@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import {
-  listZoneCityRules,
+  listAllZoneCityRules,
   listZonePriceMatrix,
   saveZoneCityRuleGroup,
   type ZoneCityRuleRecord,
@@ -33,6 +33,8 @@ type CityRuleDraft = {
 
 type CityGroupDraft = {
   originalKey: string | null;
+  sourceCity?: string;
+  sourceProvince?: string;
   city: string;
   canonicalCity: string;
   province: string;
@@ -59,6 +61,7 @@ type CityIconName =
 const PROVINCES = ["AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"];
 const WESTERN_PROVINCES = new Set(["AB", "BC", "MB", "SK", "NT", "NU", "YT"]);
 const FSA_PATTERN = /^[ABCEGHJKLMNPRSTVXY]\d[ABCEGHJKLMNPRSTVWXYZ]$/;
+const CITIES_PER_PAGE = 50;
 
 export default function CitySettingsPage() {
   const initialParams = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -67,12 +70,16 @@ export default function CitySettingsPage() {
   const [search, setSearch] = useState("");
   const [originFilter, setOriginFilter] = useState(() => initialParams.get("origin") || "");
   const [zoneFilter, setZoneFilter] = useState(() => initialParams.get("zone") || "");
+  const [provinceFilter, setProvinceFilter] = useState("");
+  const [conflictsOnly, setConflictsOnly] = useState(false);
+  const [page, setPage] = useState(1);
   const [draft, setDraft] = useState<CityGroupDraft | null>(null);
   const [prefixInput, setPrefixInput] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [batchZone, setBatchZone] = useState("");
   const [batchPriority, setBatchPriority] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -152,7 +159,7 @@ export default function CitySettingsPage() {
           value.toLowerCase().includes(query),
         ) ||
         group.rules.some((rule) =>
-          [rule.postal_prefix, rule.note].some((value) =>
+          [rule.postal_prefix, rule.city, rule.canonical_city].some((value) =>
             value?.toLowerCase().includes(query),
           ),
         );
@@ -161,29 +168,37 @@ export default function CitySettingsPage() {
           (!originFilter || rule.origin === originFilter) &&
           (!zoneFilter || String(rule.zone) === zoneFilter),
       );
-      return groupMatches && assignmentMatches;
+      return groupMatches && assignmentMatches && (!provinceFilter || group.province === provinceFilter)
+        && (!conflictsOnly || duplicatePrefixes(group.rules).length > 0);
     });
-  }, [groups, originFilter, search, zoneFilter]);
+  }, [groups, originFilter, search, zoneFilter, provinceFilter, conflictsOnly]);
+  const pageCount = Math.max(1, Math.ceil(visibleGroups.length / CITIES_PER_PAGE));
+  const currentPage = Math.min(page, pageCount);
+  const displayedGroups = visibleGroups.slice((currentPage - 1) * CITIES_PER_PAGE, currentPage * CITIES_PER_PAGE);
+  const uniqueFsaCount = useMemo(() => new Set(records.map((record) => record.postal_prefix)).size, [records]);
+  const conflictCount = useMemo(() => groups.reduce((count, group) => count + duplicatePrefixes(group.rules).length, 0), [groups]);
   const assignmentCount = useMemo(
     () => new Set(records.map((record) => `${record.origin}|${record.zone}`)).size,
     [records],
   );
 
-  async function loadAll() {
+  async function loadAll(): Promise<boolean> {
     setIsLoading(true);
+    setHasLoaded(false);
     setError(null);
     try {
       const [ruleResponse, matrixResponse] = await Promise.all([
-        listZoneCityRules({ limit: 1000 }),
+        listAllZoneCityRules(),
         listZonePriceMatrix({ limit: 5000 }),
       ]);
       setRecords(ruleResponse.records);
       setMatrix(matrixResponse);
-      if (ruleResponse.total > ruleResponse.records.length) {
-        setNotice(`当前规则超过 ${ruleResponse.records.length} 条，页面仅显示前 ${ruleResponse.records.length} 条。`);
-      }
+      setHasLoaded(true);
+      setPage(1);
+      return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "城市与邮编配置读取失败。");
+      return false;
     } finally {
       setIsLoading(false);
     }
@@ -194,7 +209,6 @@ export default function CitySettingsPage() {
       ? document.activeElement
       : null;
     const province = "ON";
-    const origin = originForProvince(province);
     setDraft({
       originalKey: null,
       city: "",
@@ -205,7 +219,7 @@ export default function CitySettingsPage() {
     });
     setPrefixInput("");
     setSelectedKeys(new Set());
-    setBatchZone(String(defaultZone(matrix, origin)));
+    setBatchZone("");
     setBatchPriority("100");
     setError(null);
     setNotice(null);
@@ -225,10 +239,10 @@ export default function CitySettingsPage() {
       note: rule.note ?? "",
     }));
     const commonZone = mostCommon(rules.map((rule) => rule.zone)) || rules[0]?.zone || "1";
-    const commonPriority =
-      mostCommon(rules.map((rule) => rule.priority)) || rules[0]?.priority || "100";
     setDraft({
       originalKey: group.key,
+      sourceCity: group.canonicalCity,
+      sourceProvince: group.province,
       city: group.city,
       canonicalCity: group.canonicalCity,
       province: group.province,
@@ -238,7 +252,7 @@ export default function CitySettingsPage() {
     setPrefixInput("");
     setSelectedKeys(new Set(rules.map((rule) => rule.key)));
     setBatchZone(commonZone);
-    setBatchPriority(commonPriority);
+    setBatchPriority("");
     setError(null);
     setNotice(null);
   }
@@ -296,7 +310,11 @@ export default function CitySettingsPage() {
     }
 
     const origin = originForProvince(draft.province);
-    const zone = batchZone || String(defaultZone(matrix, origin));
+    const zone = batchZone;
+    if (newPrefixes.length && (!Number.isInteger(Number(zone)) || Number(zone) < 1)) {
+      setError("请根据现行运价填写新增 FSA 的 Zone，再加入列表。");
+      return;
+    }
     const priority = batchPriority || "100";
     const nextRules = newPrefixes.map((postalPrefix, index) => ({
       key: `new-${Date.now()}-${index}`,
@@ -362,7 +380,7 @@ export default function CitySettingsPage() {
       setError("批量 Zone 必须是正整数。");
       return;
     }
-    if (!Number.isInteger(priority) || priority < 1 || priority > 1000) {
+    if (batchPriority.trim() && (!Number.isInteger(priority) || priority < 1 || priority > 1000)) {
       setError("批量优先级必须是 1 至 1000 的整数。");
       return;
     }
@@ -373,14 +391,14 @@ export default function CitySettingsPage() {
             ...current,
             rules: current.rules.map((rule) =>
               selectedKeys.has(rule.key)
-                ? { ...rule, origin, zone: String(zone), priority: String(priority) }
+                ? { ...rule, origin, zone: String(zone), ...(batchPriority.trim() ? { priority: String(priority) } : {}) }
                 : rule,
             ),
           }
         : current,
     );
     setError(null);
-    setNotice(`已将 ${selectedKeys.size} 个邮编统一调整为 ${formatOrigin(origin)} · Zone ${zone}。`);
+    setNotice(`已将 ${selectedKeys.size} 条配置暂改为 ${formatOrigin(origin)} · Zone ${zone}，保存后生效。${batchPriority.trim() ? "" : "原优先级保持不变。"}`);
   }
 
   function removeSelectedRules() {
@@ -501,6 +519,8 @@ export default function CitySettingsPage() {
         city,
         province: draft.province,
         canonical_city: canonicalCity,
+        source_city: draft.sourceCity,
+        source_province: draft.sourceProvince,
         rules: draft.rules.map((rule) => ({
           id: rule.id,
           postal_prefix: rule.postalPrefix.trim().toUpperCase(),
@@ -513,11 +533,12 @@ export default function CitySettingsPage() {
           .map((rule) => rule.id)
           .filter((recordId): recordId is number => recordId !== null),
       });
-      await loadAll();
+      const refreshed = await loadAll();
       closeEditor();
-      setNotice(
+      if (refreshed) setNotice(
         `${canonicalCity.toUpperCase()} 已保存：新增 ${result.created_count} 个、更新 ${result.updated_count} 个、停用 ${result.deactivated_count} 个邮编。`,
       );
+      else setError("配置已保存，但最新列表读取失败。请点击“重新读取”，不要重复保存。");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "城市邮编批量保存失败。");
     } finally {
@@ -546,7 +567,7 @@ export default function CitySettingsPage() {
             <CityIcon name="refresh" />
             {isLoading ? "读取中…" : "重新读取"}
           </button>
-          <button className="btn-primary" type="button" onClick={startCreate} disabled={isLoading}>
+          <button className="btn-primary" type="button" onClick={startCreate} disabled={isLoading || !hasLoaded}>
             <CityIcon name="plus" />
             新增城市
           </button>
@@ -561,11 +582,27 @@ export default function CitySettingsPage() {
       )}
 
       <section className="city-settings-metrics" aria-label="城市配置概览">
-        <CityMetric icon="city" label="城市" value={`${groups.length} 个`} hint="一城一组" />
-        <CityMetric icon="postal" label="有效 FSA" value={`${records.length} 个`} hint="集中维护" />
-        <CityMetric icon="layers" label="分区组合" value={`${assignmentCount} 组`} hint="始发仓 / Zone" />
+        <CityMetric icon="city" label="城市" value={hasLoaded ? `${groups.length} 个` : "—"} hint="按省份与标准城市名分组" />
+        <CityMetric icon="postal" label="有效 FSA" value={hasLoaded ? `${uniqueFsaCount} 个` : "—"} hint={hasLoaded ? `${records.length} 条城市规则` : "等待读取"} />
+        <CityMetric icon="layers" label="分区组合" value={hasLoaded ? `${assignmentCount} 组` : "—"} hint="始发仓 / Zone" />
         <CityMetric icon="check" label="生效时间" value="保存后立即" hint="原子批量提交" />
       </section>
+
+      {hasLoaded && conflictCount > 0 && <div className="city-config-warning" role="status">
+        <span>发现 {conflictCount} 组同城 FSA 重复配置，请核对 Zone 后保留正确规则。</span>
+        <button type="button" onClick={() => {
+          if (!conflictsOnly) {
+            setSearch("");
+            setProvinceFilter("");
+            setOriginFilter("");
+            setZoneFilter("");
+          }
+          setConflictsOnly(!conflictsOnly);
+          setPage(1);
+        }}>
+          {conflictsOnly ? "显示全部城市" : "查看待核对城市"}
+        </button>
+      </div>}
 
       <section className="pricing-panel city-settings-workspace">
         <div className="city-settings-command">
@@ -585,14 +622,21 @@ export default function CitySettingsPage() {
             <input
               type="search"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => { setSearch(event.target.value); setPage(1); }}
               placeholder="搜索城市、标准城市名或 FSA"
               aria-label="搜索城市、标准城市名或 FSA"
             />
           </label>
           <label className="city-settings-filter">
+            <span>省份</span>
+            <select value={provinceFilter} onChange={(event) => { setProvinceFilter(event.target.value); setPage(1); }}>
+              <option value="">全部省份</option>
+              {PROVINCES.map((province) => <option value={province} key={province}>{province}</option>)}
+            </select>
+          </label>
+          <label className="city-settings-filter">
             <span>始发仓</span>
-            <select value={originFilter} onChange={(event) => setOriginFilter(event.target.value)}>
+            <select value={originFilter} onChange={(event) => { setOriginFilter(event.target.value); setPage(1); }}>
               <option value="">全部始发仓</option>
               {origins.map((origin) => (
                 <option value={origin} key={origin}>{formatOrigin(origin)}</option>
@@ -601,14 +645,14 @@ export default function CitySettingsPage() {
           </label>
           <label className="city-settings-filter">
             <span>Zone</span>
-            <select value={zoneFilter} onChange={(event) => setZoneFilter(event.target.value)}>
+            <select value={zoneFilter} onChange={(event) => { setZoneFilter(event.target.value); setPage(1); }}>
               <option value="">全部 Zone</option>
               {zones.map((zone) => (
                 <option value={zone} key={zone}>Zone {zone}</option>
               ))}
             </select>
           </label>
-          {(search || originFilter || zoneFilter) && (
+          {(search || originFilter || zoneFilter || provinceFilter || conflictsOnly) && (
             <button
               className="city-settings-reset"
               type="button"
@@ -616,6 +660,9 @@ export default function CitySettingsPage() {
                 setSearch("");
                 setOriginFilter("");
                 setZoneFilter("");
+                setProvinceFilter("");
+                setConflictsOnly(false);
+                setPage(1);
               }}
             >
               清除筛选
@@ -627,7 +674,7 @@ export default function CitySettingsPage() {
           {isLoading && !records.length ? (
             <div className="city-settings-empty">正在读取城市与邮编配置…</div>
           ) : visibleGroups.length ? (
-            visibleGroups.map((group) => {
+            displayedGroups.map((group) => {
               const assignments = summarizeAssignments(group.rules);
               const assignmentFilterActive = Boolean(originFilter || zoneFilter);
               const matchingAssignmentCount = group.rules.filter(
@@ -647,6 +694,7 @@ export default function CitySettingsPage() {
                       {group.city !== group.canonicalCity && (
                         <small>规则城市名：{group.city}</small>
                       )}
+                      {duplicatePrefixes(group.rules).length > 0 && <small className="city-conflict-label">重复 FSA：{duplicatePrefixes(group.rules).join("、")}</small>}
                     </div>
                   </div>
 
@@ -695,6 +743,7 @@ export default function CitySettingsPage() {
                     className="city-group-manage"
                     type="button"
                     onClick={() => startEdit(group)}
+                    disabled={isLoading || !hasLoaded}
                     aria-label={`批量管理 ${group.canonicalCity} 的 ${group.rules.length} 个邮编`}
                   >
                     <CityIcon name="edit" />
@@ -712,6 +761,13 @@ export default function CitySettingsPage() {
             </div>
           )}
         </div>
+        {hasLoaded && visibleGroups.length > CITIES_PER_PAGE && <nav className="city-settings-pagination" aria-label="城市列表分页">
+          <span>第 {currentPage} / {pageCount} 页 · 共 {visibleGroups.length} 个城市，搜索覆盖全部配置</span>
+          <div>
+            <button className="btn-secondary" type="button" disabled={currentPage === 1 || isLoading} onClick={() => setPage(currentPage - 1)}>上一页</button>
+            <button className="btn-secondary" type="button" disabled={currentPage === pageCount || isLoading} onClick={() => setPage(currentPage + 1)}>下一页</button>
+          </div>
+        </nav>}
       </section>
 
       {draft && (
@@ -752,13 +808,16 @@ export default function CitySettingsPage() {
               </button>
             </header>
 
-            <div className="city-batch-scroll">
+            <fieldset className="city-batch-scroll" disabled={isSaving}>
               {(error || notice) && (
                 <div className={`pricing-feedback ${error ? "is-error" : "is-success"} city-batch-feedback`} role={error ? "alert" : "status"}>
                   <CityIcon name={error ? "alert" : "check"} />
                   <span>{error || notice}</span>
                 </div>
               )}
+              {duplicateDraftPrefixes(draft.rules).length > 0 && <p className="city-config-warning">
+                以下 FSA 有重复配置：{duplicateDraftPrefixes(draft.rules).join("、")}。请核对 Zone，并将多余规则标为停用后保存。
+              </p>}
 
               <section className="city-batch-section">
                 <div className="city-batch-section-heading">
@@ -835,6 +894,7 @@ export default function CitySettingsPage() {
                         min={1}
                         step={1}
                         value={batchZone}
+                        placeholder="按现行运价填写"
                         onChange={(event) => setBatchZone(event.target.value)}
                       />
                     </label>
@@ -847,6 +907,7 @@ export default function CitySettingsPage() {
                         max={1000}
                         step={1}
                         value={batchPriority}
+                        placeholder="100"
                         onChange={(event) => setBatchPriority(event.target.value)}
                       />
                     </label>
@@ -895,6 +956,7 @@ export default function CitySettingsPage() {
                       max={1000}
                       step={1}
                       value={batchPriority}
+                      placeholder="保持原值"
                       onChange={(event) => setBatchPriority(event.target.value)}
                     />
                   </label>
@@ -913,7 +975,7 @@ export default function CitySettingsPage() {
                     disabled={!selectedKeys.size}
                   >
                     <CityIcon name="trash" />
-                    批量移除
+                    批量停用
                   </button>
                 </div>
 
@@ -926,7 +988,7 @@ export default function CitySettingsPage() {
                             type="checkbox"
                             checked={selectedKeys.has(rule.key)}
                             onChange={() => toggleRule(rule.key)}
-                            aria-label={`选择 ${rule.postalPrefix || "新邮编"}`}
+                            aria-label={`选择 ${rule.postalPrefix || "新邮编"}，Zone ${rule.zone}`}
                           />
                         </label>
                         <label className="city-rule-prefix-field">
@@ -979,7 +1041,7 @@ export default function CitySettingsPage() {
                           className="city-rule-remove-one"
                           type="button"
                           onClick={() => removeRule(rule.key)}
-                          aria-label={`移除 ${rule.postalPrefix || "新邮编"}`}
+                          aria-label={`${rule.id === null ? "移除" : "停用"} ${rule.postalPrefix || "新邮编"}，Zone ${rule.zone}`}
                         >
                           <CityIcon name="trash" />
                         </button>
@@ -997,14 +1059,14 @@ export default function CitySettingsPage() {
                 {draft.removedRules.length > 0 && (
                   <div className="city-removed-summary">
                     <span>
-                      已移除 {draft.removedRules.length} 个：
+                      待停用 / 移除 {draft.removedRules.length} 个（保存后生效）：
                       {draft.removedRules.map((rule) => rule.postalPrefix).join("、")}
                     </span>
                     <button type="button" onClick={restoreRemovedRules}>全部撤销</button>
                   </div>
                 )}
               </section>
-            </div>
+            </fieldset>
 
             <footer className="city-batch-footer">
               <div>
@@ -1119,12 +1181,23 @@ function originForProvince(province: string): string {
   return WESTERN_PROVINCES.has(province.toUpperCase()) ? "calgary" : "toronto";
 }
 
-function defaultZone(matrix: ZonePriceMatrixListResponse | null, origin: string): number {
-  const zones = matrix?.records
-    .filter((record) => record.origin === origin)
-    .map((record) => record.zone)
-    .sort((left, right) => left - right);
-  return zones?.[0] ?? matrix?.zones[0] ?? 1;
+function duplicateDraftPrefixes(rules: CityRuleDraft[]): string[] {
+  return duplicateValues(rules.map((rule) => rule.postalPrefix));
+}
+
+function duplicatePrefixes(rules: ZoneCityRuleRecord[]): string[] {
+  return duplicateValues(rules.map((rule) => rule.postal_prefix));
+}
+
+function duplicateValues(prefixes: string[]): string[] {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const value of prefixes) {
+    const prefix = value.trim().toUpperCase();
+    if (seen.has(prefix)) duplicates.add(prefix);
+    seen.add(prefix);
+  }
+  return [...duplicates];
 }
 
 function mostCommon(values: string[]): string {

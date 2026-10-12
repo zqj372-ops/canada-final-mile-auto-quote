@@ -6265,7 +6265,7 @@ body {
 
 .city-settings-filters {
   display: grid;
-  grid-template-columns: minmax(16rem, 1fr) minmax(10rem, 0.3fr) minmax(9rem, 0.25fr) auto;
+  grid-template-columns: minmax(13rem, 1fr) minmax(7rem, 0.25fr) minmax(9rem, 0.3fr) minmax(7rem, 0.25fr) auto;
   align-items: end;
   gap: 0.65rem;
   border-bottom: 1px solid var(--pricing-border-soft);
@@ -6637,11 +6637,34 @@ body {
 }
 
 .city-batch-scroll {
+  min-width: 0;
+  margin: 0;
+  border: 0;
   flex: 1;
   overflow: auto;
   background: #f7f9fb;
   padding: 0.9rem 1.1rem 1.1rem;
 }
+
+.city-config-warning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin: 0 0 1rem;
+  border: 1px solid #ead3a7;
+  border-radius: 0.6rem;
+  padding: 0.75rem 1rem;
+  color: #795414;
+  background: #fffaf0;
+  font-size: 0.78rem;
+}
+
+.city-config-warning button { color: inherit; text-decoration: underline; }
+.city-group-identity .city-conflict-label { color: #98630f; }
+.city-settings-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 1rem; border-top: 1px solid var(--pricing-border-soft); font-size: 0.75rem; color: var(--pricing-muted); }
+.city-settings-pagination > div { display: flex; gap: 0.5rem; }
 
 .city-batch-feedback {
   margin-bottom: 0.75rem;

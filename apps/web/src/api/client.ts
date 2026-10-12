@@ -884,6 +884,8 @@ export interface ZoneCityRuleGroupPayload {
   city: string;
   province: string;
   canonical_city?: string | null;
+  source_city?: string;
+  source_province?: string;
   rules: ZoneCityRuleGroupItemPayload[];
   deactivate_ids?: number[];
 }
@@ -1369,6 +1371,25 @@ export function listZoneCityRules(params: {
   return request<ZoneCityRuleListResponse>(
     `/quote-configs/zone-city-rules${query ? `?${query}` : ""}`,
   );
+}
+
+export async function listAllZoneCityRules(): Promise<ZoneCityRuleListResponse> {
+  const limit = 1000;
+  const first = await listZoneCityRules({ limit, offset: 0 });
+  const records = [...first.records];
+  const offsets = Array.from({ length: Math.max(0, Math.ceil(first.total / limit) - 1) }, (_, index) => (index + 1) * limit);
+  // Read independent pages together, with bounded concurrency for larger rule sets.
+  for (let index = 0; index < offsets.length; index += 4) {
+    const pages = await Promise.all(offsets.slice(index, index + 4).map((offset) => listZoneCityRules({ limit, offset })));
+    for (const page of pages) {
+      if (page.total !== first.total) throw new Error("城市配置在读取期间发生变化，请重新读取后再修改。");
+      records.push(...page.records);
+    }
+  }
+  if (records.length !== first.total || new Set(records.map((record) => record.id)).size !== first.total) {
+    throw new Error("城市配置未完整读取，请重新读取后再修改。");
+  }
+  return { ...first, records };
 }
 
 export function createZoneCityRule(

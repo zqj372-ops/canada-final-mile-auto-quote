@@ -128,6 +128,8 @@ class ZoneCityRuleGroupSave(BaseModel):
     city: str = Field(min_length=1, max_length=100)
     province: str = Field(min_length=2, max_length=32)
     canonical_city: str | None = Field(default=None, max_length=100)
+    source_city: str | None = Field(default=None, min_length=1, max_length=100)
+    source_province: str | None = Field(default=None, min_length=2, max_length=32)
     rules: list[ZoneCityRuleGroupItem] = Field(default_factory=list, max_length=200)
     deactivate_ids: list[int] = Field(default_factory=list, max_length=200)
 
@@ -333,6 +335,8 @@ def save_zone_city_rule_group(
             canonical_city=payload.canonical_city,
             rules=[rule.model_dump() for rule in payload.rules],
             deactivate_ids=payload.deactivate_ids,
+            source_city=payload.source_city,
+            source_province=payload.source_province,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

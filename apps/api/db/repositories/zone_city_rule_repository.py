@@ -38,14 +38,15 @@ class ZoneCityRuleRepository:
         )
         query = select(ZoneLookupRule)
         count_query = select(func.count(ZoneLookupRule.id))
-        city_count_query = select(
-            func.count(func.distinct(func.coalesce(ZoneLookupRule.canonical_city, ZoneLookupRule.city)))
-        )
+        city_groups_query = select(
+            ZoneLookupRule.province,
+            func.coalesce(ZoneLookupRule.canonical_city, ZoneLookupRule.city),
+        ).distinct()
         prefix_count_query = select(func.count(func.distinct(ZoneLookupRule.postal_prefix)))
         for criterion in criteria:
             query = query.where(criterion)
             count_query = count_query.where(criterion)
-            city_count_query = city_count_query.where(criterion)
+            city_groups_query = city_groups_query.where(criterion)
             prefix_count_query = prefix_count_query.where(criterion)
 
         records = self.session.scalars(
@@ -62,7 +63,7 @@ class ZoneCityRuleRepository:
         return {
             "records": [self.to_dict(record) for record in records],
             "total": int(self.session.scalar(count_query) or 0),
-            "city_count": int(self.session.scalar(city_count_query) or 0),
+            "city_count": int(self.session.scalar(select(func.count()).select_from(city_groups_query.subquery())) or 0),
             "postal_prefix_count": int(self.session.scalar(prefix_count_query) or 0),
         }
 
@@ -120,10 +121,14 @@ class ZoneCityRuleRepository:
         canonical_city: str | None,
         rules: Sequence[Mapping[str, object]],
         deactivate_ids: Sequence[int],
+        source_city: str | None = None,
+        source_province: str | None = None,
     ) -> dict[str, object]:
         """Atomically replace the editable rules for one city group."""
 
         try:
+            if (source_city is None) != (source_province is None):
+                raise ValueError("原城市和原省份必须同时提供。")
             incoming_ids = [
                 int(record_id)
                 for rule in rules
@@ -145,6 +150,13 @@ class ZoneCityRuleRepository:
                 if target_province is None or target_city is None:
                     raise ValueError("城市或省份无效。")
                 target_group = (target_province, target_city.upper())
+                source_group = target_group
+                if source_city is not None:
+                    normalized_source_city = normalize_city(source_city)
+                    normalized_source_province = normalize_province(source_province)
+                    if normalized_source_city is None or normalized_source_province is None:
+                        raise ValueError("原城市或原省份无效。")
+                    source_group = (normalized_source_province, normalized_source_city.upper())
                 existing = self.session.scalars(
                     select(ZoneLookupRule).where(ZoneLookupRule.id.in_(managed_ids))
                 ).all()
@@ -168,8 +180,19 @@ class ZoneCityRuleRepository:
                     )
                     for record in existing_by_id.values()
                 }
-                if current_groups != {target_group}:
+                if current_groups != {source_group}:
                     raise ValueError("提交的邮编规则不属于当前城市，已拒绝批量保存。")
+                if source_group != target_group:
+                    active_source_ids = set(self.session.scalars(
+                        select(ZoneLookupRule.id).where(
+                            ZoneLookupRule.active.is_(True),
+                            ZoneLookupRule.province == source_group[0],
+                            func.upper(func.coalesce(ZoneLookupRule.canonical_city, ZoneLookupRule.city))
+                            == source_group[1],
+                        )
+                    ).all())
+                    if not active_source_ids.issubset(managed_ids):
+                        raise ValueError("城市邮编配置已变化，修改城市名或省份前请重新读取完整配置。")
 
             normalized_rules: list[tuple[int | None, dict[str, object]]] = []
             seen_prefixes: set[str] = set()
