@@ -97,7 +97,7 @@ VITE_API_BASE_URL=http://localhost:8000 npm run dev
 
 工作台页面：
 
-- `/quote`：普通 Zone 报价输入。
+- `/quote`：销售确认工作台，依次完成原文解析、字段核对和确认报价。
 - `/ai-quote`：粘贴客户原始消息，由 AI 提取字段，再由 Zone Quote Engine 报价。
 - `/manual-tasks`：处理 `manual_required` 人工确认任务。
 - `/learning-candidates`：Hermes 自学习候选审核，批准后才发布为可复用学习规则。
@@ -109,10 +109,25 @@ VITE_API_BASE_URL=http://localhost:8000 npm run dev
 - `/settings/wecom`：维护企业微信群机器人 Webhook 配置。
 - `/settings/email`：维护邮件通知配置，作为人工任务和报价通知的主要通道。
 
-`/quote` 是中文 AI 报价工作台：销售粘贴尺寸、重量、地址和邮编，页面只做字段识别
-和展示，价格仍由后端 `POST /quotes/zone-calculate` 计算。包装类型、地址类型、风险
-阈值、示例文本、附加费显示名和报价复制模板由后端
-`GET /quote-configs/workbench` 返回，不写死在前端。
+`/quote` 采用三栏工作台。`POST /quotes/ai-extract` 只提取草稿，完整、明确的标签式
+单票询价可本地解析；其他内容继续使用后台配置的模型。销售可编辑字段，再通过
+`POST /quotes/confirmed-calculate` 调用确定性报价引擎。修改计价字段后，旧结果不可
+复制或导出，直到重新报价。字段选项、示例、附加费显示名及风险标签继续读取
+`GET /quote-configs/workbench`；客户回复由后端根据确认字段和实际费用生成。
+
+独立演示环境（临时 SQLite 库、测试价格，不读取生产库或调用模型）：
+
+```bash
+.venv/bin/python scripts/run_workbench_preview.py
+# 另一个终端
+cd apps/web
+QUOTE_API_PROXY_TARGET=http://127.0.0.1:8801 npm run dev -- --host 127.0.0.1 --port 5179
+```
+
+访问 `http://127.0.0.1:5179/quote`，演示账户说明在启动脚本头部。
+重启演示服务会重建临时库和会话密钥，需要重新登录。
+本次设计、接口、验证结果与未验证范围见 [重构交付说明](docs/QUOTE_WORKBENCH_REFACTOR.md)。
+纠错审核、离线评测、诊断后台任务和升级注意事项见 [优化与学习说明](docs/EXTRACTION_LEARNING.md)。
 
 Docker Compose：
 
@@ -204,8 +219,10 @@ AI 报价的通用默认模型；Hermes 未单独绑定时，内置 LLM 辅助�
 ```
 
 诊断包会包含原始输入、解析结果、邮编/城市/省份、Zone 命中、价格矩阵、
-失败原因、相邻 FSA、历史人工确认和私有地址参考包的小上下文。主报价接口不会等待
-Hermes Agent，避免慢响应或 504。
+失败原因、相邻 FSA、历史人工确认和私有地址参考包的小上下文。主报价接口只保存快照，
+`HERMES_CONTEXT_WORKER_ENABLED=true` 时后台补齐上下文；也可运行
+`python scripts/prepare_quote_diagnostics.py --limit 20`。准备上下文不会调用模型或改价。
+上下文失败会留在队列中，可通过 `/quotes/hermes-diagnostics/{id}/prepare` 重试。
 
 ### 参考数据导入
 
@@ -320,9 +337,25 @@ docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod
 
 ## 报价 API
 
+### Confirmed Quote Workbench
+
+- `POST /quotes/ai-extract`：输入 `customer_message`，可指定 `force_ai`；返回草稿、
+  字段来源、缺失/校验信息、`extraction_mode`、实际 `duration_ms`、解析版本及签名回执。
+  `strategy=single|dual` 可用于评测，默认仍为 dual；模型解析预算默认 30 秒。不会创建报价、
+  人工任务或销售记录，不发送通知。
+- `POST /quotes/confirmed-calculate`：输入确认后的 `quote`、原文、`field_provenance`，
+  可携带 `extraction_snapshot` 和待替代人工单的 `supersedes_quote_id`。
+  可同时携带服务端签发的 `extraction_receipt` 和逐字段 `correction_reasons`。
+  审计、销售记录、必要的人工任务、旧任务替代及诊断快照使用同一事务，保存失败返回 503 并回滚。
+  成功返回真实 `sales_record_id` / `manual_task_id`；诊断参考上下文由后台补齐。
+  尾板、手叉车和预约必须明确为 true / false，未知值会阻止确认报价。
+- 解析权限沿用 `admin` / `sales`；确认报价沿用 `admin` / `operator` / `sales`。
+  同一人工单仅可替代一次；销售仅可替代自己创建且仍待处理的任务。
+- 新流程不自动发送邮件或企业微信消息，人工单可在后台继续处理。原接口保留兼容。
+
 ### Zone Quote
 
-`POST /quotes/zone-calculate` 是当前 Canada final-mile MVP 的主报价入口。基础价必须来自
+`POST /quotes/zone-calculate` 是保留的直接报价入口。基础价必须来自
 `zone_price_matrix`，查不到 Zone 或价格时返回 `manual_required`，不会按每托单价或里程估算。
 
 ```json
@@ -387,8 +420,8 @@ PATCH /quotes/manual-tasks/{task_id}
 -> AI 只基于锁定 quote_result 润色销售话术
 ```
 
-如果缺少 `postal_code`、`cbm`、`weight_kg`、`piece_count`、`packaging_type`
-或 `address_type`，接口不会调用 Zone Quote Engine，只返回 `missing_fields`
+如果缺少 `postal_code`、`cbm`、`weight_kg`、`piece_count`、`packaging_type`、
+`address_type` 或尾板 / 手叉车 / 预约是否需要未确认，接口不会调用 Zone Quote Engine，只返回 `missing_fields`
 和追问客户的话术。
 
 AI 配置接口：
@@ -481,8 +514,8 @@ API 会从 PostgreSQL 查询候选 `vendor_rate_rules`，再交给 Quote Engine 
 
 ## 当前状态
 
-仓库已初始化，Canada final-mile 报价资料已归档到 `reference/canada-final-mile/`，
-并已建立第一版工程骨架、SQLAlchemy 数据访问闭环和 Zone Quote Engine。
+已有确定性报价引擎、配置后台、人工任务和审计流程。销售工作台已拆分为解析、确认
+报价两步，并提供独立本地演示。运行和测试通过不代表生产已经发布；发布仍需独立验证。
 
 ## 资料入口
 
@@ -497,5 +530,5 @@ API 会从 PostgreSQL 查询候选 `vendor_rate_rules`，再交给 Quote Engine 
 
 - 增加真实导入模板和脱敏样例数据。
 - 用 `EDGE_CASES.md` 建立异常场景测试集。
-- 做极简前端报价工作台，使用审计日志和人工确认池支撑运营流程。
+- 用脱敏真实询价评估解析准确率、快路径覆盖率和模型端到端延迟。
 - 接入 Google Address Validation 或 Canada Post AddressComplete 前，保持人工确认兜底。

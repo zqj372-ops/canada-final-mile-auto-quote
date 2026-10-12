@@ -6,6 +6,7 @@ import {
   type JsonValue,
   type QuoteAuditLog,
 } from "../api/client";
+import ExtractionFeedbackReview from "../components/ExtractionFeedbackReview";
 import RiskTags from "../components/RiskTags";
 
 interface AuditPageProps {
@@ -170,6 +171,7 @@ export default function AuditPage({ embedded = false }: AuditPageProps = {}) {
           <div className="grid gap-6 p-5 xl:grid-cols-[0.85fr_1.15fr]">
             <div className="space-y-5">
               <QuoteLogicCard record={record} />
+              <ExtractionFeedbackReview key={record.quote_id} audit={record} />
 
               <div>
                 <h3 className="section-title">审计字段</h3>

@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy import Index, text, JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -253,6 +253,8 @@ class SalesQuoteRecord(Base):
     __tablename__ = "sales_quote_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Shared production database: M2M records belong to its separate service.
+    scope_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="legacy", server_default="legacy", index=True)
     quote_id: Mapped[str | None] = mapped_column(String(64), index=True)
     actor_user_id: Mapped[int | None] = mapped_column(Integer, index=True)
     actor_api_key_id: Mapped[int | None] = mapped_column(Integer, index=True)
@@ -274,7 +276,10 @@ class ManualQuoteTask(Base):
     __tablename__ = "manual_quote_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # Shared production database: M2M records belong to its separate service.
+    scope_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="legacy", server_default="legacy", index=True)
     quote_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    learning_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     reason: Mapped[str] = mapped_column(Text, nullable=False)
     risk_tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     request_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
@@ -458,6 +463,9 @@ class LearnedQuoteRule(Base):
 
 class HermesLearningCandidate(Base):
     __tablename__ = "hermes_learning_candidates"
+    __table_args__ = (Index("uq_learning_candidate_v2_key", "duplicate_key", unique=True,
+                           sqlite_where=text("duplicate_key LIKE 'v2:%'"),
+                           postgresql_where=text("duplicate_key LIKE 'v2:%'")),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     source_task_id: Mapped[int | None] = mapped_column(Integer, index=True)

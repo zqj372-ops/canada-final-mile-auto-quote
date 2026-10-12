@@ -57,13 +57,15 @@ def build_zone_quote_logic(request_json: dict[str, Any], result_json: dict[str, 
         }
 
     price_source = _source_label(source_type)
-    formula_parts = [part for part in [f"基础价 {base_price}", f"燃油 {fuel}"] if part]
+    formula_parts = [f"{label} {value}" for label, value in [("基础价", base_price), ("燃油", fuel)] if value]
     if accessorials:
         formula_parts.append(
             "附加费 "
             + " + ".join(f"{key} {_money_text(value)}" for key, value in accessorials.items() if _money_text(value))
         )
     formula = " + ".join(formula_parts) + (f" = 合计 {total}" if total else "")
+    if source_type == "learned_manual_quote":
+        formula = f"人工审核整口价 {total}；基础运费、燃油及附加费未拆分"
     steps = [
         f"货物数据：{cargo}，计费托数 {billing_pallets or '-'} 托。",
         f"线路来源：{route}。",

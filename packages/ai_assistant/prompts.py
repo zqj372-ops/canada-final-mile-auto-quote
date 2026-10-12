@@ -9,6 +9,7 @@ FIELD_EXTRACTION_SYSTEM_PROMPT = """
 - 不读取或要求完整报价表、完整邮编表、完整 SOP。
 - 不确定的关键字段必须填 null，并加入 missing_fields。
 - 地址类型不确定时 address_type 必须为 null，并加入 missing_fields: ["address_type"]。
+- 尾板、手叉车、预约服务未明确说明时必须填 null；明确不需要才填 false。
 - packaging_type 只能是 carton、wooden_crate、pallet、woven_bag、flexible_packaging、unknown。
 - address_type 只能是 commercial、residential、private、rural_residential 或 null。
 - 必须能理解乱格式尺寸重量：170*140*87 409kg、170x140x87cm 409KG、170 140 87 409kg、2箱 67in x 55in x 34in 900lbs。
@@ -118,6 +119,7 @@ ADDRESS_EXTRACTION_SYSTEM_PROMPT = """
 - 省份可以输出缩写或全称，例如 AB / Alberta。
 - 不确定的字段填 null，并加入 missing_fields。
 - 地址类型不确定时 address_type 必须为 null，并加入 missing_fields: ["address_type"]。
+- 尾板、手叉车、预约服务未明确说明时必须填 null；明确不需要才填 false。
 - address_type 只能是 commercial、residential、private、rural_residential 或 null。
 - 不要把品名、尺寸、重量、电话、收货人当成地址。
 - 地址可能跨行，也可能与货物信息混在同一行；只保留街道/单元号到 address_line，城市、省份和邮编分别输出。
@@ -127,12 +129,12 @@ ADDRESS_EXTRACTION_SYSTEM_PROMPT = """
 示例 1 输入：
 加拿大地址：1055 Flagship Way, unit A, Pickering ON, L1X 0P2\n品名：棉枕\n前台已确认字段：\naddress_type=commercial\nrequires_liftgate=false
 示例 1 输出：
-{"address_line":"1055 Flagship Way, unit A","postal_code":"L1X 0P2","city":"Pickering","province":"ON","country":"Canada","address_type":"commercial","requires_liftgate":false,"requires_pallet_jack":false,"requires_appointment":false,"detention_minutes":0,"missing_fields":[],"confidence":97,"extraction_notes":"采用前台确认的商业地址类型"}
+{"address_line":"1055 Flagship Way, unit A","postal_code":"L1X 0P2","city":"Pickering","province":"ON","country":"Canada","address_type":"commercial","requires_liftgate":false,"requires_pallet_jack":null,"requires_appointment":null,"detention_minutes":0,"missing_fields":[],"confidence":97,"extraction_notes":"采用前台确认的商业地址类型"}
 
 示例 2 输入：
 地址：436 route 275\nSainte-Marguerite de dorchester\nprovince Québec\npays Canada\nG0S2X0
 示例 2 输出：
-{"address_line":"436 route 275","postal_code":"G0S 2X0","city":"Sainte-Marguerite de dorchester","province":"QC","country":"Canada","address_type":null,"requires_liftgate":false,"requires_pallet_jack":false,"requires_appointment":false,"detention_minutes":0,"missing_fields":["address_type"],"confidence":94,"extraction_notes":"原文未说明地址类型"}
+{"address_line":"436 route 275","postal_code":"G0S 2X0","city":"Sainte-Marguerite de dorchester","province":"QC","country":"Canada","address_type":null,"requires_liftgate":null,"requires_pallet_jack":null,"requires_appointment":null,"detention_minutes":0,"missing_fields":["address_type","requires_liftgate","requires_pallet_jack","requires_appointment"],"confidence":94,"extraction_notes":"原文未说明地址类型"}
 
 输出 JSON 字段：
 {
@@ -142,9 +144,9 @@ ADDRESS_EXTRACTION_SYSTEM_PROMPT = """
   "province": string|null,
   "country": string|null,
   "address_type": "commercial"|"residential"|"private"|"rural_residential"|null,
-  "requires_liftgate": boolean,
-  "requires_pallet_jack": boolean,
-  "requires_appointment": boolean,
+  "requires_liftgate": boolean|null,
+  "requires_pallet_jack": boolean|null,
+  "requires_appointment": boolean|null,
   "detention_minutes": number,
   "missing_fields": string[],
   "confidence": number,

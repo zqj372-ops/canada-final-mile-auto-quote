@@ -52,6 +52,7 @@ jobs:
       - name: Run pytest
         env:
           DEV_AUTH_DISABLED: "true"
+          TEST_POSTGRES_URL: postgresql+psycopg://quote_app:quote_app_test_password@localhost:5432/canada_quote_test
         run: pytest -q
 
       - name: Set up Node
@@ -68,6 +69,10 @@ jobs:
       - name: Build web
         working-directory: apps/web
         run: npm run build
+
+      - name: Test web workflow
+        working-directory: apps/web
+        run: npm test
 
       - name: Audit web dependencies
         working-directory: apps/web

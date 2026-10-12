@@ -23,6 +23,7 @@ class SalesQuoteRecordRepository:
         customer_reply: str | None,
         request_json: dict[str, object],
         result_json: dict[str, object],
+        commit: bool = True,
     ) -> SalesQuoteRecord:
         record = SalesQuoteRecord(
             quote_id=quote_id,
@@ -37,8 +38,11 @@ class SalesQuoteRecordRepository:
             result_json=result_json,
         )
         self.session.add(record)
-        self.session.commit()
-        self.session.refresh(record)
+        if commit:
+            self.session.commit()
+            self.session.refresh(record)
+        else:
+            self.session.flush()
         return record
 
     def list_records(
@@ -49,7 +53,7 @@ class SalesQuoteRecordRepository:
         limit: int = 50,
     ) -> list[SalesQuoteRecord]:
         safe_limit = max(1, min(limit, 200))
-        query = select(SalesQuoteRecord)
+        query = select(SalesQuoteRecord).where(SalesQuoteRecord.scope_kind == "legacy")
         if actor.role == "sales":
             if actor.user_id is not None:
                 query = query.where(SalesQuoteRecord.actor_user_id == actor.user_id)
@@ -66,11 +70,11 @@ class SalesQuoteRecordRepository:
         )
 
     def get_record(self, record_id: int) -> SalesQuoteRecord | None:
-        return self.session.get(SalesQuoteRecord, record_id)
+        return self.session.scalar(select(SalesQuoteRecord).where(SalesQuoteRecord.id == record_id, SalesQuoteRecord.scope_kind == "legacy"))
 
     def get_latest_record_by_quote_id(self, quote_id: str) -> SalesQuoteRecord | None:
         return self.session.scalars(
-            select(SalesQuoteRecord)
+            select(SalesQuoteRecord).where(SalesQuoteRecord.scope_kind == "legacy")
             .where(SalesQuoteRecord.quote_id == quote_id)
             .order_by(SalesQuoteRecord.created_at.desc(), SalesQuoteRecord.id.desc())
             .limit(1)

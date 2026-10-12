@@ -1,3 +1,7 @@
+import json
+import pytest
+from packages.ai_assistant.http_pool import close_model_http_clients
+
 from packages.ai_assistant.model_client import (
     AIMessage,
     AIModelConfig,
@@ -27,6 +31,13 @@ def test_minimax_request_separates_reasoning_and_uses_completion_token_limit(mon
         status_code = 200
         text = ""
 
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def iter_bytes(self):
+            yield json.dumps(self.json()).encode()
+
         @staticmethod
         def json() -> dict[str, object]:
             return {
@@ -40,22 +51,25 @@ def test_minimax_request_separates_reasoning_and_uses_completion_token_limit(mon
             }
 
     class FakeClient:
-        def __init__(self, *, timeout: int):
+        def __init__(self, *, timeout: int, limits):
             captured["timeout"] = timeout
 
         def __enter__(self):
             return self
 
+        def close(self):
+            return None
+
         def __exit__(self, *_args: object) -> None:
             return None
 
-        def post(self, url: str, *, json: dict[str, object], headers: dict[str, str]) -> FakeResponse:
+        def stream(self, method: str, url: str, *, json: dict[str, object], headers: dict[str, str], timeout) -> FakeResponse:
             captured["url"] = url
             captured["payload"] = json
             captured["headers"] = headers
             return FakeResponse()
 
-    monkeypatch.setattr("packages.ai_assistant.model_client.httpx.Client", FakeClient)
+    monkeypatch.setattr("packages.ai_assistant.http_pool.httpx.Client", FakeClient)
     client = OpenAICompatibleClient(
         AIModelConfig(
             provider="minimax",
@@ -75,3 +89,31 @@ def test_minimax_request_separates_reasoning_and_uses_completion_token_limit(mon
     assert payload["reasoning_split"] is True
     assert payload["max_completion_tokens"] == 1200
     assert "max_tokens" not in payload
+
+
+@pytest.fixture(autouse=True)
+def clean_http_pool():
+    close_model_http_clients()
+    yield
+    close_model_http_clients()
+
+
+def test_connections_are_reused_and_credentials_are_isolated(monkeypatch):
+    from packages.ai_assistant.http_pool import model_http_client
+    instances = []
+    class FakeClient:
+        def __init__(self, **kwargs):
+            self.closed = False
+            instances.append(self)
+        def close(self):
+            self.closed = True
+    monkeypatch.setattr("packages.ai_assistant.http_pool.httpx.Client", FakeClient)
+    with model_http_client("https://fixture.invalid/v1", "fixture-a", 30) as first:
+        pass
+    with model_http_client("https://fixture.invalid/v1", "fixture-a", 30) as second:
+        assert first is second
+    with model_http_client("https://fixture.invalid/v1", "fixture-b", 30) as third:
+        assert third is not first
+    assert len(instances) == 2
+    close_model_http_clients()
+    assert all(item.closed for item in instances)

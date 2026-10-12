@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.db.models import HermesLearningCandidate, LearnedQuoteRule, ManualQuoteTask, QuoteAuditLog, SalesQuoteRecord
 from apps.api.db.repositories.hermes_learning_candidate_repository import hermes_candidate_to_dict
-from apps.api.db.repositories.learned_quote_rule_repository import learned_quote_rule_to_dict
+from apps.api.db.repositories.learned_quote_rule_repository import LearnedQuoteRuleRepository, learned_quote_rule_to_dict
 from apps.api.db.repositories.quote_audit_repository import QuoteAuditRepository
 from apps.api.services.quote_logic_explainer import build_zone_quote_logic
 from apps.api.services.manual_task_service import manual_task_to_dict
@@ -58,17 +58,15 @@ def get_quote_error_summary(db: Session, *, limit: int = 20) -> dict[str, object
     ) or 0
 
     pending_tasks = db.scalar(
-        select(func.count(ManualQuoteTask.id)).where(ManualQuoteTask.status == "pending")
+        select(func.count(ManualQuoteTask.id)).where(ManualQuoteTask.scope_kind == "legacy").where(ManualQuoteTask.status == "pending")
     ) or 0
     resolved_tasks = db.scalar(
-        select(func.count(ManualQuoteTask.id)).where(ManualQuoteTask.status == "resolved")
+        select(func.count(ManualQuoteTask.id)).where(ManualQuoteTask.scope_kind == "legacy").where(ManualQuoteTask.status == "resolved")
     ) or 0
     ai_issue_tasks = db.scalar(
-        select(func.count(ManualQuoteTask.id)).where(ManualQuoteTask.quote_id.like("ai_%"))
+        select(func.count(ManualQuoteTask.id)).where(ManualQuoteTask.scope_kind == "legacy").where(ManualQuoteTask.quote_id.like("ai_%"))
     ) or 0
-    active_learning_rules = db.scalar(
-        select(func.count(LearnedQuoteRule.id)).where(LearnedQuoteRule.status == "active")
-    ) or 0
+    active_learning_rules = LearnedQuoteRuleRepository(db).count_active()
     pending_learning_candidates = db.scalar(
         select(func.count(HermesLearningCandidate.id)).where(HermesLearningCandidate.status == "pending_review")
     ) or 0
@@ -95,16 +93,16 @@ def get_quote_error_summary(db: Session, *, limit: int = 20) -> dict[str, object
         )
     ) or 0
     daily_created_tasks = db.scalar(
-        select(func.count(ManualQuoteTask.id)).where(ManualQuoteTask.created_at >= window_started_at)
+        select(func.count(ManualQuoteTask.id)).where(ManualQuoteTask.scope_kind == "legacy").where(ManualQuoteTask.created_at >= window_started_at)
     ) or 0
     daily_pending_tasks = db.scalar(
-        select(func.count(ManualQuoteTask.id)).where(
+        select(func.count(ManualQuoteTask.id)).where(ManualQuoteTask.scope_kind == "legacy").where(
             ManualQuoteTask.created_at >= window_started_at,
             ManualQuoteTask.status == "pending",
         )
     ) or 0
     daily_ai_issue_tasks = db.scalar(
-        select(func.count(ManualQuoteTask.id)).where(
+        select(func.count(ManualQuoteTask.id)).where(ManualQuoteTask.scope_kind == "legacy").where(
             ManualQuoteTask.created_at >= window_started_at,
             ManualQuoteTask.quote_id.like("ai_%"),
         )
@@ -112,7 +110,7 @@ def get_quote_error_summary(db: Session, *, limit: int = 20) -> dict[str, object
 
     recent_tasks = list(
         db.scalars(
-            select(ManualQuoteTask)
+            select(ManualQuoteTask).where(ManualQuoteTask.scope_kind == "legacy")
             .order_by(ManualQuoteTask.created_at.desc(), ManualQuoteTask.id.desc())
             .limit(safe_limit)
         )
@@ -151,7 +149,7 @@ def get_quote_error_summary(db: Session, *, limit: int = 20) -> dict[str, object
         risk_counter.update(task.risk_tags or [])
     daily_risk_counter: Counter[str] = Counter()
     for task in db.scalars(
-        select(ManualQuoteTask)
+        select(ManualQuoteTask).where(ManualQuoteTask.scope_kind == "legacy")
         .where(ManualQuoteTask.created_at >= window_started_at)
         .order_by(ManualQuoteTask.created_at.desc(), ManualQuoteTask.id.desc())
         .limit(200)
@@ -241,7 +239,7 @@ def _latest_sales_records_by_quote_id(db: Session, quote_ids: list[str]) -> dict
     if not unique_quote_ids:
         return {}
     records = db.scalars(
-        select(SalesQuoteRecord)
+        select(SalesQuoteRecord).where(SalesQuoteRecord.scope_kind == "legacy")
         .where(SalesQuoteRecord.quote_id.in_(unique_quote_ids))
         .order_by(SalesQuoteRecord.created_at.desc(), SalesQuoteRecord.id.desc())
     )

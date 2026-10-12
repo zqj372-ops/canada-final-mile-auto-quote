@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from apps.api.auth import AUDIT_READ_ROLES, require_roles
+from apps.api.auth import AUDIT_READ_ROLES, LEARNING_WRITE_ROLES, CurrentActor, require_roles
+from apps.api.services.extraction_feedback_service import FeedbackReviewPayload, review_extraction_feedback
 from apps.api.db.session import get_db
 from apps.api.services.audit_service import (
     get_quote_audit as get_quote_audit_service,
@@ -30,3 +31,9 @@ def get_quote_audit(quote_id: str, db: Session = Depends(get_db)) -> dict[str, o
 @router.get("/error-summary", dependencies=[Depends(require_roles(*AUDIT_READ_ROLES))])
 def get_quote_error_summary(db: Session = Depends(get_db), limit: int = 20) -> dict[str, object]:
     return get_quote_error_summary_service(db, limit=limit)
+
+
+@router.patch("/audit/{quote_id}/extraction-feedback")
+def review_feedback(quote_id: str, payload: FeedbackReviewPayload, db: Session = Depends(get_db),
+                    actor: CurrentActor = Depends(require_roles(*LEARNING_WRITE_ROLES))) -> dict[str, object]:
+    return review_extraction_feedback(db, quote_id, payload, actor)

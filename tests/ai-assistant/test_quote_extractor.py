@@ -825,7 +825,7 @@ def test_extract_quote_draft_accepts_json_wrapped_by_think_text() -> None:
     assert draft.postal_code == "T0B 3L0"
     assert draft.city == "New Norway"
     assert draft.cbm == Decimal("6.275")
-    assert draft.missing_fields == []
+    assert draft.missing_fields == ["requires_appointment", "requires_liftgate", "requires_pallet_jack"]
 
 
 def test_extract_quote_draft_sanitizes_loose_model_json() -> None:
@@ -856,12 +856,12 @@ def test_extract_quote_draft_sanitizes_loose_model_json() -> None:
     draft = extract_quote_draft("ignored", FakeAIClient(content))
 
     assert draft.confidence == 85
-    assert draft.requires_liftgate is False
-    assert draft.requires_pallet_jack is False
-    assert draft.requires_appointment is False
+    assert draft.requires_liftgate is None
+    assert draft.requires_pallet_jack is None
+    assert draft.requires_appointment is None
     assert draft.detention_minutes == 0
     assert draft.piece_count == 1
-    assert draft.missing_fields == []
+    assert draft.missing_fields == ["requires_appointment", "requires_liftgate", "requires_pallet_jack"]
 
 
 def test_extract_quote_draft_ignores_non_blocking_model_missing_fields() -> None:
@@ -891,7 +891,7 @@ def test_extract_quote_draft_ignores_non_blocking_model_missing_fields() -> None
 
     draft = extract_quote_draft("ignored", FakeAIClient(content))
 
-    assert draft.missing_fields == []
+    assert draft.missing_fields == ["requires_appointment", "requires_liftgate", "requires_pallet_jack"]
 
 
 def test_extract_quote_draft_with_agents_merges_cargo_and_address_outputs() -> None:

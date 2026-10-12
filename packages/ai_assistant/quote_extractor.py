@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
+from time import perf_counter
+
+from packages.ai_assistant.extraction_runtime import submit_extraction
 from decimal import Decimal
 import json
 import re
@@ -9,6 +12,7 @@ from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from packages.ai_assistant.service_requirements import SERVICE_FIELDS, explicit_service_requirements
 from packages.ai_assistant.model_client import AIMessage, BaseAIClient
 from packages.ai_assistant.prompts import (
     ADDRESS_EXTRACTION_SYSTEM_PROMPT,
@@ -46,9 +50,9 @@ class AIExtractedQuoteDraft(BaseModel):
     explicit_pallet_count: int | None = Field(default=None, ge=1)
     is_stackable: bool | None = None
     address_type: str | None = None
-    requires_liftgate: bool = False
-    requires_pallet_jack: bool = False
-    requires_appointment: bool = False
+    requires_liftgate: bool | None = None
+    requires_pallet_jack: bool | None = None
+    requires_appointment: bool | None = None
     detention_minutes: int = Field(default=0, ge=0)
     missing_fields: list[str] = Field(default_factory=list)
     confidence: int = Field(default=0, ge=0, le=100)
@@ -94,9 +98,9 @@ class AddressAgentExtraction(BaseModel):
     province: str | None = None
     country: str | None = None
     address_type: str | None = None
-    requires_liftgate: bool = False
-    requires_pallet_jack: bool = False
-    requires_appointment: bool = False
+    requires_liftgate: bool | None = None
+    requires_pallet_jack: bool | None = None
+    requires_appointment: bool | None = None
     detention_minutes: int = Field(default=0, ge=0)
     missing_fields: list[str] = Field(default_factory=list)
     confidence: int = Field(default=0, ge=0, le=100)
@@ -228,34 +232,62 @@ def extract_quote_draft(customer_message: str, client: BaseAIClient) -> AIExtrac
     return draft
 
 
-def extract_quote_draft_with_agents(customer_message: str, client: BaseAIClient) -> AIExtractedQuoteDraft:
+def extract_quote_draft_with_agents(
+    customer_message: str, client: BaseAIClient,
+    *, provenance: dict[str, str] | None = None, deadline: float | None = None,
+) -> AIExtractedQuoteDraft:
     """Extract quote fields with separate cargo and address agents, then validate deterministically."""
 
     errors: list[str] = []
     cargo: CargoAgentExtraction | None = None
     address: AddressAgentExtraction | None = None
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        cargo_future = executor.submit(_extract_cargo_with_agent, customer_message, client)
-        address_future = executor.submit(_extract_address_with_agent, customer_message, client)
-        for label, future in (("cargo", cargo_future), ("address", address_future)):
+    deadline = deadline or getattr(client, "deadline", None) or (perf_counter() + 30)
+    futures = []
+    try:
+        for label, function in (("cargo", _extract_cargo_with_agent), ("address", _extract_address_with_agent)):
+            futures.append((label, submit_extraction(function, customer_message, client)))
+        for label, future in futures:
             try:
+                value = future.result(timeout=max(0, deadline - perf_counter()))
                 if label == "cargo":
-                    cargo = future.result()
+                    cargo = value
                 else:
-                    address = future.result()
+                    address = value
+            except FutureTimeout:
+                errors.append(f"{label}_agent_deadline_exceeded")
             except QuoteExtractionError as exc:
                 errors.append(f"{label}_agent_failed:{exc}")
+    except RuntimeError as exc:
+        errors.append(str(exc))
+    finally:
+        for _, future in futures:
+            future.cancel()
 
     if cargo is None and address is None:
         raise QuoteExtractionError("; ".join(errors) or "Both extraction agents failed.")
 
     draft = _draft_from_agent_outputs(cargo, address)
+    if provenance is not None:
+        for item in (cargo, address):
+            if item is not None:
+                for field in item.model_fields_set:
+                    if getattr(item, field) is not None:
+                        provenance[field] = "ai_extracted"
     fallback = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), customer_message)
+    before = draft.model_dump()
     draft = _merge_agent_draft_with_fallback(draft, fallback)
     draft = _reconcile_with_explicit_facts(draft, fallback, customer_message)
     draft = _validate_cargo_items_and_totals(draft)
+    for field, value in explicit_service_requirements(customer_message).items():
+        setattr(draft, field, value)
     _clear_extracted_address_noise(draft)
+    if provenance is not None:
+        for field, value in draft.model_dump().items():
+            if value is not None and (field not in provenance or value != before.get(field)):
+                provenance[field] = "deterministic_extracted"
+        for field in _parse_confirmed_fields(customer_message):
+            provenance[field] = "customer_original"
     if errors:
         draft.validation_notes.extend(errors)
     draft.missing_fields = sorted(missing_required_fields(draft))
@@ -350,9 +382,9 @@ def _draft_from_agent_outputs(
         explicit_pallet_count=cargo.explicit_pallet_count if cargo else None,
         is_stackable=cargo.is_stackable if cargo else None,
         address_type=address.address_type if address else None,
-        requires_liftgate=address.requires_liftgate if address else False,
-        requires_pallet_jack=address.requires_pallet_jack if address else False,
-        requires_appointment=address.requires_appointment if address else False,
+        requires_liftgate=address.requires_liftgate if address else None,
+        requires_pallet_jack=address.requires_pallet_jack if address else None,
+        requires_appointment=address.requires_appointment if address else None,
         detention_minutes=address.detention_minutes if address else 0,
         missing_fields=sorted({*(cargo.missing_fields if cargo else []), *(address.missing_fields if address else [])}),
         confidence=int(sum(confidences) / len(confidences)) if confidences else 0,
@@ -385,9 +417,12 @@ def _merge_agent_draft_with_fallback(
         if getattr(draft, field) in (None, ""):
             setattr(draft, field, getattr(fallback, field))
 
-    draft.requires_liftgate = draft.requires_liftgate or fallback.requires_liftgate
-    draft.requires_pallet_jack = draft.requires_pallet_jack or fallback.requires_pallet_jack
-    draft.requires_appointment = draft.requires_appointment or fallback.requires_appointment
+    if draft.requires_liftgate is None:
+        draft.requires_liftgate = fallback.requires_liftgate
+    if draft.requires_pallet_jack is None:
+        draft.requires_pallet_jack = fallback.requires_pallet_jack
+    if draft.requires_appointment is None:
+        draft.requires_appointment = fallback.requires_appointment
     draft.detention_minutes = draft.detention_minutes or fallback.detention_minutes
 
     if _has_fully_dimensioned_cargo_items(fallback):
@@ -701,6 +736,8 @@ def apply_deterministic_extraction(draft: AIExtractedQuoteDraft, customer_messag
     if parsed["piece_count"] and draft.confidence < 75:
         draft.confidence = max(draft.confidence, 75)
     _clear_placeholder_fields(draft)
+    for field, value in explicit_service_requirements(customer_message).items():
+        setattr(draft, field, value)
     return _validate_cargo_items_and_totals(draft)
 
 
@@ -729,7 +766,7 @@ def _clear_suspicious_model_piece_count(
 
 def missing_required_fields(draft: AIExtractedQuoteDraft) -> set[str]:
     missing: set[str] = set()
-    for field in REQUIRED_FIELDS:
+    for field in REQUIRED_FIELDS | set(SERVICE_FIELDS):
         value = getattr(draft, field)
         if value is None or value == "":
             missing.add(field)
@@ -760,6 +797,9 @@ def build_follow_up_question(missing_fields: list[str]) -> str:
     if not missing_fields:
         return ""
     labels = {
+        "requires_liftgate": "是否需要尾板",
+        "requires_pallet_jack": "是否需要手叉车",
+        "requires_appointment": "是否需要预约",
         "postal_code": "加拿大邮编",
         "cbm": "总体积 CBM",
         "weight_kg": "总重量 kg",
@@ -793,7 +833,7 @@ def _sanitize_extraction_data(data: dict[str, Any]) -> dict[str, Any]:
     normalized["address_line"] = _strip_extracted_address_noise(data.get("address_line"))
     normalized["city"] = _strip_extracted_address_noise(data.get("city"))
     for field in ["requires_liftgate", "requires_pallet_jack", "requires_appointment"]:
-        normalized[field] = _coerce_bool(normalized.get(field), default=False)
+        normalized[field] = _coerce_optional_bool(normalized.get(field))
     normalized["detention_minutes"] = _coerce_int(normalized.get("detention_minutes"), default=0)
     normalized["piece_count"] = _coerce_optional_int(normalized.get("piece_count"))
     normalized["explicit_pallet_count"] = _coerce_optional_int(normalized.get("explicit_pallet_count"))
@@ -843,9 +883,9 @@ def _sanitize_address_agent_data(data: dict[str, Any]) -> dict[str, Any]:
         "province": _find_province(str(province)) or (str(province).upper() if province and not _is_placeholder_value(str(province)) else None),
         "country": _none_if_placeholder(data.get("country")),
         "address_type": _none_if_placeholder(data.get("address_type")),
-        "requires_liftgate": _coerce_bool(data.get("requires_liftgate"), default=False),
-        "requires_pallet_jack": _coerce_bool(data.get("requires_pallet_jack"), default=False),
-        "requires_appointment": _coerce_bool(data.get("requires_appointment"), default=False),
+        "requires_liftgate": _coerce_optional_bool(data.get("requires_liftgate")),
+        "requires_pallet_jack": _coerce_optional_bool(data.get("requires_pallet_jack")),
+        "requires_appointment": _coerce_optional_bool(data.get("requires_appointment")),
         "detention_minutes": _coerce_int(data.get("detention_minutes"), default=0),
         "missing_fields": _coerce_string_list(data.get("missing_fields")),
         "confidence": _coerce_confidence(data.get("confidence")),

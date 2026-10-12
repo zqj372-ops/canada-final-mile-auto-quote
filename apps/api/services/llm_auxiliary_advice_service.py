@@ -183,8 +183,8 @@ class LLMAuxiliaryAdviceService:
         normalized_city = normalize_city(city)
         normalized_province = normalize_province(province)
         records = self.db.scalars(
-            select(ManualQuoteTask)
-            .where(ManualQuoteTask.status == "resolved", ManualQuoteTask.resolved_price_usd.is_not(None))
+            select(ManualQuoteTask).where(ManualQuoteTask.scope_kind == "legacy")
+            .where(ManualQuoteTask.learning_eligible.is_(True), ManualQuoteTask.status == "resolved", ManualQuoteTask.resolved_price_usd.is_not(None))
             .order_by(ManualQuoteTask.updated_at.desc(), ManualQuoteTask.id.desc())
             .limit(120)
         ).all()

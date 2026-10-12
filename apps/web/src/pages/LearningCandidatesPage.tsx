@@ -6,6 +6,7 @@ import {
   rejectHermesLearningCandidate,
   updateLearnedQuoteRule,
   type HermesLearningCandidate,
+  type HermesCandidateReviewPayload,
 } from "../api/client";
 import RiskTags from "../components/RiskTags";
 
@@ -87,7 +88,7 @@ export default function LearningCandidatesPage({
     }
   }
 
-  async function approveSelected() {
+  async function approveSelected(terms: HermesCandidateReviewPayload) {
     if (!selected) {
       return;
     }
@@ -98,7 +99,8 @@ export default function LearningCandidatesPage({
     setNotice(null);
     try {
       const response = await approveHermesLearningCandidate(candidateId, {
-        review_note: note,
+        ...terms, review_note: note,
+        expected_evidence_version: readText(asRecord(selected.proposal_json), "evidence_version"),
       });
       setSelected(response.candidate);
       setNotice(`候选 #${candidateId} 已批准，生成学习规则 #${response.learned_rule.id}`);
@@ -146,6 +148,7 @@ export default function LearningCandidatesPage({
         note: optionalText(reviewNote) ?? "Disabled from Hermes candidate page.",
       });
       setNotice(`学习规则 #${selected.promoted_rule_id} 已禁用`);
+      await loadCandidates(filter);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "禁用学习规则失败");
     } finally {
@@ -251,9 +254,9 @@ export default function LearningCandidatesPage({
                       <CompactValue label="建议价" value={formatMoney(candidate.resolved_total_price_usd)} />
                     </div>
                     <div className="flex flex-wrap gap-2 text-xs text-slate-500">
-                      <span>scope: {candidate.scope}</span>
-                      <span>support: {candidate.support_count}</span>
-                      <span>confidence: {candidate.confidence}%</span>
+                      <span>{scopeLabel(candidate.scope)}</span>
+                      <span>独立人工单：{candidate.support_count}</span>
+                      <span>{asRecord(candidate.proposal_json).price_conflict ? "价格冲突待核实" : "人工审核"}</span>
                     </div>
                   </button>
                 );
@@ -265,10 +268,11 @@ export default function LearningCandidatesPage({
         <section className="panel p-5">
           {selected ? (
             <CandidateDetails
+              key={`${selected.id}:${readText(asRecord(selected.proposal_json), "evidence_version")}:${selected.status}`}
               candidate={selected}
               busy={busyId === selected.id}
               reviewNote={reviewNote}
-              onApprove={() => void approveSelected()}
+              onApprove={(terms) => void approveSelected(terms)}
               onDisableRule={() => void disablePromotedRule()}
               onReject={() => void rejectSelected()}
               onReviewNoteChange={setReviewNote}
@@ -294,11 +298,21 @@ function CandidateDetails({
   busy: boolean;
   candidate: HermesLearningCandidate;
   reviewNote: string;
-  onApprove: () => void;
+  onApprove: (terms: HermesCandidateReviewPayload) => void;
   onDisableRule: () => void;
   onReject: () => void;
   onReviewNoteChange: (value: string) => void;
 }) {
+  const proposal = asRecord(candidate.proposal_json);
+  const savedTerms = asRecord(proposal.price_terms);
+  const [supplier, setSupplier] = useState(readText(savedTerms, "supplier") || "");
+  const [sourceReference, setSourceReference] = useState(readText(savedTerms, "source_reference") || "");
+  const [validUntil, setValidUntil] = useState("");
+  const hasConflict = proposal.price_conflict === true;
+  const termsReadOnly = busy || candidate.status !== "pending_review";
+  const canPublish = candidate.status === "pending_review" && candidate.scope === "exact_address"
+    && candidate.support_count > 0 && !hasConflict && supplier.trim() && sourceReference.trim()
+    && validUntil && new Date(validUntil).getTime() > Date.now();
   return (
     <div className="grid gap-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -312,13 +326,13 @@ function CandidateDetails({
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="建议合计" value={formatMoney(candidate.resolved_total_price_usd)} />
-        <Metric label="基础价" value={formatMoney(candidate.resolved_base_price_usd)} />
+        <Metric label="人工一口价" value={formatMoney(candidate.resolved_total_price_usd)} />
+        <Metric label="基础运费（未拆分）" value={formatMoney(candidate.resolved_base_price_usd)} />
         <Metric label="计费托数" value={`${candidate.billing_pallets} 托`} />
-        <Metric label="证据次数" value={`${candidate.support_count} 次`} />
+        <Metric label="独立人工单" value={`${candidate.support_count} 单`} />
         <Metric label="始发仓" value={candidate.origin || "-"} />
         <Metric label="Zone" value={candidate.zone === null ? "-" : String(candidate.zone)} />
-        <Metric label="置信度" value={`${candidate.confidence}%`} />
+        <Metric label="价格核对" value={hasConflict ? "金额冲突" : candidate.status === "approved" ? "人工已审核" : "待按来源核实"} />
         <Metric label="发布规则" value={candidate.promoted_rule_id ? `#${candidate.promoted_rule_id}` : "未发布"} />
       </div>
 
@@ -329,13 +343,21 @@ function CandidateDetails({
         </div>
       </div>
 
+      {hasConflict && <p role="alert" className="rounded-md bg-amber-50 p-3 text-amber-950">独立人工单的金额不一致，已暂停自动复用。请核实并更正原人工单后重新审核。</p>}
+      {candidate.scope !== "exact_address" && <p role="alert" className="rounded-md bg-amber-50 p-3 text-amber-950">此记录缺少完整地址或属于旧版宽范围规则。保留作参考；请从核实后的人工单生成新候选。</p>}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label><span className="field-label">供应商 / 承运人</span><input className="field-input" value={supplier} disabled={termsReadOnly} onChange={(event) => setSupplier(event.target.value)} maxLength={200} /></label>
+        <label><span className="field-label">价格来源（报价号或确认记录）</span><input className="field-input" value={sourceReference} disabled={termsReadOnly} onChange={(event) => setSourceReference(event.target.value)} maxLength={1000} /></label>
+        <label><span className="field-label">有效期至（本地时间）</span><input type="datetime-local" className="field-input" value={validUntil} disabled={termsReadOnly} onChange={(event) => setValidUntil(event.target.value)} /></label>
+        <div className="text-sm text-slate-600">批准后即刻生效，仅复用 USD 一口价，运费及附加费未拆分。{savedTerms.valid_until ? ` 已发布有效期至：${new Date(String(savedTerms.valid_until)).toLocaleString()}` : ""}</div>
+      </div>
       <label>
         <span className="field-label">审核备注</span>
         <textarea
           className="field-input min-h-24"
           value={reviewNote}
           onChange={(event) => onReviewNoteChange(event.target.value)}
-          placeholder="写明为什么批准或拒绝，例如：已和供应商确认 S7K/Saskatoon/3托按 Calgary Zone 5 处理。"
+          placeholder="记录人工核实结果及适用条件。"
         />
       </label>
 
@@ -343,15 +365,15 @@ function CandidateDetails({
         <button
           className="btn-primary"
           type="button"
-          disabled={busy || candidate.status === "approved"}
-          onClick={onApprove}
+          disabled={busy || !canPublish}
+          onClick={() => onApprove({ supplier: supplier.trim(), source_reference: sourceReference.trim(), valid_until: new Date(validUntil).toISOString() })}
         >
           {busy ? "处理中..." : "批准并发布"}
         </button>
         <button
           className="btn-secondary bg-white text-slate-700"
           type="button"
-          disabled={busy || candidate.status === "rejected"}
+          disabled={busy || candidate.status !== "pending_review"}
           onClick={onReject}
         >
           拒绝候选
@@ -367,11 +389,20 @@ function CandidateDetails({
       </div>
 
       <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-950">
-        Hermes 的顺序是先给建议，再由人工审核确认。批准后的学习规则只会在 Zone/价格表未命中时复用，不会覆盖正常 Zone Matrix 报价。
+        Hermes 的顺序是先给建议，再由人工审核确认。批准后的学习规则只在原报价需人工处理，且地址、货物、服务完全一致、价格仍有效时复用。正常矩阵价始终优先。
       </div>
 
       <LearningProposalCard candidate={candidate} />
       <LearningEvidenceCard candidate={candidate} />
+      <section className="overflow-auto rounded-md border border-slate-200 p-3">
+        <p className="field-label">独立人工单与金额</p>
+        <table className="mt-2 w-full text-left text-sm"><thead><tr><th>人工单</th><th>金额 USD</th><th>状态</th><th>确认备注</th></tr></thead>
+          <tbody>{(Array.isArray(asRecord(candidate.evidence_json).cases) ? asRecord(candidate.evidence_json).cases as unknown[] : []).map((item) => {
+            const evidence = asRecord(item);
+            return <tr key={String(evidence.task_id)}><td>#{String(evidence.task_id)}</td><td>{String(evidence.resolved_price_usd)}</td><td>{evidence.status === "resolved" ? "已确认" : "未生效"}</td><td>{String(evidence.resolved_note || "—")}</td></tr>;
+          })}</tbody>
+        </table>
+      </section>
       <RawDebugDetails proposal={candidate.proposal_json} evidence={candidate.evidence_json} />
     </div>
   );
@@ -426,9 +457,9 @@ function LearningProposalCard({ candidate }: { candidate: HermesLearningCandidat
         <InfoTile label="始发仓" value={candidate.origin || "待人工指定"} />
         <InfoTile label="Zone" value={candidate.zone === null ? "待人工指定" : String(candidate.zone)} />
         <InfoTile label="计费托数" value={`${candidate.billing_pallets} 托`} />
-        <InfoTile label="建议合计" value={formatMoney(totalPrice)} strong />
-        <InfoTile label="基础价" value={formatMoney(basePrice)} />
-        <InfoTile label="证据次数" value={`${candidate.support_count} 次`} />
+        <InfoTile label="人工一口价" value={formatMoney(totalPrice)} strong />
+        <InfoTile label="基础运费（未拆分）" value={formatMoney(basePrice)} />
+        <InfoTile label="独立人工单" value={`${candidate.support_count} 单`} />
       </div>
     </section>
   );
@@ -541,7 +572,9 @@ function readText(source: Record<string, unknown>, key: string): string | null {
 
 function scopeLabel(value: string | null): string {
   const labels: Record<string, string> = {
-    postal_code: "精确邮编规则",
+    exact_address: "同一地址、货物及服务",
+    manual_only: "信息不全，仅供参考",
+    postal_code: "旧版精确邮编规则",
     postal_prefix: "FSA 邮编前缀规则",
     postal_prefix_city: "FSA + 城市规则",
     city_province: "城市 + 省份规则",

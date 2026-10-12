@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+import json
 from time import perf_counter
 from typing import Any, Protocol
 
-import httpx
+from packages.ai_assistant.http_pool import model_http_client
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -38,8 +39,9 @@ class BaseAIClient(Protocol):
 
 
 class OpenAICompatibleClient:
-    def __init__(self, config: AIModelConfig):
+    def __init__(self, config: AIModelConfig, *, deadline: float | None = None):
         self.config = config
+        self.deadline = deadline
 
     def complete(self, messages: list[AIMessage]) -> AIResponse:
         if not self.config.base_url:
@@ -68,15 +70,27 @@ class OpenAICompatibleClient:
 
         started = perf_counter()
         try:
-            with httpx.Client(timeout=self.config.timeout_seconds) as client:
-                response = client.post(url, json=payload, headers=headers)
-            latency_ms = int((perf_counter() - started) * 1000)
-            if response.status_code >= 400:
-                return AIResponse(
-                    error=f"AI provider returned HTTP {response.status_code}: {_safe_error_body(response.text)}",
-                    latency_ms=latency_ms,
-                )
-            data = response.json()
+            deadline = self.deadline or (started + self.config.timeout_seconds)
+            remaining = deadline - perf_counter()
+            if remaining <= 0:
+                return AIResponse(error="extraction_deadline_exceeded", latency_ms=0)
+            with model_http_client(self.config.base_url, self.config.api_key, self.config.timeout_seconds) as client:
+                with client.stream("POST", url, json=payload, headers=headers,
+                                   timeout=min(self.config.timeout_seconds, remaining)) as response:
+                    body = bytearray()
+                    for chunk in response.iter_bytes():
+                        if perf_counter() >= deadline:
+                            raise TimeoutError("extraction_deadline_exceeded")
+                        body.extend(chunk)
+                        if len(body) > 2 * 1024 * 1024:
+                            raise ValueError("Model response exceeds 2 MiB")
+                    latency_ms = int((perf_counter() - started) * 1000)
+                    if response.status_code >= 400:
+                        return AIResponse(
+                            error=f"AI provider returned HTTP {response.status_code}: {_safe_error_body(body.decode('utf-8', errors='replace'))}",
+                            latency_ms=latency_ms,
+                        )
+                    data = json.loads(body)
             content = _extract_openai_content(data)
             return AIResponse(content=content, raw=data, latency_ms=latency_ms)
         except Exception as exc:

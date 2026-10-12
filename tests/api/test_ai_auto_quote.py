@@ -92,6 +92,8 @@ def complete_extraction() -> AIExtractedQuoteDraft:
         longest_side_cm=Decimal("100"),
         address_type="commercial",
         requires_appointment=True,
+        requires_liftgate=False,
+        requires_pallet_jack=False,
         missing_fields=[],
         confidence=95,
     )
@@ -262,7 +264,7 @@ def test_ai_provider_failure_uses_complete_deterministic_fallback(monkeypatch: p
                 "常规纸箱尺寸 10箱 4.2cbm 850kg\n"
                 "packaging_type=carton\n"
                 "address_type=commercial\n"
-                "requires_appointment=true\n"
+                "requires_appointment=true\nrequires_liftgate=false\nrequires_pallet_jack=false\n"
             )
         },
     )
@@ -315,6 +317,7 @@ def test_ai_auto_quote_blocks_cross_origin_zone_matrix(monkeypatch: pytest.Monke
             piece_count=10,
             packaging_type="carton",
             address_type="commercial",
+            requires_liftgate=False, requires_pallet_jack=False, requires_appointment=False,
             missing_fields=[],
             confidence=95,
         ),
@@ -367,6 +370,7 @@ def test_ai_optional_missing_fields_still_calls_zone_quote_engine(monkeypatch: p
             explicit_pallet_count=None,
             is_stackable=None,
             address_type="commercial",
+            requires_liftgate=False, requires_pallet_jack=False, requires_appointment=False,
             missing_fields=["longest_side_cm", "explicit_pallet_count", "is_stackable"],
             confidence=86,
         )
@@ -424,6 +428,7 @@ def test_ai_aggregate_manual_required_still_returns_billing_pallet_estimate(monk
             explicit_pallet_count=None,
             is_stackable=None,
             address_type="commercial",
+            requires_liftgate=False, requires_pallet_jack=False, requires_appointment=False,
             missing_fields=["longest_side_cm", "explicit_pallet_count", "is_stackable"],
             confidence=86,
         ),

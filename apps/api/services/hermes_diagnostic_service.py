@@ -7,16 +7,17 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import Session
 
-from apps.api.db.models import ManualQuoteTask
+from apps.api.db.models import ManualQuoteTask, HermesDiagnosticQueue
 from apps.api.db.repositories.ai_model_config_repository import AIModelConfigRepository
 from apps.api.db.repositories.hermes_diagnostic_repository import (
     HermesDiagnosticRepository,
@@ -61,6 +62,7 @@ def enqueue_quote_diagnostic(
     raw_input: str | None = None,
     extraction: dict[str, object] | None = None,
     source: str = "zone_quote",
+    commit: bool = True,
 ) -> dict[str, object] | None:
     try:
         package = build_quote_diagnostic_package(
@@ -69,16 +71,18 @@ def enqueue_quote_diagnostic(
             result,
             raw_input=raw_input,
             extraction=extraction,
-            source=source,
+            source=source, include_context=False,
         )
         record = HermesDiagnosticRepository(db).create(
             quote_id=result.quote_id,
             quote_status="manual_required" if result.manual_review_required else "quoted",
             source_type=result.source_type.value if hasattr(result.source_type, "value") else str(result.source_type),
-            diagnostic_package_json=package,
+            diagnostic_package_json=package, commit=commit,
         )
         return hermes_diagnostic_to_dict(record)
     except Exception:
+        if not commit:
+            raise
         logger.exception("Failed to enqueue Hermes diagnostic package.", extra={"quote_id": result.quote_id})
         db.rollback()
         return None
@@ -92,6 +96,7 @@ def build_quote_diagnostic_package(
     raw_input: str | None = None,
     extraction: dict[str, object] | None = None,
     source: str = "zone_quote",
+    include_context: bool = True,
 ) -> dict[str, object]:
     repository = ZoneRepository(db)
     postal_prefix = result.postal_prefix or extract_fsa(request.postal_code)
@@ -100,7 +105,9 @@ def build_quote_diagnostic_package(
     expected_origin = ORIGIN_BY_PROVINCE.get(normalize_province(province) or "")
 
     return {
-        "schema_version": "2026-07-08.hermes-diagnostic.v1",
+        "schema_version": "2026-10-12.hermes-diagnostic.v2",
+        "context_status": "ready" if include_context else "pending",
+        "context_collected_at": datetime.now(timezone.utc).isoformat() if include_context else None,
         "source": source,
         "quote_id": result.quote_id,
         "quote_status": "manual_required" if result.manual_review_required else "quoted",
@@ -125,28 +132,33 @@ def build_quote_diagnostic_package(
             "zone": result.zone,
             "match_trace": result.match_trace,
         },
-        "price_matrix": _price_matrix_context(repository, result),
+        "price_matrix": _price_matrix_context(repository, result) if include_context else {
+            "requested_origin": result.origin, "requested_zone": result.zone,
+            "requested_billing_pallets": result.billing_pallets,
+            "exact_price_found": None, "base_price_usd": _decimal_string(result.base_price_usd),
+            "fuel_usd": _decimal_string(result.fuel_usd), "total_price_usd": _decimal_string(result.total_price_usd),
+        },
         "failure": {
             "manual_review_required": result.manual_review_required,
             "reason": result.matched_rule if result.manual_review_required else None,
             "risk_tags": result.risk_tags,
             "internal_note": result.internal_note,
         },
-        "neighboring_fsa": _neighboring_fsa_context(repository, postal_prefix, province, result.billing_pallets),
+        "neighboring_fsa": _neighboring_fsa_context(repository, postal_prefix, province, result.billing_pallets) if include_context else [],
         "historical_manual_confirmations": _historical_manual_confirmations(
             db,
             city=city,
             province=province,
             postal_prefix=postal_prefix,
             billing_pallets=result.billing_pallets,
-        ),
+        ) if include_context else [],
         "private_reference_context": _private_reference_context(
             postal_code=request.postal_code,
             city=city,
             province=province,
             cbm=request.cbm,
             weight_kg=request.weight_kg,
-        ),
+        ) if include_context else {"available": False, "reason": "context pending"},
         "agent_contract": {
             "role": "Hermes Agent only diagnoses and suggests. It cannot execute a correction or change any price.",
             "execution_mode": "advisory_only",
@@ -165,6 +177,36 @@ def build_quote_diagnostic_package(
             "learning_rule_policy": "Only a resolved manual task can create a learning candidate; approval is required before reuse.",
         },
     }
+
+
+
+def prepare_hermes_context(db: Session, diagnostic_id: int | None = None) -> dict[str, object] | None:
+    statement = select(HermesDiagnosticQueue)
+    if diagnostic_id is None:
+        statement = statement.where(HermesDiagnosticQueue.diagnostic_package_json["context_status"].as_string() == "pending")
+    else:
+        statement = statement.where(HermesDiagnosticQueue.id == diagnostic_id)
+    record = db.scalar(statement.order_by(HermesDiagnosticQueue.id).limit(1).with_for_update(skip_locked=True))
+    if record is None:
+        return None
+    snapshot = dict(record.diagnostic_package_json)
+    if snapshot.get("context_status") not in {"pending", "failed"}:
+        db.rollback()
+        return hermes_diagnostic_to_dict(record)
+    try:
+        record.diagnostic_package_json = build_quote_diagnostic_package(
+            db, ZoneQuoteRequest.model_validate(snapshot["quote_request"]),
+            ZoneQuoteResult.model_validate(snapshot["quote_result"]),
+            raw_input=snapshot.get("raw_input"), extraction=snapshot.get("parsed_result"),
+            source=str(snapshot.get("source", "zone_quote")),
+        )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Diagnostic context preparation failed", extra={"diagnostic_id": record.id})
+        record.diagnostic_package_json = {**snapshot, "context_status": "failed", "context_error": type(exc).__name__}
+        db.commit()
+    return hermes_diagnostic_to_dict(record)
 
 
 def list_hermes_diagnostics(
@@ -210,6 +252,11 @@ def run_hermes_diagnostic(
     if diagnostic is None:
         raise HTTPException(status_code=404, detail="Hermes diagnostic package not found.")
 
+    if diagnostic.diagnostic_package_json.get("context_status") in {"pending", "failed"}:
+        prepare_hermes_context(db, diagnostic_id)
+        db.refresh(diagnostic)
+        if diagnostic.diagnostic_package_json.get("context_status") != "ready":
+            raise HTTPException(status_code=503, detail="诊断资料暂未准备完成，请重试。")
     config_repository = AIModelConfigRepository(db)
     config_record = config_repository.get_agent_config("hermes")
     if config_record is None:
@@ -500,8 +547,10 @@ def _neighboring_fsa_context(
     if not postal_prefix or not province:
         return []
     rows = []
-    for rule in repository.list_postal_family_zone_rules(postal_prefix, province)[:40]:
-        price = repository.get_zone_price(rule.origin, rule.zone, billing_pallets) if billing_pallets else None
+    rules = repository.list_postal_family_zone_rules(postal_prefix, province, limit=18)
+    prices = repository.get_zone_prices([(rule.origin, rule.zone, billing_pallets) for rule in rules]) if billing_pallets else {}
+    for rule in rules:
+        price = prices.get((rule.origin, rule.zone, billing_pallets))
         rows.append(
             {
                 "postal_prefix": rule.postal_prefix,
@@ -529,9 +578,15 @@ def _historical_manual_confirmations(
     normalized_city = normalize_city(city)
     normalized_province = normalize_province(province)
     prefix = (postal_prefix or "").upper()[:3]
+    task_city = func.upper(func.coalesce(ManualQuoteTask.result_json["city"].as_string(), ManualQuoteTask.request_json["city"].as_string()))
+    task_province = func.upper(func.coalesce(ManualQuoteTask.result_json["province"].as_string(), ManualQuoteTask.request_json["province"].as_string()))
+    task_prefix = func.upper(func.coalesce(ManualQuoteTask.result_json["postal_prefix"].as_string(), ManualQuoteTask.request_json["postal_code"].as_string()))
+    relevant = or_(task_city == normalized_city if normalized_city else False,
+                   task_prefix.like(prefix[:2] + "%") if prefix else False)
     records = db.scalars(
-        select(ManualQuoteTask)
-        .where(ManualQuoteTask.status == "resolved", ManualQuoteTask.resolved_price_usd.is_not(None))
+        select(ManualQuoteTask).where(ManualQuoteTask.scope_kind == "legacy")
+        .where(ManualQuoteTask.learning_eligible.is_(True), ManualQuoteTask.status == "resolved", ManualQuoteTask.resolved_price_usd.is_not(None),
+               task_province == normalized_province, relevant)
         .order_by(ManualQuoteTask.updated_at.desc(), ManualQuoteTask.id.desc())
         .limit(160)
     ).all()
