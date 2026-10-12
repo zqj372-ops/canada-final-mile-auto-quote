@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { calculateConfirmedQuote, extractQuote, type QuoteWorkbenchConfig } from "../../api/client";
 import DraftForm from "./DraftForm";
 import QuoteResult from "./QuoteResult";
+import ParsedCargoTable from "../ParsedCargoTable";
 import { initialState, normalizeQuoteSnapshot, toQuote, validateDraft, workbenchReducer } from "./state";
 import "./workbench.css";
 
@@ -86,6 +87,7 @@ export default function QuoteWorkbench({ config, onSaved }: { config: QuoteWorkb
           <p>{state.extraction.extraction_mode === "local" ? "本次无需调用模型，请核对右侧字段。" : "请核对识别结果，空缺字段可直接补充。"}</p>
           {state.extraction.extraction.validation_notes.some((n) => /mismatch|replaced/.test(n)) && <p className="qw-warning">原文汇总与尺寸计算存在差异，请重点核对体积、重量与件数。</p>}
         </div>}
+        {state.extraction && <ParsedCargoTable extraction={state.extraction.extraction} draft={state.draft} />}
         {!state.draft && <details className="qw-options"><summary>解析选项</summary><label><input type="checkbox" checked={forceAI} onChange={(e) => setForceAI(e.target.checked)} disabled={busy} /> 始终使用后台配置的模型</label></details>}
         <footer>解析后可修改字段，再确认报价。</footer>
       </section>

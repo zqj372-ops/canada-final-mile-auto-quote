@@ -10,7 +10,7 @@ export const emptyDraft: Draft = {
   requires_liftgate: null, requires_pallet_jack: null, requires_appointment: null, detention_minutes: "0",
 };
 export const labels: Record<QuoteField, string> = {
-  address_line: "街道地址", postal_code: "邮编", city: "城市", province: "省份", cbm: "总体积 (CBM)", weight_kg: "总重 (kg)",
+  address_line: "街道地址", postal_code: "邮编", city: "城市", province: "省份", cbm: "总体积 (CBM)", weight_kg: "总毛重 (kg)",
   piece_count: "件数", packaging_type: "包装类型", longest_side_cm: "最长边 (cm)", explicit_pallet_count: "客户明确托数",
   is_stackable: "可堆叠", address_type: "地址类型", requires_liftgate: "尾板", requires_pallet_jack: "手叉车",
   requires_appointment: "预约", detention_minutes: "等待时间 (分钟)",
