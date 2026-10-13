@@ -91,7 +91,6 @@ export default function QuoteCalculationPanel({
         <Metric label="Zone" value={result?.zone !== null && result?.zone !== undefined ? String(result.zone) : "待匹配"} />
         <Metric label="计费托数" value={result?.billing_pallets ? `${result.billing_pallets} 托` : "待计算"} />
         <Metric label="托数拆解" value={formatPalletBreakdown(result?.pallet_breakdown)} />
-        <Metric label="基础派送费" value={formatMoney(result?.base_price_usd, currency)} />
         <Metric label="风险缓冲" value="未配置" />
       </div>
 

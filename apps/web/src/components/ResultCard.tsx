@@ -103,8 +103,6 @@ export default function ResultCard({ result }: ResultCardProps) {
                     : formatMoney(result.total_price_usd)
                 }
               />
-              <Metric label="base_price_usd" value={formatMoney(result.base_price_usd)} />
-              <Metric label="fuel_usd" value={formatMoney(result.fuel_usd)} />
               <Metric
                 label="billing_pallets"
                 value={formatNullable(result.billing_pallets)}

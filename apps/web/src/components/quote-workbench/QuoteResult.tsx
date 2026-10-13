@@ -14,9 +14,7 @@ export default function QuoteResult({ state, config, ruralConfirmed, onConfirmRu
   const quotedCargo: ZoneQuoteRequest | null = state.snapshot ? JSON.parse(state.snapshot) : null;
   const logicValue = result?.match_trace.quote_logic;
   const logic = logicValue && typeof logicValue === "object" && !Array.isArray(logicValue) ? logicValue : null;
-  const priceFormula = typeof logic?.price_formula === "string"
-    ? Object.entries(config.accessorial_labels).reduce((formula, [key, label]) => formula.split(key).join(label), logic.price_formula)
-    : null;
+  const matchingTrace = Object.fromEntries(Object.entries(result?.match_trace || {}).filter(([key]) => key !== "quote_logic"));
   const canUse = canUseQuote(state, ruralConfirmed);
   const rural = result && (result.risk_tags.includes("rural_fsa_secondary_confirmation") || (result.postal_code || "")[1] === "0");
   const currency = "USD"; // ZoneQuoteResult monetary fields are explicitly denominated in USD.
@@ -39,11 +37,11 @@ export default function QuoteResult({ state, config, ruralConfirmed, onConfirmRu
         {busy && <p className="qw-warning">正在重新计算，暂不可复制或导出。</p>}
         <div className="qw-total"><span>{result.manual_review_required ? "需要人工复核" : "报价合计"}</span>
           <strong>{result.manual_review_required ? "待人工确认" : money(result.total_price_usd)}</strong>
-          {!result.manual_review_required && <small>{result.source_type === "learned_manual_quote" ? "USD · 人工审核整口价" : "USD · 已含下列费用"}</small>}
+          {!result.manual_review_required && <small>{result.source_type === "learned_manual_quote" ? "USD · 人工审核整口价" : "USD"}</small>}
         </div>
         {result.manual_review_required ? <p className="qw-warning">{result.internal_note || result.matched_rule}<br />人工任务 #{state.response?.manual_task_id} 已保存。</p>
-          : result.source_type === "learned_manual_quote" ? <p className="qw-note">基础运费、燃油及附加费未拆分。仅适用于审核时确认的地址、货物、服务及有效期。</p>
-          : <dl className="qw-fees"><div><dt>基础派送费</dt><dd>{money(result.base_price_usd)}</dd></div><div><dt>燃油附加费</dt><dd>{money(result.fuel_usd)}</dd></div>
+          : result.source_type === "learned_manual_quote" ? <p className="qw-note">仅适用于审核时确认的地址、货物、服务及有效期。</p>
+          : Object.keys(result.accessorials).length > 0 && <dl className="qw-fees">
             {Object.entries(result.accessorials).map(([key, value]) => <div key={key}><dt>{config.accessorial_labels[key] || key}</dt><dd>{money(value)}</dd></div>)}
           </dl>}
         <dl className="qw-match"><div><dt>始发仓</dt><dd>{result.origin || "未匹配"}</dd></div><div><dt>分区</dt><dd>{result.zone == null ? "未匹配" : `Zone ${result.zone}`}</dd></div><div><dt>价格来源</dt><dd>{result.source_type === "zone_matrix" ? "Zone 价格矩阵" : result.source_type === "learned_manual_quote" ? "已审核人工价格" : "人工复核"}</dd></div></dl>
@@ -55,12 +53,11 @@ export default function QuoteResult({ state, config, ruralConfirmed, onConfirmRu
             {Object.entries(result.pallet_breakdown).map(([key, value]) => <div key={key}><dt>{palletLabels[key] || key}</dt><dd>{value} 托</dd></div>)}
           </dl> : <p className="qw-note">计费条件不足，暂未返回托数明细。</p>}
           <p className="qw-billing-total">最终计费托数 <strong>{result.billing_pallets == null ? "待确认" : `${result.billing_pallets} 托`}</strong></p>
-          {priceFormula && <p className="qw-price-formula">{priceFormula}</p>}
         </section>
         {rural && <label className="qw-rural"><input type="checkbox" checked={ruralConfirmed} disabled={state.phase !== "quoted"} onChange={(e) => onConfirmRural(e.target.checked)} /><span>乡村地址二次确认：已核对完整地址、城市、卡车准入及可能的偏远附加费。</span></label>}
         {result.risk_tags.length > 0 && <details className="qw-details"><summary>风险提示（{result.risk_tags.length}）</summary><ul>{result.risk_tags.map((tag) => <li key={tag}>{config.backend_risk_tag_labels[tag] || tag}</li>)}</ul></details>}
         <div className="qw-result-actions"><QuoteCopyButton key={result.quote_id} text={result.sales_note || ""} disabled={!canUse || !result.sales_note} /><button className="qw-secondary" onClick={exportQuote} disabled={!canUse || !result.sales_note}>导出报价</button></div>
-        <details className="qw-details"><summary>匹配依据与报价编号</summary><p>{result.quote_id}</p><p>{result.matched_rule}</p><pre>{JSON.stringify(result.match_trace, null, 2)}</pre></details>
+        <details className="qw-details"><summary>匹配依据与报价编号</summary><p>{result.quote_id}</p><p>{result.matched_rule}</p><pre>{JSON.stringify(matchingTrace, null, 2)}</pre></details>
         {state.response?.superseded_quote_id && <p className="qw-note">已替代原人工任务，历史记录保留。</p>}
         {state.response && !state.response.diagnostic_queued && <p className="qw-warning">报价已保存，诊断队列写入失败。</p>}
       </div>}

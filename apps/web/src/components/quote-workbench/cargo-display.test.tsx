@@ -80,6 +80,13 @@ describe("cargo calculation display", () => {
     expect(html).toContain("体积折托");
     expect(html).toContain("重量折托");
     expect(html).toContain("最终计费托数");
-    expect(html).toContain("基础价 USD 120.00 + 燃油 USD 42.00 + 尾板费 USD 50.00 = 合计 USD 212.00");
+    expect(html).toContain("212.00");
+    expect(html).toContain("尾板费");
+    expect(html).toContain("50.00");
+    expect(html).not.toContain("基础派送费");
+    expect(html).not.toContain("燃油");
+    expect(html).not.toContain("120.00");
+    expect(html).not.toContain("42.00");
+    expect(html).not.toContain("price_formula");
   });
 });
