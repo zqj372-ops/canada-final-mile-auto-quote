@@ -33,6 +33,7 @@ from packages.ai_assistant.extraction_runtime import ObservedAIClient, submit_ex
 from packages.ai_assistant.prompts import FIELD_EXTRACTION_SYSTEM_PROMPT, CARGO_EXTRACTION_SYSTEM_PROMPT, ADDRESS_EXTRACTION_SYSTEM_PROMPT
 from packages.ai_assistant.fast_extractor import try_extract_locally
 from packages.ai_assistant.model_client import OpenAICompatibleClient, config_from_record
+from packages.ai_assistant.service_requirements import SERVICE_FIELDS, mentioned_service_fields
 from packages.ai_assistant.quote_extractor import (
     AIExtractedQuoteDraft, ALLOWED_PACKAGING_TYPES, QuoteExtractionError,
     apply_deterministic_extraction, extract_quote_draft, extract_quote_draft_with_agents, missing_required_fields,
@@ -47,7 +48,7 @@ QuoteField = Literal[
     "packaging_type", "longest_side_cm", "address_type", "requires_liftgate",
     "requires_pallet_jack", "requires_appointment", "explicit_pallet_count", "is_stackable", "detention_minutes",
 ]
-FieldSource = Literal["customer_original", "ai_extracted", "deterministic_extracted", "human_edited"]
+FieldSource = Literal["customer_original", "ai_extracted", "deterministic_extracted", "default_value", "human_edited"]
 
 
 class AIExtractRequest(BaseModel):
@@ -173,6 +174,13 @@ def extract_for_workbench(db: Session, payload: AIExtractRequest, actor: Current
             extraction = apply_deterministic_extraction(AIExtractedQuoteDraft(), payload.customer_message)
             extraction.validation_notes.append("model_unavailable_review_fields")
             mode = "fallback"
+    # Workbench policy: omitted services are not needed. Explicit uncertainty
+    # or conflicting instructions still require confirmation.
+    mentioned_services = mentioned_service_fields(payload.customer_message)
+    for field in SERVICE_FIELDS:
+        if field not in mentioned_services:
+            setattr(extraction, field, False)
+            sources[field] = "default_value"
     provenance = {
         key: sources.get(key, "deterministic_extracted")
         for key in ZoneQuoteRequest.model_fields if getattr(extraction, key) is not None
@@ -182,7 +190,7 @@ def extract_for_workbench(db: Session, payload: AIExtractRequest, actor: Current
     search = (build_quote_search_context(db, extraction, search_config_id=payload.search_config_id)
               if payload.enable_search_context else None)
     duration_ms = round((perf_counter() - started) * 1000)
-    metadata = {"parser_version": "2026-10-12.2", "strategy": "local" if mode == "local" else payload.strategy,
+    metadata = {"parser_version": "2026-10-13.1", "strategy": "local" if mode == "local" else payload.strategy,
                 "schema_hash": digest(AIExtractedQuoteDraft.model_json_schema()),
                 "prompt_hash": digest([FIELD_EXTRACTION_SYSTEM_PROMPT, CARGO_EXTRACTION_SYSTEM_PROMPT, ADDRESS_EXTRACTION_SYSTEM_PROMPT]),
                 "model": model_metadata, "duration_ms": duration_ms, "budget_seconds": payload.budget_seconds,

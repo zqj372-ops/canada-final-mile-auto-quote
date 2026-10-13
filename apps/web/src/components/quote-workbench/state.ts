@@ -7,7 +7,7 @@ export type Draft = Record<Exclude<QuoteField, "requires_liftgate" | "requires_p
 export const emptyDraft: Draft = {
   address_line: "", postal_code: "", city: "", province: "", cbm: "", weight_kg: "", piece_count: "",
   packaging_type: "", longest_side_cm: "", explicit_pallet_count: "", is_stackable: "", address_type: "",
-  requires_liftgate: null, requires_pallet_jack: null, requires_appointment: null, detention_minutes: "0",
+  requires_liftgate: false, requires_pallet_jack: false, requires_appointment: false, detention_minutes: "0",
 };
 export const labels: Record<QuoteField, string> = {
   address_line: "街道地址", postal_code: "邮编", city: "城市", province: "省份", cbm: "总体积 (CBM)", weight_kg: "总毛重 (kg)",
@@ -15,7 +15,7 @@ export const labels: Record<QuoteField, string> = {
   is_stackable: "可堆叠", address_type: "地址类型", requires_liftgate: "尾板", requires_pallet_jack: "手叉车",
   requires_appointment: "预约", detention_minutes: "等待时间 (分钟)",
 };
-export const sourceLabels = { customer_original: "客户原文", ai_extracted: "AI 提取", deterministic_extracted: "规则解析", human_edited: "人工修改" };
+export const sourceLabels = { customer_original: "客户原文", ai_extracted: "AI 提取", deterministic_extracted: "规则解析", default_value: "默认值", human_edited: "人工修改" };
 export const serviceFields: QuoteField[] = ["requires_liftgate", "requires_pallet_jack", "requires_appointment"];
 const numbers: QuoteField[] = ["cbm", "weight_kg", "piece_count", "longest_side_cm", "explicit_pallet_count", "detention_minutes"];
 const integers: QuoteField[] = ["piece_count", "explicit_pallet_count", "detention_minutes"];

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AIExtractResponse, ConfirmedCalculateResponse } from "../../api/client";
-import { canUseQuote, initialState, normalizeQuoteSnapshot, validateDraft, workbenchReducer } from "./state";
+import { canUseQuote, emptyDraft, initialState, normalizeQuoteSnapshot, serviceFields, validateDraft, workbenchReducer } from "./state";
 
 const extraction = {
   extraction: { address_line: "8888 Keele St", postal_code: "L4K 2N2", city: "Concord", province: "ON", cbm: "4.2", weight_kg: "850", piece_count: 10, packaging_type: "carton", address_type: "commercial", requires_liftgate: false, requires_pallet_jack: false, requires_appointment: false, detention_minutes: 0 },
@@ -65,7 +65,23 @@ describe("confirmed quote workflow", () => {
 
 
 describe("service confirmation and correction reasons", () => {
-  it("preserves unknown service flags until a person explicitly confirms them", () => {
+  it("starts with no services and keeps server defaults ready for quoting", () => {
+    const state = workbenchReducer(initialState, { type: "extracted", response: {
+      ...extraction, field_provenance: { requires_liftgate: "default_value", requires_pallet_jack: "default_value", requires_appointment: "default_value" },
+    } });
+    for (const field of serviceFields) {
+      expect(emptyDraft[field]).toBe(false);
+      expect(state.draft![field]).toBe(false);
+      expect(state.provenance[field]).toBe("default_value");
+    }
+    expect(state.phase).toBe("ready");
+    const requested = workbenchReducer(state, { type: "extracted", response: {
+      ...extraction, extraction: { ...extraction.extraction, requires_liftgate: true, requires_pallet_jack: true, requires_appointment: true },
+    } });
+    for (const field of serviceFields) expect(requested.draft![field]).toBe(true);
+    expect(requested.phase).toBe("ready");
+  });
+  it("preserves explicitly unresolved service flags until a person confirms them", () => {
     let state = workbenchReducer(initialState, { type: "extracted", response: {
       ...extraction, extraction: { ...extraction.extraction, requires_liftgate: null },
     } });

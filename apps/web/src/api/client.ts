@@ -178,7 +178,7 @@ export interface AIAutoQuoteResponse {
 }
 
 export type QuoteField = keyof ZoneQuoteRequest;
-export type FieldSource = "customer_original" | "ai_extracted" | "deterministic_extracted" | "human_edited";
+export type FieldSource = "customer_original" | "ai_extracted" | "deterministic_extracted" | "default_value" | "human_edited";
 export type CorrectionReason = "extraction_error" | "customer_update" | "business_decision";
 export type CorrectionReasons = Partial<Record<QuoteField, CorrectionReason>>;
 export type FieldProvenance = Partial<Record<QuoteField, FieldSource>>;

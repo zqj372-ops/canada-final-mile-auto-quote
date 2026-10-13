@@ -6,10 +6,11 @@ from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from apps.api.db.models import Base, ZoneLookupRule, ZonePriceMatrix, PostalCodeCityLookup, QuoteAuditLog, ManualQuoteTask, SalesQuoteRecord, HermesDiagnosticQueue
+from apps.api.db.models import AIModelConfig, Base, ZoneLookupRule, ZonePriceMatrix, PostalCodeCityLookup, QuoteAuditLog, ManualQuoteTask, SalesQuoteRecord, HermesDiagnosticQueue
 from apps.api.db.session import get_db
 from apps.api.main import app
 from apps.api.services.quote_workbench_service import ConfirmedQuote
+from packages.ai_assistant.model_client import AIResponse
 
 SAMPLE = """数量: 2托盘
 尺寸: 120x100x150 cm
@@ -67,11 +68,85 @@ def test_local_extraction_needs_no_model_and_has_no_side_effects(context, monkey
     body = response.json()
     assert body["extraction_mode"] == "local"
     assert body["extraction"]["weight_kg"] == "800.0"
-    assert {item["field"] for item in body["draft_validation_errors"]} == {"requires_pallet_jack", "requires_appointment"}
+    assert body["draft_validation_errors"] == []
     assert "quote_result" not in body
     assert body["field_provenance"]["requires_liftgate"] == "deterministic_extracted"
+    for field in ("requires_pallet_jack", "requires_appointment"):
+        assert body["extraction"][field] is False
+        assert body["field_provenance"][field] == "default_value"
     assert body["field_provenance"]["detention_minutes"] == "deterministic_extracted"
     assert counts(factory) == [0, 0, 0, 0]
+
+
+@pytest.fixture
+def unavailable_model(context, monkeypatch):
+    _, factory = context
+    with factory() as db:
+        db.add(AIModelConfig(name="Fixture model", provider="openai", base_url="https://example.invalid/v1",
+                             api_key_encrypted="xor1:AA==", model_name="fixture", temperature=0,
+                             max_tokens=800, timeout_seconds=1, is_default=True, enabled=True, purpose="general"))
+        db.commit()
+    monkeypatch.setattr("packages.ai_assistant.model_client.OpenAICompatibleClient.complete",
+                        lambda *args, **kwargs: AIResponse(error="fixture_unavailable"))
+
+
+def test_default_services_can_be_quoted_without_edits_or_artificial_corrections(context):
+    client, factory = context
+    with factory() as db:
+        db.add(ZonePriceMatrix(origin="toronto", zone=2, billing_pallets=2, base_price_usd=Decimal("100"),
+                               source="test", last_updated="2026-10-13"))
+        db.commit()
+    message = SAMPLE.removesuffix("\n尾板: 否")
+    extracted = client.post("/quotes/ai-extract", json={"customer_message": message}).json()
+    for field in ("requires_liftgate", "requires_pallet_jack", "requires_appointment"):
+        assert extracted["extraction"][field] is False
+        assert extracted["field_provenance"][field] == "default_value"
+    assert extracted["draft_validation_errors"] == []
+    assert extracted["extraction_missing_fields"] == []
+    response = client.post("/quotes/confirmed-calculate", json={
+        "customer_message": message,
+        "quote": {key: extracted["extraction"][key] for key in ConfirmedQuote.model_fields},
+        "field_provenance": extracted["field_provenance"],
+        "extraction_snapshot": extracted["extraction"],
+        "extraction_receipt": extracted["extraction_receipt"],
+    })
+    assert response.status_code == 200, response.text
+    result = response.json()["quote_result"]
+    assert result["manual_review_required"] is False
+    assert not any(Decimal(value) for value in result["accessorials"].values())
+    audit = client.get(f'/quotes/audit/{result["quote_id"]}').json()
+    feedback = audit["request_json"]["extraction_feedback"]
+    assert feedback["verified_source"] is True
+    assert feedback["status"] == "no_corrections"
+    assert feedback["corrections"] == []
+
+
+@pytest.mark.parametrize("field,name", [
+    ("requires_liftgate", "尾板"), ("requires_pallet_jack", "手叉车"),
+    ("requires_appointment", "预约"), ("requires_liftgate", "liftgate"),
+    ("requires_pallet_jack", "pallet jack"), ("requires_appointment", "appointment"),
+])
+@pytest.mark.parametrize("requirement,expected", [("yes", True), ("no", False), ("待确认", None), ("yes\n{name}: no", None)])
+def test_service_defaults_preserve_explicit_requests_and_uncertainty(context, unavailable_model, field, name, requirement, expected):
+    client, factory = context
+    message = SAMPLE.removesuffix("\n尾板: 否") + f"\n{name}: " + requirement.format(name=name)
+    response = client.post("/quotes/ai-extract", json={"customer_message": message})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["extraction"][field] is expected
+    assert body["field_provenance"].get(field) != "default_value"
+    assert (field in body["extraction_missing_fields"]) is (expected is None)
+
+
+def test_service_defaults_also_apply_after_model_failure(context, unavailable_model):
+    client, _ = context
+    response = client.post("/quotes/ai-extract", json={"customer_message": SAMPLE.removesuffix("\n尾板: 否"), "force_ai": True})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["extraction_mode"] == "fallback"
+    for field in ("requires_liftgate", "requires_pallet_jack", "requires_appointment"):
+        assert body["extraction"][field] is False
+        assert body["field_provenance"][field] == "default_value"
 
 
 def test_force_model_without_config_returns_error_without_creating_tasks(context):
@@ -300,8 +375,7 @@ def test_background_context_failure_preserves_saved_quote(context, monkeypatch):
 def extraction_confirmation(client):
     extraction = client.post('/quotes/ai-extract', json={'customer_message': SAMPLE}).json()
     quote = {key: extraction['extraction'][key] for key in ConfirmedQuote.model_fields}
-    for key in ('requires_liftgate', 'requires_pallet_jack', 'requires_appointment'):
-        quote[key] = quote[key] if quote[key] is not None else False
+    quote['requires_pallet_jack'] = True
     quote['cbm'] = '4.0'
     return {'customer_message': SAMPLE, 'quote': quote,
             'field_provenance': {key: 'human_edited' for key, value in quote.items() if value is not None},

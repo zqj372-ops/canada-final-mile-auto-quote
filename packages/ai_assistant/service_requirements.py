@@ -11,6 +11,10 @@ _BOOL = {"是": True, "需要": True, "yes": True, "true": True, "1": True,
          "否": False, "不需要": False, "no": False, "false": False, "0": False}
 
 
+def mentioned_service_fields(message: str) -> set[str]:
+    return {field for field, name in _NAMES.items() if re.search(name, message, re.I)}
+
+
 def explicit_service_requirements(message: str) -> dict[str, bool | None]:
     facts = {}
     for field, name in _NAMES.items():
