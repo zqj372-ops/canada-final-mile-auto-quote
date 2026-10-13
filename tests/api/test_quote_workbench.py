@@ -98,6 +98,78 @@ def test_confirmed_quote_uses_confirmed_input_and_saves_real_records(context, mo
         assert record.request_json["quote"]["weight_kg"] == "850"
 
 
+@pytest.fixture
+def york_context(context):
+    client, factory = context
+    with factory() as db:
+        db.add(PostalCodeCityLookup(postal_code="M6B 3P8", preferred_city="York", province="ON"))
+        # Deliberately distinct fixture zones prove that postal city wins.
+        for city, zone in (("YORK", 2), ("TORONTO", 4)):
+            db.add(ZoneLookupRule(postal_prefix="M6B", city=city, province="ON", origin="toronto", zone=zone, note="Fixture only"))
+        db.commit()
+    return client, factory
+
+
+def test_city_mismatch_is_advisory_during_extraction(york_context):
+    client, factory = york_context
+    message = SAMPLE.replace("8888 Keele St", "2464 Dufferin St, Toronto, Ontario, Canada, M6B 3P8")
+    message = message.replace("Concord", "Toronto").replace("L4K 2N2", "M6B 3P8")
+    message += "\n手叉车: 否\n预约: 否"
+    response = client.post("/quotes/ai-extract", json={"customer_message": message})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["extraction"]["city"] == "Toronto"
+    assert body["extraction"]["postal_code"] == "M6B 3P8"
+    assert body["address_validation"]["city_consistent"] is False
+    assert body["address_validation"]["preferred_city"] == "York"
+    assert "不阻止报价" in body["address_validation"]["note_zh"]
+    assert body["draft_validation_errors"] == []
+    assert counts(factory) == [0, 0, 0, 0]
+
+
+def test_confirmed_quote_prefers_postal_city_and_preserves_input(york_context):
+    client, factory = york_context
+    body = payload()
+    body["quote"].update(address_line="2464 Dufferin St, Toronto, Ontario, Canada, M6B 3P8",
+                         postal_code="M6B 3P8", city="Toronto", province="Ontario")
+    response = client.post("/quotes/confirmed-calculate", json=body)
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    result = saved["quote_result"]
+    assert result["source_type"] == "zone_matrix"
+    assert result["postal_code"] == "M6B 3P8"
+    assert result["city"] == result["preferred_city"] == "York"
+    assert result["province"] == "ON"
+    assert result["zone"] == 2
+    assert result["base_price_usd"] == "120.00"
+    assert result["manual_review_required"] is False
+    assert result["match_trace"]["input_city"] == "Toronto"
+    assert result["match_trace"]["city_match_source"] == "postal_lookup"
+    assert counts(factory) == [1, 0, 1, 1]
+    with factory() as db:
+        record = db.get(SalesQuoteRecord, saved["sales_record_id"])
+        assert record.request_json["quote"]["city"] == "Toronto"
+        assert record.request_json["quote"]["address_line"] == body["quote"]["address_line"]
+        audit = db.scalar(select(QuoteAuditLog).where(QuoteAuditLog.quote_id == result["quote_id"]))
+        assert audit.request_json["city"] == "Toronto"
+
+
+def test_postal_city_with_conflicting_rules_still_requires_manual_review(york_context):
+    client, factory = york_context
+    with factory() as db:
+        db.add(ZoneLookupRule(postal_prefix="M6B", city="YORK", province="ON", origin="toronto", zone=3, note="Conflicting fixture"))
+        db.commit()
+    body = payload()
+    body["quote"].update(address_line="2464 Dufferin St", postal_code="M6B 3P8", city="Toronto")
+    response = client.post("/quotes/confirmed-calculate", json=body)
+    assert response.status_code == 200, response.text
+    result = response.json()["quote_result"]
+    assert result["manual_review_required"] is True
+    assert result["matched_by"] == "split_record_conflict"
+    assert result["total_price_usd"] is None
+    assert response.json()["manual_task_id"] is not None
+
+
 @pytest.mark.parametrize("mutation", ["missing_provenance", "result_field", "source_value", "wrong_province", "empty_city", "soft_packaging", "invalid_postal"])
 def test_invalid_confirmed_fields_do_not_write(context, mutation):
     client, factory = context

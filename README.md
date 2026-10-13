@@ -349,6 +349,8 @@ docker compose -p canada_quote --env-file .env.prod -f infra/docker-compose.prod
   审计、销售记录、必要的人工任务、旧任务替代及诊断快照使用同一事务，保存失败返回 503 并回滚。
   成功返回真实 `sales_record_id` / `manual_task_id`；诊断参考上下文由后台补齐。
   尾板、手叉车和预约必须明确为 true / false，未知值会阻止确认报价。
+  城市名称与邮编库不同只提示，不阻止报价；完整邮编对应城市用于分区匹配，原始输入保留。
+  省份与邮编冲突仍需核对，缺失或有歧义的分区、价格仍按原规则转人工。
 - 解析权限沿用 `admin` / `sales`；确认报价沿用 `admin` / `operator` / `sales`。
   同一人工单仅可替代一次；销售仅可替代自己创建且仍待处理的任务。
 - 新流程不自动发送邮件或企业微信消息，人工单可在后台继续处理。原接口保留兼容。
@@ -390,6 +392,9 @@ full postal_code override
 -> 兼容旧数据的 city fallback
 -> manual_required
 ```
+
+完整邮编命中城市记录时，城市匹配只使用该记录及其别名；未命中时才使用输入城市。
+例如输入 Toronto、邮编记录为 York，不会把两者合并成两个分区候选。
 
 如果同一 FSA 下存在多个 origin/zone 且城市别名仍无法唯一确定，系统返回
 `manual_required`，不会估算价格。

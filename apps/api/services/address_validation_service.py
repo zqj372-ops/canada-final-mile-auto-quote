@@ -269,9 +269,14 @@ def _build_note(
             parts.append("城市与本地邮编库不一致")
         if province_consistent is False:
             parts.append("省份与本地邮编库不一致")
+        action = (
+            "请核对省份与邮编后再报价。"
+            if province_consistent is False
+            else "分区匹配以输入邮编为准，城市名称差异仅作提示，不阻止报价。"
+        )
         return (
             f"本地邮编库命中 {postal_code} -> {location}，但{'、'.join(parts)}。"
-            "系统应优先使用本地邮编库城市/省份做 Zone 匹配，地图仅供人工目视确认。"
+            f"{action}地图仅供人工目视确认。"
         )
     if city_consistent is None and province_consistent is None:
         return (

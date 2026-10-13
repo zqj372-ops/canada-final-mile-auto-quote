@@ -1,4 +1,4 @@
-from packages.quote_engine.zone_lookup import lookup_zone_by_city_province
+from packages.quote_engine.zone_lookup import lookup_zone, lookup_zone_by_city_province
 from packages.quote_engine.zone_models import ZoneLookupRuleRecord
 
 
@@ -55,3 +55,31 @@ def test_configured_fsa_can_still_match_exact_rule() -> None:
     assert decision.zone == 1
     assert decision.matched_by == "city_zone_fallback"
     assert decision.match_trace["fsa"] == "T3S"
+
+
+def test_input_city_can_resolve_multiple_zones_without_full_postal_lookup() -> None:
+    decision = lookup_zone(
+        postal_code="M6B 3P8", postal_prefix="M6B", input_city="Toronto", preferred_city=None,
+        province="ON", aliases=[], rules=[
+            ZoneLookupRuleRecord(postal_prefix="M6B", city="TORONTO", province="ON", origin="toronto", zone=2),
+            ZoneLookupRuleRecord(postal_prefix="M6B", city="YORK", province="ON", origin="toronto", zone=4),
+        ],
+    )
+    assert decision.manual_required is False
+    assert decision.zone == 2
+    assert decision.match_trace["city_match_source"] == "input_city"
+
+
+def test_unmatched_postal_city_does_not_fall_back_to_conflicting_input_city() -> None:
+    decision = lookup_zone(
+        postal_code="M6B 3P8", postal_prefix="M6B", input_city="Toronto", preferred_city="York",
+        province="ON", aliases=[], rules=[
+            ZoneLookupRuleRecord(postal_prefix="M6B", city="TORONTO", province="ON", origin="toronto", zone=2),
+            ZoneLookupRuleRecord(postal_prefix="M6B", city="NORTH YORK", province="ON", origin="toronto", zone=4),
+        ],
+    )
+    assert decision.manual_required is True
+    assert decision.zone is None
+    assert decision.matched_by == "city_not_found"
+    assert "M6B + York + ON" in decision.matched_rule
+    assert decision.match_trace["canonical_city_candidates"] == ["YORK"]

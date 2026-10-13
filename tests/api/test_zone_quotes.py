@@ -247,7 +247,7 @@ def test_rural_postal_quote_keeps_price_but_requires_secondary_confirmation() ->
     assert "二次确认：该地址为乡村邮编" in body["sales_note"]
 
 
-def test_city_postal_zone_conflict_explains_both_candidates() -> None:
+def test_postal_city_takes_priority_over_input_city_zone() -> None:
     client = build_client(
         postal_records=[
             {"postal_code": "N0A 1M0", "preferred_city": "Ohsweken", "province": "ON"},
@@ -272,6 +272,10 @@ def test_city_postal_zone_conflict_explains_both_candidates() -> None:
                 "note": "",
             },
         ],
+        prices=[{
+            "origin": "toronto", "zone": 6, "billing_pallets": 3,
+            "base_price_usd": Decimal("200.00"), "source": "test", "last_updated": "2026-10-13",
+        }],
     )
 
     response = client.post(
@@ -287,13 +291,14 @@ def test_city_postal_zone_conflict_explains_both_candidates() -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source_type"] == "manual_required"
-    assert body["matched_by"] == "split_record_conflict"
-    assert body["manual_review_required"] is True
-    assert body["matched_rule"] == (
-        "地址信息对应不同 Zone：输入城市 Hagersville → 多伦多 Zone 5；"
-        "邮编 N0A 1M0 对应城市 Ohsweken → 多伦多 Zone 6。请核对城市或邮编后再报价。"
-    )
+    assert body["source_type"] == "zone_matrix"
+    assert body["matched_by"] == "canonical_city"
+    assert body["manual_review_required"] is False
+    assert body["city"] == "Ohsweken"
+    assert body["zone"] == 6
+    assert body["base_price_usd"] == "200.00"
+    assert body["match_trace"]["input_city"] == "Hagersville"
+    assert body["match_trace"]["canonical_city_candidates"] == ["OHSWEKEN"]
     assert "rural_fsa_secondary_confirmation" in body["risk_tags"]
 
 

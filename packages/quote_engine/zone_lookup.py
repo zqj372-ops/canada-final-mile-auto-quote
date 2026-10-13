@@ -196,6 +196,7 @@ def lookup_zone(
         "fsa": prefix,
         "input_city": input_city,
         "preferred_city": preferred_city,
+        "city_match_source": "postal_lookup" if preferred_city else "input_city",
         "province": normalized_province,
         "canonical_city_candidates": city_candidates,
         "candidate_count": len(prefix_rules),
@@ -211,7 +212,7 @@ def lookup_zone(
     if override is not None:
         rule = ZoneLookupRuleRecord(
             postal_prefix=override.postal_prefix,
-            city=override.canonical_city or input_city or preferred_city or "",
+            city=override.canonical_city or preferred_city or input_city or "",
             province=override.province,
             origin=override.origin,
             zone=override.zone,
@@ -335,7 +336,7 @@ def lookup_zone(
         return ZoneLookupDecision(
             manual_required=True,
             matched_rule=(
-                f"邮编前缀 {prefix} + {input_city or preferred_city or '未知城市'} + "
+                f"邮编前缀 {prefix} + {preferred_city or input_city or '未知城市'} + "
                 f"{normalized_province or '未知省份'} 未唯一匹配到 Zone 规则。"
             ),
             risk_tags=("zone_not_found",),
@@ -745,7 +746,9 @@ def _city_candidates(
 ) -> tuple[list[str], bool]:
     candidates: list[str] = []
     alias_used = False
-    for value in (input_city, preferred_city):
+    # An exact postal lookup takes precedence over the customer's city label.
+    # Combining both can introduce an unrelated Zone or a false conflict.
+    for value in (preferred_city or input_city,):
         normalized = _normalize_city_for_lookup(value)
         if not normalized:
             continue

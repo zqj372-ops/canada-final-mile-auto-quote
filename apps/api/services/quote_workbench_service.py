@@ -138,10 +138,9 @@ def draft_errors(extraction: AIExtractedQuoteDraft, address: LocalAddressValidat
             field = str(error["loc"][0]) if error["loc"] else detail.split(":")[0]
             code = detail.split(":", 1)[1] if ":" in detail else error["type"]
             errors.append(DraftError(field=field, code=code))
-    if address:
-        for field in ("city", "province"):
-            if getattr(address, f"{field}_consistent") is False:
-                errors.append(DraftError(field=field, code="postal_lookup_mismatch"))
+    # City naming differences are advisory; the engine uses the postal lookup.
+    if address and address.province_consistent is False:
+        errors.append(DraftError(field="province", code="postal_lookup_mismatch"))
     return errors
 
 
@@ -221,9 +220,9 @@ def calculate_confirmed(db: Session, payload: ConfirmedCalculateRequest, actor: 
         reasons=payload.correction_reasons, actor=actor)
     try:
         address = build_local_address_validation_from_extraction(db, AIExtractedQuoteDraft(**quote.model_dump()))
-        if address.city_consistent is False or address.province_consistent is False:
+        if address.province_consistent is False:
             raise HTTPException(status_code=422, detail={
-                "message": "城市或省份与邮编记录不一致，请核对后再报价。",
+                "message": "省份与邮编记录不一致，请核对后再报价。",
                 "preferred_city": address.preferred_city, "province": address.province,
             })
         old_record, old_task = (_lock_superseded_task(db, payload.supersedes_quote_id, actor)
