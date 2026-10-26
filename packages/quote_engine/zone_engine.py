@@ -333,6 +333,7 @@ class ZoneQuoteEngine:
 def build_zone_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult, config: ZonePricingConfig | None = None) -> str:
     pricing = config or ZonePricingConfig()
     amount = _format_money(result.total_price_usd)
+    residential_fee = result.accessorials.get("residential_fee_usd", Decimal("0"))
     density = _format_density(request.weight_kg, request.cbm)
     cargo_line = f"共{request.piece_count}件，{request.cbm} CBM，{request.weight_kg} KG"
     if result.billing_pallets is not None:
@@ -353,6 +354,7 @@ def build_zone_sales_note(request: ZoneQuoteRequest, result: ZoneQuoteResult, co
             f"目的地：{_destination_line(request, result)}",
             f"货物总计：{cargo_line}",
             f"报价：USD {amount}（{origin_label(result.origin)}派送）",
+            *([f"备注：报价已含私人地址附加费{_format_money(residential_fee)}USD"] if residential_fee > 0 else []),
             *rural_confirmation_lines,
             "注：已含尾板服务费" if request.requires_liftgate else "注：不带尾板，自卸货",
             "- 送货到门口路边，不含其他操作",

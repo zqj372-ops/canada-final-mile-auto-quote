@@ -808,265 +808,267 @@ export default function CitySettingsPage() {
               </button>
             </header>
 
-            <fieldset className="city-batch-scroll" disabled={isSaving}>
-              {(error || notice) && (
-                <div className={`pricing-feedback ${error ? "is-error" : "is-success"} city-batch-feedback`} role={error ? "alert" : "status"}>
-                  <CityIcon name={error ? "alert" : "check"} />
-                  <span>{error || notice}</span>
-                </div>
-              )}
-              {duplicateDraftPrefixes(draft.rules).length > 0 && <p className="city-config-warning">
-                以下 FSA 有重复配置：{duplicateDraftPrefixes(draft.rules).join("、")}。请核对 Zone，并将多余规则标为停用后保存。
-              </p>}
-
-              <section className="city-batch-section">
-                <div className="city-batch-section-heading">
-                  <div>
-                    <span>1</span>
-                    <strong>城市信息</strong>
+            <div className="city-batch-scroll">
+              <fieldset className="city-batch-fields" disabled={isSaving}>
+                {(error || notice) && (
+                  <div className={`pricing-feedback ${error ? "is-error" : "is-success"} city-batch-feedback`} role={error ? "alert" : "status"}>
+                    <CityIcon name={error ? "alert" : "check"} />
+                    <span>{error || notice}</span>
                   </div>
-                  <small>省份会自动确定始发仓：{formatOrigin(originForProvince(draft.province))}</small>
-                </div>
-                <div className="city-group-fields">
-                  <label>
-                    <span className="field-label">城市</span>
-                    <input
-                      className="field-input"
-                      value={draft.city}
-                      onChange={(event) =>
-                        setDraft((current) => current ? { ...current, city: event.target.value } : current)
-                      }
-                      placeholder="例如 BRAMPTON"
-                      autoComplete="off"
-                    />
-                  </label>
-                  <label>
-                    <span className="field-label">标准城市名</span>
-                    <input
-                      className="field-input"
-                      value={draft.canonicalCity}
-                      onChange={(event) =>
-                        setDraft((current) => current ? { ...current, canonicalCity: event.target.value } : current)
-                      }
-                      placeholder="留空则与城市一致"
-                      autoComplete="off"
-                    />
-                  </label>
-                  <label>
-                    <span className="field-label">省份</span>
-                    <select
-                      className="field-input"
-                      value={draft.province}
-                      onChange={(event) => updateProvince(event.target.value)}
-                    >
-                      {PROVINCES.map((province) => (
-                        <option value={province} key={province}>{province}</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </section>
+                )}
+                {duplicateDraftPrefixes(draft.rules).length > 0 && <p className="city-config-warning">
+                  以下 FSA 有重复配置：{duplicateDraftPrefixes(draft.rules).join("、")}。请核对 Zone，并将多余规则标为停用后保存。
+                </p>}
 
-              <section className="city-batch-section">
-                <div className="city-batch-section-heading">
-                  <div>
-                    <span>2</span>
-                    <strong>批量加入 FSA</strong>
+                <section className="city-batch-section">
+                  <div className="city-batch-section-heading">
+                    <div>
+                      <span>1</span>
+                      <strong>城市信息</strong>
+                    </div>
+                    <small>省份会自动确定始发仓：{formatOrigin(originForProvince(draft.province))}</small>
                   </div>
-                  <small>支持用空格、逗号或换行分隔</small>
-                </div>
-                <div className="city-prefix-adder">
-                  <label>
-                    <span className="field-label">粘贴多个 FSA</span>
-                    <textarea
-                      value={prefixInput}
-                      onChange={(event) => setPrefixInput(event.target.value.toUpperCase())}
-                      placeholder={"例如：L6P, L6T, L6W\n也可以从表格直接粘贴"}
-                      rows={2}
-                    />
-                  </label>
-                  <div className="city-prefix-defaults">
+                  <div className="city-group-fields">
                     <label>
-                      <span className="field-label">默认 Zone</span>
+                      <span className="field-label">城市</span>
                       <input
                         className="field-input"
+                        value={draft.city}
+                        onChange={(event) =>
+                          setDraft((current) => current ? { ...current, city: event.target.value } : current)
+                        }
+                        placeholder="例如 BRAMPTON"
+                        autoComplete="off"
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">标准城市名</span>
+                      <input
+                        className="field-input"
+                        value={draft.canonicalCity}
+                        onChange={(event) =>
+                          setDraft((current) => current ? { ...current, canonicalCity: event.target.value } : current)
+                        }
+                        placeholder="留空则与城市一致"
+                        autoComplete="off"
+                      />
+                    </label>
+                    <label>
+                      <span className="field-label">省份</span>
+                      <select
+                        className="field-input"
+                        value={draft.province}
+                        onChange={(event) => updateProvince(event.target.value)}
+                      >
+                        {PROVINCES.map((province) => (
+                          <option value={province} key={province}>{province}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </section>
+
+                <section className="city-batch-section">
+                  <div className="city-batch-section-heading">
+                    <div>
+                      <span>2</span>
+                      <strong>批量加入 FSA</strong>
+                    </div>
+                    <small>支持用空格、逗号或换行分隔</small>
+                  </div>
+                  <div className="city-prefix-adder">
+                    <label>
+                      <span className="field-label">粘贴多个 FSA</span>
+                      <textarea
+                        value={prefixInput}
+                        onChange={(event) => setPrefixInput(event.target.value.toUpperCase())}
+                        placeholder={"例如：L6P, L6T, L6W\n也可以从表格直接粘贴"}
+                        rows={2}
+                      />
+                    </label>
+                    <div className="city-prefix-defaults">
+                      <label>
+                        <span className="field-label">默认 Zone</span>
+                        <input
+                          className="field-input"
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={batchZone}
+                          placeholder="按现行运价填写"
+                          onChange={(event) => setBatchZone(event.target.value)}
+                        />
+                      </label>
+                      <label>
+                        <span className="field-label">默认优先级</span>
+                        <input
+                          className="field-input"
+                          type="number"
+                          min={1}
+                          max={1000}
+                          step={1}
+                          value={batchPriority}
+                          placeholder="100"
+                          onChange={(event) => setBatchPriority(event.target.value)}
+                        />
+                      </label>
+                      <button className="btn-primary" type="button" onClick={addPostalPrefixes}>
+                        <CityIcon name="plus" />
+                        加入列表
+                      </button>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="city-batch-section city-rule-section">
+                  <div className="city-batch-section-heading">
+                    <div>
+                      <span>3</span>
+                      <strong>邮编与分区</strong>
+                    </div>
+                    <small>{draft.rules.length} 个有效 · {draft.removedRules.filter((rule) => rule.id !== null).length} 个待停用</small>
+                  </div>
+
+                  <div className="city-batch-toolbar">
+                    <label className="city-select-all">
+                      <input
+                        type="checkbox"
+                        checked={allRulesSelected}
+                        onChange={toggleAllRules}
+                        disabled={!draft.rules.length}
+                      />
+                      <span>{selectedKeys.size ? `已选 ${selectedKeys.size} 个` : "全选"}</span>
+                    </label>
+                    <label>
+                      <span>统一 Zone</span>
+                      <input
                         type="number"
                         min={1}
                         step={1}
                         value={batchZone}
-                        placeholder="按现行运价填写"
                         onChange={(event) => setBatchZone(event.target.value)}
                       />
                     </label>
                     <label>
-                      <span className="field-label">默认优先级</span>
+                      <span>统一优先级</span>
                       <input
-                        className="field-input"
                         type="number"
                         min={1}
                         max={1000}
                         step={1}
                         value={batchPriority}
-                        placeholder="100"
+                        placeholder="保持原值"
                         onChange={(event) => setBatchPriority(event.target.value)}
                       />
                     </label>
-                    <button className="btn-primary" type="button" onClick={addPostalPrefixes}>
-                      <CityIcon name="plus" />
-                      加入列表
+                    <button
+                      className="city-batch-apply"
+                      type="button"
+                      onClick={applyBatchAssignment}
+                      disabled={!selectedKeys.size}
+                    >
+                      应用到已选
+                    </button>
+                    <button
+                      className="city-batch-remove"
+                      type="button"
+                      onClick={removeSelectedRules}
+                      disabled={!selectedKeys.size}
+                    >
+                      <CityIcon name="trash" />
+                      批量停用
                     </button>
                   </div>
-                </div>
-              </section>
 
-              <section className="city-batch-section city-rule-section">
-                <div className="city-batch-section-heading">
-                  <div>
-                    <span>3</span>
-                    <strong>邮编与分区</strong>
-                  </div>
-                  <small>{draft.rules.length} 个有效 · {draft.removedRules.filter((rule) => rule.id !== null).length} 个待停用</small>
-                </div>
-
-                <div className="city-batch-toolbar">
-                  <label className="city-select-all">
-                    <input
-                      type="checkbox"
-                      checked={allRulesSelected}
-                      onChange={toggleAllRules}
-                      disabled={!draft.rules.length}
-                    />
-                    <span>{selectedKeys.size ? `已选 ${selectedKeys.size} 个` : "全选"}</span>
-                  </label>
-                  <label>
-                    <span>统一 Zone</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={batchZone}
-                      onChange={(event) => setBatchZone(event.target.value)}
-                    />
-                  </label>
-                  <label>
-                    <span>统一优先级</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={1000}
-                      step={1}
-                      value={batchPriority}
-                      placeholder="保持原值"
-                      onChange={(event) => setBatchPriority(event.target.value)}
-                    />
-                  </label>
-                  <button
-                    className="city-batch-apply"
-                    type="button"
-                    onClick={applyBatchAssignment}
-                    disabled={!selectedKeys.size}
-                  >
-                    应用到已选
-                  </button>
-                  <button
-                    className="city-batch-remove"
-                    type="button"
-                    onClick={removeSelectedRules}
-                    disabled={!selectedKeys.size}
-                  >
-                    <CityIcon name="trash" />
-                    批量停用
-                  </button>
-                </div>
-
-                <div className="city-rule-list" role="list">
-                  {draft.rules.length ? (
-                    draft.rules.map((rule) => (
-                      <div className={selectedKeys.has(rule.key) ? "city-rule-row is-selected" : "city-rule-row"} role="listitem" key={rule.key}>
-                        <label className="city-rule-check">
-                          <input
-                            type="checkbox"
-                            checked={selectedKeys.has(rule.key)}
-                            onChange={() => toggleRule(rule.key)}
-                            aria-label={`选择 ${rule.postalPrefix || "新邮编"}，Zone ${rule.zone}`}
-                          />
-                        </label>
-                        <label className="city-rule-prefix-field">
-                          <span>FSA</span>
-                          <input
-                            value={rule.postalPrefix}
-                            onChange={(event) =>
-                              updateRule(rule.key, {
-                                postalPrefix: event.target.value.toUpperCase().replace(/\s/g, "").slice(0, 3),
-                              })
-                            }
-                            placeholder="L6P"
-                            maxLength={3}
-                          />
-                        </label>
-                        <div className="city-rule-origin">
-                          <span>始发仓</span>
-                          <strong>{formatOrigin(originForProvince(draft.province))}</strong>
+                  <div className="city-rule-list" role="list">
+                    {draft.rules.length ? (
+                      draft.rules.map((rule) => (
+                        <div className={selectedKeys.has(rule.key) ? "city-rule-row is-selected" : "city-rule-row"} role="listitem" key={rule.key}>
+                          <label className="city-rule-check">
+                            <input
+                              type="checkbox"
+                              checked={selectedKeys.has(rule.key)}
+                              onChange={() => toggleRule(rule.key)}
+                              aria-label={`选择 ${rule.postalPrefix || "新邮编"}，Zone ${rule.zone}`}
+                            />
+                          </label>
+                          <label className="city-rule-prefix-field">
+                            <span>FSA</span>
+                            <input
+                              value={rule.postalPrefix}
+                              onChange={(event) =>
+                                updateRule(rule.key, {
+                                  postalPrefix: event.target.value.toUpperCase().replace(/\s/g, "").slice(0, 3),
+                                })
+                              }
+                              placeholder="L6P"
+                              maxLength={3}
+                            />
+                          </label>
+                          <div className="city-rule-origin">
+                            <span>始发仓</span>
+                            <strong>{formatOrigin(originForProvince(draft.province))}</strong>
+                          </div>
+                          <label className="city-rule-zone">
+                            <span>Zone</span>
+                            <input
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={rule.zone}
+                              onChange={(event) => updateRule(rule.key, { zone: event.target.value })}
+                            />
+                          </label>
+                          <label className="city-rule-priority">
+                            <span>优先级</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={1000}
+                              step={1}
+                              value={rule.priority}
+                              onChange={(event) => updateRule(rule.key, { priority: event.target.value })}
+                            />
+                          </label>
+                          <label className="city-rule-note">
+                            <span>备注</span>
+                            <input
+                              value={rule.note}
+                              onChange={(event) => updateRule(rule.key, { note: event.target.value })}
+                              placeholder="可选"
+                            />
+                          </label>
+                          <button
+                            className="city-rule-remove-one"
+                            type="button"
+                            onClick={() => removeRule(rule.key)}
+                            aria-label={`${rule.id === null ? "移除" : "停用"} ${rule.postalPrefix || "新邮编"}，Zone ${rule.zone}`}
+                          >
+                            <CityIcon name="trash" />
+                          </button>
                         </div>
-                        <label className="city-rule-zone">
-                          <span>Zone</span>
-                          <input
-                            type="number"
-                            min={1}
-                            step={1}
-                            value={rule.zone}
-                            onChange={(event) => updateRule(rule.key, { zone: event.target.value })}
-                          />
-                        </label>
-                        <label className="city-rule-priority">
-                          <span>优先级</span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={1000}
-                            step={1}
-                            value={rule.priority}
-                            onChange={(event) => updateRule(rule.key, { priority: event.target.value })}
-                          />
-                        </label>
-                        <label className="city-rule-note">
-                          <span>备注</span>
-                          <input
-                            value={rule.note}
-                            onChange={(event) => updateRule(rule.key, { note: event.target.value })}
-                            placeholder="可选"
-                          />
-                        </label>
-                        <button
-                          className="city-rule-remove-one"
-                          type="button"
-                          onClick={() => removeRule(rule.key)}
-                          aria-label={`${rule.id === null ? "移除" : "停用"} ${rule.postalPrefix || "新邮编"}，Zone ${rule.zone}`}
-                        >
-                          <CityIcon name="trash" />
-                        </button>
+                      ))
+                    ) : (
+                      <div className="city-rule-empty">
+                        <CityIcon name="postal" />
+                        <strong>当前列表没有邮编</strong>
+                        <small>在上方粘贴多个 FSA 后点击“加入列表”。</small>
                       </div>
-                    ))
-                  ) : (
-                    <div className="city-rule-empty">
-                      <CityIcon name="postal" />
-                      <strong>当前列表没有邮编</strong>
-                      <small>在上方粘贴多个 FSA 后点击“加入列表”。</small>
+                    )}
+                  </div>
+
+                  {draft.removedRules.length > 0 && (
+                    <div className="city-removed-summary">
+                      <span>
+                        待停用 / 移除 {draft.removedRules.length} 个（保存后生效）：
+                        {draft.removedRules.map((rule) => rule.postalPrefix).join("、")}
+                      </span>
+                      <button type="button" onClick={restoreRemovedRules}>全部撤销</button>
                     </div>
                   )}
-                </div>
-
-                {draft.removedRules.length > 0 && (
-                  <div className="city-removed-summary">
-                    <span>
-                      待停用 / 移除 {draft.removedRules.length} 个（保存后生效）：
-                      {draft.removedRules.map((rule) => rule.postalPrefix).join("、")}
-                    </span>
-                    <button type="button" onClick={restoreRemovedRules}>全部撤销</button>
-                  </div>
-                )}
-              </section>
-            </fieldset>
+                </section>
+              </fieldset>
+            </div>
 
             <footer className="city-batch-footer">
               <div>

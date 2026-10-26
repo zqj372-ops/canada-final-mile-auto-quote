@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from apps.api.auth import CurrentActor
+from apps.api.services.quote_admission import require_quote_scope
 from apps.api.db.repositories.ai_model_config_repository import AIModelConfigRepository
 from apps.api.db.repositories.manual_quote_task_repository import ManualQuoteTaskRepository
 from apps.api.db.repositories.quote_rule_config_repository import QuoteRuleConfigRepository
@@ -34,6 +35,7 @@ from apps.api.services.quote_service import (
 from apps.api.services.search_context_service import QuoteSearchContext, build_quote_search_context
 from packages.ai_assistant.model_client import AIMessage, OpenAICompatibleClient, config_from_record
 from packages.ai_assistant.output_guard import validate_zone_ai_output
+from packages.ai_assistant.quote_draft import merge_quote_draft
 from packages.ai_assistant.prompts import SALES_NOTE_SYSTEM_PROMPT
 from packages.ai_assistant.quote_extractor import (
     AIExtractedQuoteDraft,
@@ -55,7 +57,7 @@ logger = logging.getLogger(__name__)
 class AIAutoQuoteRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    customer_message: str = Field(min_length=1)
+    customer_message: str = Field(min_length=1, max_length=20000)
     ai_config_id: int | None = None
     auto_submit_when_complete: bool = True
     notify_email: bool = False
@@ -81,16 +83,26 @@ def calculate_ai_auto_quote(
     db: Session,
     payload: AIAutoQuoteRequest,
     actor: CurrentActor | None = None,
+    *,
+    notify_manual: bool = True,
+    previous_extraction: dict | None = None,
+    current_message: str | None = None,
 ) -> AIAutoQuoteResponse:
+    require_quote_scope(current_message if current_message is not None else payload.customer_message,
+                        has_draft=previous_extraction is not None)
     config_repository = AIModelConfigRepository(db)
     config_record = _select_ai_config(config_repository, payload.ai_config_id)
     ai_client = OpenAICompatibleClient(
         config_from_record(config_record, api_key=config_repository.decrypt_api_key(config_record))
     )
 
+    previous = AIExtractedQuoteDraft.model_validate(previous_extraction) if previous_extraction is not None else None
+    extraction_message = current_message if previous is not None and current_message is not None else payload.customer_message
     extraction_error: QuoteExtractionError | None = None
     try:
-        extraction = extract_quote_draft(payload.customer_message, ai_client)
+        extraction = extract_quote_draft(extraction_message, ai_client)
+        if previous is not None:
+            extraction = merge_quote_draft(previous, extraction, extraction_message)
     except QuoteExtractionError as exc:
         extraction_error = exc
         extraction = apply_deterministic_extraction(
@@ -98,8 +110,10 @@ def calculate_ai_auto_quote(
                 confidence=0,
                 extraction_notes="AI model extraction failed; deterministic parser fallback was applied.",
             ),
-            payload.customer_message,
+            extraction_message,
         )
+        if previous is not None:
+            extraction = merge_quote_draft(previous, extraction, extraction_message)
         missing_fields = sorted(missing_required_fields(extraction))
         extraction.missing_fields = missing_fields
         if missing_fields:
@@ -146,7 +160,7 @@ def calculate_ai_auto_quote(
     address_validation = _optional_address_validation(db, extraction)
     search_context = _optional_search_context(db, extraction, payload)
     if missing_fields:
-        customer_reply = build_follow_up_question(missing_fields)
+        customer_reply = build_follow_up_question(missing_fields, extraction)
         _record_ai_review_task(
             db,
             quote_id=generate_quote_id(),
@@ -228,6 +242,7 @@ def calculate_ai_auto_quote(
         source="ai_auto_quote",
         manual_email_config_id=payload.email_config_id,
         manual_wecom_bot_id=payload.wecom_bot_id,
+        notify_manual=notify_manual,
     )
 
     if quote_result.manual_review_required:

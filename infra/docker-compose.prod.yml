@@ -28,6 +28,8 @@ services:
       HERMES_CONTEXT_WORKER_ENABLED: ${HERMES_CONTEXT_WORKER_ENABLED:-false}
       EXTRACTION_RECEIPT_SECRET: ${EXTRACTION_RECEIPT_SECRET:-}
       POSTAL_HIT_TEST_OUTPUT_DIR: /app/outputs/postal_hit_tests
+      CLEARDDP_REFERENCE_ENABLED: ${CLEARDDP_REFERENCE_ENABLED:-false}
+      CLEARDDP_STATE_DIR: /app/outputs/clearddp
     volumes:
       - ../outputs:/app/outputs
     depends_on:

@@ -12,8 +12,9 @@ from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-from packages.ai_assistant.service_requirements import SERVICE_FIELDS, explicit_service_requirements
+from packages.ai_assistant.service_requirements import SERVICE_FIELDS, explicit_service_requirements, mentioned_service_fields
 from packages.ai_assistant.model_client import AIMessage, BaseAIClient
+from packages.ai_assistant.quote_scope import MODEL_DATA_BOUNDARY
 from packages.ai_assistant.prompts import (
     ADDRESS_EXTRACTION_SYSTEM_PROMPT,
     CARGO_EXTRACTION_SYSTEM_PROMPT,
@@ -61,6 +62,10 @@ class AIExtractedQuoteDraft(BaseModel):
     cargo_agent: dict[str, Any] | None = None
     address_agent: dict[str, Any] | None = None
     validation_notes: list[str] = Field(default_factory=list)
+    draft_conflicts: list[str] = Field(default_factory=list)
+    pending_cargo_update: dict[str, Any] | None = None
+    shipment_weight_kg: Decimal | None = Field(default=None, ge=0)
+    shipment_cbm: Decimal | None = Field(default=None, ge=0)
 
     @field_validator("packaging_type")
     @classmethod
@@ -218,6 +223,23 @@ PROVINCE_ALIASES = {
 }
 
 
+def split_update_turns(message: str) -> list[str]:
+    """Recognize customer corrections as well as the legacy worker separator."""
+    return [part for part in re.split(
+        r"客户补充：|(?:\n|[；;，])\s*(?=(?:更正|尺寸更正|尺寸改为|修改为|改为)[：:\s\d])",
+        message,
+    ) if part.strip()]
+
+
+def _conversation_service_requirements(message: str) -> dict[str, bool | None]:
+    facts = dict.fromkeys(SERVICE_FIELDS)
+    for turn in split_update_turns(message):
+        patch = explicit_service_requirements(turn)
+        for field in mentioned_service_fields(turn):
+            facts[field] = patch[field]
+    return facts
+
+
 def extract_quote_draft(customer_message: str, client: BaseAIClient) -> AIExtractedQuoteDraft:
     draft = _complete_validated_extraction(
         customer_message,
@@ -257,9 +279,9 @@ def extract_quote_draft_with_agents(
             except FutureTimeout:
                 errors.append(f"{label}_agent_deadline_exceeded")
             except QuoteExtractionError as exc:
-                errors.append(f"{label}_agent_failed:{exc}")
+                errors.append(f"{label}_agent_failed")
     except RuntimeError as exc:
-        errors.append(str(exc))
+        errors.append("extraction_executor_unavailable")
     finally:
         for _, future in futures:
             future.cancel()
@@ -277,9 +299,13 @@ def extract_quote_draft_with_agents(
     fallback = apply_deterministic_extraction(AIExtractedQuoteDraft(confidence=0), customer_message)
     before = draft.model_dump()
     draft = _merge_agent_draft_with_fallback(draft, fallback)
+    if len(split_update_turns(customer_message)) > 1:
+        for field in ("cargo_items", "cbm", "weight_kg", "piece_count", "longest_side_cm",
+                      "draft_conflicts", "pending_cargo_update", "shipment_weight_kg", "shipment_cbm"):
+            setattr(draft, field, getattr(fallback, field))
     draft = _reconcile_with_explicit_facts(draft, fallback, customer_message)
     draft = _validate_cargo_items_and_totals(draft)
-    for field, value in explicit_service_requirements(customer_message).items():
+    for field, value in _conversation_service_requirements(customer_message).items():
         setattr(draft, field, value)
     _clear_extracted_address_noise(draft)
     if provenance is not None:
@@ -323,7 +349,7 @@ def _complete_validated_extraction(
     model_type: type[ExtractionModel],
 ) -> ExtractionModel:
     messages = [
-        AIMessage(role="system", content=system_prompt),
+        AIMessage(role="system", content=system_prompt + MODEL_DATA_BOUNDARY),
         AIMessage(role="user", content=customer_message),
     ]
     response = client.complete(messages)
@@ -331,7 +357,7 @@ def _complete_validated_extraction(
         raise QuoteExtractionError(response.error)
 
     try:
-        return model_type.model_validate(sanitizer(_parse_json_object(response.content)))
+        return model_type.model_validate(_ground_model_data(sanitizer(_parse_json_object(response.content)), customer_message))
     except (QuoteExtractionError, ValidationError) as first_error:
         repair = client.complete(
             [
@@ -350,13 +376,52 @@ def _complete_validated_extraction(
         if repair.error:
             raise QuoteExtractionError(repair.error) from first_error
         try:
-            return model_type.model_validate(sanitizer(_parse_json_object(repair.content)))
+            return model_type.model_validate(_ground_model_data(sanitizer(_parse_json_object(repair.content)), customer_message))
         except (QuoteExtractionError, ValidationError) as repair_error:
             raise QuoteExtractionError("AI extraction failed schema validation after one repair retry.") from repair_error
 
 
 def _compact_validation_error(error: Exception) -> str:
     return " ".join(str(error).split())[:1000]
+
+
+def _ground_model_data(data: dict, source: str) -> dict:
+    """Never expose model prose or model-created workflow state to callers.
+
+    Numeric/enum fields remain schema-checked and reconciled with deterministic
+    facts. Address strings and cargo evidence must be bounded source excerpts.
+    Server validation notes are added only AFTER this boundary.
+    """
+    clean = dict(data)
+    for field, allowed in (("packaging_type", ALLOWED_PACKAGING_TYPES), ("address_type", ALLOWED_ADDRESS_TYPES)):
+        if clean.get(field) not in allowed:
+            clean[field] = None
+    for field in ("extraction_notes", "cargo_agent", "address_agent", "pending_cargo_update",
+                  "shipment_weight_kg", "shipment_cbm"):
+        clean.pop(field, None)
+    for field in ("validation_notes", "draft_conflicts", "missing_fields"):
+        if field in clean:
+            clean[field] = []
+    normalized = " ".join(unicodedata.normalize("NFKC", source).casefold().split())
+    for field, limit in (("address_line", 200), ("city", 80), ("country", 40)):
+        value = clean.get(field)
+        if value is not None and (not isinstance(value, str) or len(value) > limit
+                or " ".join(unicodedata.normalize("NFKC", value).casefold().split()) not in normalized):
+            clean[field] = None
+    province = clean.get("province")
+    if province:
+        clean["province"] = PROVINCE_ALIASES.get(str(province).lower())
+    postal = clean.get("postal_code")
+    if postal:
+        canonical = re.sub(r"[ -]", "", str(postal)).upper()
+        found = {re.sub(r"[ -]", "", m.group()).upper() for m in POSTAL_CODE_PATTERN.finditer(source)}
+        clean["postal_code"] = canonical[:3] + " " + canonical[3:] if canonical in found else None
+    for item in clean.get("cargo_items") or []:
+        if isinstance(item, dict):
+            span = item.get("source_span")
+            if span is not None and (not isinstance(span, str) or len(span) > 1000 or span not in source):
+                item["source_span"] = None
+    return clean
 
 
 def _draft_from_agent_outputs(
@@ -429,6 +494,10 @@ def _merge_agent_draft_with_fallback(
         draft.cargo_items = fallback.cargo_items
     elif not draft.cargo_items and fallback.cargo_items:
         draft.cargo_items = fallback.cargo_items
+
+    if fallback.draft_conflicts:
+        draft.draft_conflicts = list(fallback.draft_conflicts)
+        draft.pending_cargo_update = fallback.pending_cargo_update
 
     if fallback.confidence and draft.confidence < 75:
         draft.confidence = max(draft.confidence, min(85, fallback.confidence))
@@ -593,13 +662,18 @@ def _validate_cargo_items_and_totals(draft: AIExtractedQuoteDraft) -> AIExtracte
     if draft.longest_side_cm is None and longest_side_cm is not None:
         draft.longest_side_cm = _quantize(longest_side_cm, "0.1")
 
-    _split_aggregate_weight_for_single_cargo_item(draft)
+    if draft.shipment_weight_kg is not None:
+        draft.weight_kg = draft.shipment_weight_kg
+    if draft.shipment_cbm is not None:
+        draft.cbm = draft.shipment_cbm
+    if draft.shipment_weight_kg is None:
+        _split_aggregate_weight_for_single_cargo_item(draft)
     return draft
 
 
 def _normalize_cargo_item(item: ExtractedCargoItem) -> ExtractedCargoItem:
     cbm = item.cbm
-    if cbm is None and item.length_cm is not None and item.width_cm is not None and item.height_cm is not None:
+    if item.length_cm is not None and item.width_cm is not None and item.height_cm is not None:
         cbm = _quantize(
             item.length_cm * item.width_cm * item.height_cm / Decimal("1000000"),
             "0.000001",
@@ -633,9 +707,9 @@ def _normalize_cargo_item(item: ExtractedCargoItem) -> ExtractedCargoItem:
 
     return item.model_copy(
         update={
-            "length_cm": _quantize(item.length_cm, "0.1") if item.length_cm is not None else None,
-            "width_cm": _quantize(item.width_cm, "0.1") if item.width_cm is not None else None,
-            "height_cm": _quantize(item.height_cm, "0.1") if item.height_cm is not None else None,
+            "length_cm": item.length_cm,
+            "width_cm": item.width_cm,
+            "height_cm": item.height_cm,
             "weight_kg": normalized_weight,
             "cbm": cbm,
             "total_weight_kg": total_weight_kg,
@@ -686,6 +760,19 @@ def _split_aggregate_weight_for_single_cargo_item(draft: AIExtractedQuoteDraft) 
 
 
 def apply_deterministic_extraction(draft: AIExtractedQuoteDraft, customer_message: str) -> AIExtractedQuoteDraft:
+    # Old persisted conversations used this delimiter. Parse each turn separately
+    # so obsolete dimensions never enter the same cargo sum as their correction.
+    if len(split_update_turns(customer_message)) > 1:
+        from packages.ai_assistant.quote_draft import merge_quote_draft
+        turns = split_update_turns(customer_message)
+        resolved = apply_deterministic_extraction(AIExtractedQuoteDraft(), turns[0])
+        for turn in turns[1:]:
+            patch = apply_deterministic_extraction(AIExtractedQuoteDraft(), turn)
+            resolved = merge_quote_draft(resolved, patch, turn)
+        draft = _merge_agent_draft_with_fallback(draft, resolved)
+        for field in ("cargo_items", "cbm", "weight_kg", "piece_count", "longest_side_cm", "draft_conflicts", "pending_cargo_update", "shipment_weight_kg", "shipment_cbm", *SERVICE_FIELDS):
+            setattr(draft, field, getattr(resolved, field))
+        return draft
     confirmed = _parse_confirmed_fields(customer_message)
     _clear_placeholder_fields(draft)
     parsed = _parse_measurements(customer_message)
@@ -736,8 +823,9 @@ def apply_deterministic_extraction(draft: AIExtractedQuoteDraft, customer_messag
     if parsed["piece_count"] and draft.confidence < 75:
         draft.confidence = max(draft.confidence, 75)
     _clear_placeholder_fields(draft)
-    for field, value in explicit_service_requirements(customer_message).items():
+    for field, value in _conversation_service_requirements(customer_message).items():
         setattr(draft, field, value)
+    _clear_extracted_address_noise(draft)
     return _validate_cargo_items_and_totals(draft)
 
 
@@ -765,7 +853,7 @@ def _clear_suspicious_model_piece_count(
 
 
 def missing_required_fields(draft: AIExtractedQuoteDraft) -> set[str]:
-    missing: set[str] = set()
+    missing: set[str] = set(draft.draft_conflicts)
     for field in REQUIRED_FIELDS | set(SERVICE_FIELDS):
         value = getattr(draft, field)
         if value is None or value == "":
@@ -793,7 +881,7 @@ def _is_placeholder_value(value: str | None) -> bool:
     return normalized in {"", "-", "--", "---", "n/a", "na", "null", "none", "unknown", "待确认", "未知"}
 
 
-def build_follow_up_question(missing_fields: list[str]) -> str:
+def build_follow_up_question(missing_fields: list[str], draft: AIExtractedQuoteDraft | None = None) -> str:
     if not missing_fields:
         return ""
     labels = {
@@ -801,14 +889,40 @@ def build_follow_up_question(missing_fields: list[str]) -> str:
         "requires_pallet_jack": "是否需要手叉车",
         "requires_appointment": "是否需要预约",
         "postal_code": "加拿大邮编",
-        "cbm": "总体积 CBM",
+        "cbm": "总体积 CBM（或每组货物的长×宽×高、单位及件数）",
         "weight_kg": "总重量 kg",
         "piece_count": "件数",
         "packaging_type": "包装类型",
         "address_type": "地址类型（商业/住宅/私人/偏远住宅）",
     }
-    readable = "、".join(labels.get(field, field) for field in missing_fields)
-    return f"这票还缺少 {readable}。麻烦补充后我再帮你确认报价。"
+    questions = []
+    if "cargo_update_target" in missing_fields:
+        groups = "；".join(
+            f"第{i}组：{item.quantity}件，{item.length_cm or '?'}×{item.width_cm or '?'}×{item.height_cm or '?'} cm"
+            for i, item in enumerate(draft.cargo_items if draft else [], 1)
+        )
+        questions.append(f"{groups}。请说明修改第几组，或注明“全部替换”并重发完整货物资料。" if groups else
+                         "请注明“全部替换”并重发完整货物资料，或说明新增货物的完整尺寸、单位、件数和重量。")
+    if "cargo_add_details" in missing_fields:
+        questions.append("新增操作尚未完成，原货物已保留。请补充新增货物的尺寸、单位、件数和重量；也可回复‘取消新增’。")
+    if "cargo_add_base_details" in missing_fields:
+        questions.append("新增货物已暂存，但原货物缺少可分组汇总的明细。请注明‘全部替换’并重发包含原货物及新增货物的完整资料，或回复‘取消新增’。")
+    if "cargo_volume_conflict" in missing_fields:
+        declared = (draft.pending_cargo_update or {}).get("patch", {}).get("cbm") if draft else None
+        questions.append(f"申报体积 {declared} CBM 与已知尺寸计算体积不一致。请更正尺寸，或明确回复‘以总体积为准’；已知最长边仍用于计费判断。")
+    fields = [field for field in missing_fields if field not in {"cargo_update_target", "cargo_add_details", "cargo_add_base_details", "cargo_volume_conflict"}]
+    if fields:
+        readable = "、".join(labels.get(field, field) for field in fields)
+        questions.append(f"请补充 {readable}。")
+    known = []
+    if draft:
+        for field, label, unit in (("postal_code", "邮编", ""), ("piece_count", "件数", "件"),
+                                   ("cbm", "体积", " CBM"), ("weight_kg", "总重", " kg")):
+            value = getattr(draft, field)
+            if value is not None and field not in missing_fields:
+                known.append(f"{label} {value}{unit}")
+    prefix = "已记录：" + "、".join(known) + "。\n" if known else ""
+    return prefix + "\n".join(questions) + "补充后我会更新这票资料。"
 
 
 def _parse_json_object(content: str) -> dict[str, Any]:
@@ -830,6 +944,9 @@ def _parse_json_object(content: str) -> dict[str, Any]:
 
 def _sanitize_extraction_data(data: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(data)
+    # These are server-managed conversation decisions, never model assertions.
+    for field in ("shipment_weight_kg", "shipment_cbm", "pending_cargo_update", "draft_conflicts"):
+        normalized.pop(field, None)
     normalized["address_line"] = _strip_extracted_address_noise(data.get("address_line"))
     normalized["city"] = _strip_extracted_address_noise(data.get("city"))
     for field in ["requires_liftgate", "requires_pallet_jack", "requires_appointment"]:
@@ -902,6 +1019,8 @@ def _strip_extracted_address_noise(value: Any) -> str | None:
     for raw_line in str(value).splitlines():
         line = raw_line.strip()
         lowered = line.lower()
+        if re.fullmatch(r"(?:邮编|postal\s*code)\s*(?:改为|更正为|是|为|[:：=])?", line, re.I):
+            continue
         if (
             lowered.startswith("---")
             or "前台已确认字段" in lowered
@@ -918,8 +1037,12 @@ def _strip_extracted_address_noise(value: Any) -> str | None:
         ):
             continue
         cleaned = _CONFIRMED_FIELD_TOKEN_RE.sub(" ", line).strip(" ,，;；|/-")
-        if cleaned:
-            kept.append(cleaned)
+        for fragment in re.split(r"[,，;；]", cleaned):
+            fragment = fragment.strip()
+            if re.fullmatch(r"(?:邮编|postal\s*code)\s*(?:改为|更正为|是|为|[:：=])?|第\s*(?:[1-9]\d*|[一二三四五六七八九十])\s*组|(?:不需要|无需|需要|不要|不|无|要)?(?:尾板|手叉车|预约)(?:服务)?", fragment, re.I):
+                continue
+            if fragment:
+                kept.append(fragment)
     if not kept:
         return None
     return ", ".join(dict.fromkeys(kept))
@@ -1114,9 +1237,9 @@ def _parse_measurements(customer_message: str) -> dict[str, Any]:
             cargo_items.append(
                 ExtractedCargoItem(
                     quantity=int(quantity),
-                    length_cm=_quantize(length_cm, "0.1"),
-                    width_cm=_quantize(width_cm, "0.1"),
-                    height_cm=_quantize(height_cm, "0.1"),
+                    length_cm=length_cm,
+                    width_cm=width_cm,
+                    height_cm=height_cm,
                     weight_kg=_quantize(weight_kg, "0.01") if weight_kg > 0 else None,
                     cbm=_quantize(item_cbm, "0.000001"),
                     total_weight_kg=(
@@ -1731,6 +1854,13 @@ def _to_cbm(value: str, unit: str | None) -> Decimal:
 
 def _find_explicit_cbm(customer_message: str) -> Decimal | None:
     normalized = _normalize_text(customer_message)
+    unit_matches = list(
+        re.finditer(
+            rf"(?P<value>{NUMBER_TOKEN_PATTERN})\s*(?P<unit>{VOLUME_UNIT_PATTERN})(?=$|[^A-Za-z])",
+            normalized,
+            re.IGNORECASE,
+        )
+    )
     labeled_matches = list(
         re.finditer(
             rf"(?<![A-Za-z0-9.])(?P<label>{VOLUME_LABEL_PATTERN})\s*[:：=]?\s*"
@@ -1740,18 +1870,20 @@ def _find_explicit_cbm(customer_message: str) -> Decimal | None:
             re.IGNORECASE,
         )
     )
-    if labeled_matches:
-        match = labeled_matches[-1]
+    for match in reversed(labeled_matches):
+        # In "20 CBM 5150 KG", CBM already belongs to 20; it is not a
+        # field label for the next number, even across a line break.
+        if any(unit.start("unit") <= match.start("label") < unit.end("unit") for unit in unit_matches):
+            continue
+        if not match.group("unit") and re.match(
+            rf"\s*(?:{WEIGHT_UNIT_PATTERN}|{PIECE_UNIT_PATTERN})(?=$|[^A-Za-z])",
+            normalized[match.end("value"):],
+            re.IGNORECASE,
+        ):
+            continue
         return _to_cbm(match.group("value"), match.group("unit") or match.group("label"))
 
-    matches = list(
-        re.finditer(
-            rf"(?P<value>{NUMBER_TOKEN_PATTERN})\s*(?P<unit>{VOLUME_UNIT_PATTERN})(?=$|[^A-Za-z])",
-            normalized,
-            re.IGNORECASE,
-        )
-    )
-    return _to_cbm(matches[-1].group("value"), matches[-1].group("unit")) if matches else None
+    return _to_cbm(unit_matches[-1].group("value"), unit_matches[-1].group("unit")) if unit_matches else None
 
 
 def _find_authoritative_weight(customer_message: str) -> Decimal | None:

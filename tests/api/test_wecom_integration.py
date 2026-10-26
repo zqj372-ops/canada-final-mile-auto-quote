@@ -424,7 +424,7 @@ def test_ai_auto_quote_success_notify_sends_ai_quote(monkeypatch: pytest.MonkeyP
 
     response = client.post(
         "/quotes/ai-auto-quote",
-        json={"customer_message": "quote this", "notify_wecom": True},
+        json={"customer_message": "2箱100kg", "notify_wecom": True},
     )
 
     assert response.status_code == 200
@@ -443,7 +443,7 @@ def test_ai_auto_quote_manual_required_auto_sends_manual_required(monkeypatch: p
         lambda _self, content: sent.append(content) or WeComSendResult(success=True, latency_ms=1, status_code=200),
     )
 
-    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
+    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "2箱100kg"})
 
     assert response.status_code == 200
     assert response.json()["manual_review_required"] is True

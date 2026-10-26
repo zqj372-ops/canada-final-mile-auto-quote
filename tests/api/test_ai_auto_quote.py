@@ -166,7 +166,7 @@ def test_ai_sales_note_keeps_concise_customer_message() -> None:
 def test_ai_auto_quote_without_default_config_returns_clear_error() -> None:
     client = build_client(include_default_config=False)
 
-    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
+    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "2箱100kg"})
 
     assert response.status_code == 400
     assert response.json()["detail"] == "No default AI model config is available."
@@ -188,7 +188,7 @@ def test_ai_extraction_missing_fields_does_not_call_zone_engine(monkeypatch: pyt
     monkeypatch.setattr("apps.api.services.ai_quote_service.extract_quote_draft", fake_extract)
     monkeypatch.setattr("apps.api.services.ai_quote_service.ZoneQuoteEngine.quote", fail_quote)
 
-    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
+    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "2箱100kg"})
 
     assert response.status_code == 200
     body = response.json()
@@ -209,7 +209,7 @@ def test_ai_missing_fields_creates_manual_task(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr("apps.api.services.ai_quote_service.extract_quote_draft", fake_extract)
 
-    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
+    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "2箱100kg"})
     tasks = client.get("/quotes/manual-tasks").json()
 
     assert response.status_code == 200
@@ -292,7 +292,7 @@ def test_ai_extraction_complete_calls_zone_quote_engine(monkeypatch: pytest.Monk
         lambda _client, quote_result: quote_result.sales_note,
     )
 
-    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
+    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "2箱100kg"})
 
     assert response.status_code == 200
     body = response.json()
@@ -342,7 +342,7 @@ def test_ai_auto_quote_blocks_cross_origin_zone_matrix(monkeypatch: pytest.Monke
         ),
     )
 
-    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
+    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "2箱100kg"})
 
     body = response.json()
     assert body["quote_result"]["source_type"] == "manual_required"
@@ -401,7 +401,7 @@ def test_ai_optional_missing_fields_still_calls_zone_quote_engine(monkeypatch: p
         lambda _client, quote_result: quote_result.sales_note,
     )
 
-    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
+    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "2箱100kg"})
 
     assert response.status_code == 200
     body = response.json()
@@ -434,7 +434,7 @@ def test_ai_aggregate_manual_required_still_returns_billing_pallet_estimate(monk
         ),
     )
 
-    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
+    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "2箱100kg"})
 
     assert response.status_code == 200
     body = response.json()
@@ -450,7 +450,7 @@ def test_ai_auto_quote_manual_required_creates_manual_task(monkeypatch: pytest.M
     client = build_client(include_zone_rule=False)
     monkeypatch.setattr("apps.api.services.ai_quote_service.extract_quote_draft", lambda _message, _client: complete_extraction())
 
-    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "quote this"})
+    response = client.post("/quotes/ai-auto-quote", json={"customer_message": "2箱100kg"})
     tasks = client.get("/quotes/manual-tasks").json()
 
     assert response.status_code == 200

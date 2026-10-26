@@ -1,0 +1,745 @@
+[
+  {
+    "zh": "上海",
+    "en": "Shanghai",
+    "country": "CN",
+    "aliases": [
+      "上海港"
+    ]
+  },
+  {
+    "zh": "上海洋山",
+    "en": "Shanghai Yangshan",
+    "country": "CN",
+    "aliases": [
+      "洋山"
+    ]
+  },
+  {
+    "zh": "宁波",
+    "en": "Ningbo",
+    "country": "CN",
+    "aliases": [
+      "宁波舟山"
+    ]
+  },
+  {
+    "zh": "青岛",
+    "en": "Qingdao",
+    "country": "CN",
+    "aliases": [
+      "青岛港"
+    ]
+  },
+  {
+    "zh": "深圳",
+    "en": "Shenzhen",
+    "country": "CN",
+    "aliases": [
+      "深圳港"
+    ]
+  },
+  {
+    "zh": "盐田",
+    "en": "Yantian",
+    "country": "CN",
+    "aliases": [
+      "盐田港"
+    ]
+  },
+  {
+    "zh": "蛇口",
+    "en": "Shekou",
+    "country": "CN",
+    "aliases": [
+      "蛇口港"
+    ]
+  },
+  {
+    "zh": "厦门",
+    "en": "Xiamen",
+    "country": "CN",
+    "aliases": [
+      "厦门港"
+    ]
+  },
+  {
+    "zh": "天津",
+    "en": "Tianjin",
+    "country": "CN",
+    "aliases": [
+      "天津港"
+    ]
+  },
+  {
+    "zh": "天津新港",
+    "en": "Xingang",
+    "country": "CN",
+    "aliases": [
+      "新港"
+    ]
+  },
+  {
+    "zh": "大连",
+    "en": "Dalian",
+    "country": "CN",
+    "aliases": [
+      "大连港"
+    ]
+  },
+  {
+    "zh": "连云港",
+    "en": "Lianyungang",
+    "country": "CN",
+    "aliases": []
+  },
+  {
+    "zh": "福州",
+    "en": "Fuzhou",
+    "country": "CN",
+    "aliases": []
+  },
+  {
+    "zh": "广州",
+    "en": "Guangzhou",
+    "country": "CN",
+    "aliases": [
+      "广州港"
+    ]
+  },
+  {
+    "zh": "南沙",
+    "en": "Nansha",
+    "country": "CN",
+    "aliases": [
+      "南沙港"
+    ]
+  },
+  {
+    "zh": "黄埔",
+    "en": "Huangpu",
+    "country": "CN",
+    "aliases": []
+  },
+  {
+    "zh": "湛江",
+    "en": "Zhanjiang",
+    "country": "CN",
+    "aliases": []
+  },
+  {
+    "zh": "香港",
+    "en": "Hong Kong",
+    "country": "HK",
+    "aliases": [
+      "香港港"
+    ]
+  },
+  {
+    "zh": "温哥华",
+    "en": "Vancouver",
+    "country": "CA",
+    "aliases": [
+      "温哥华港"
+    ]
+  },
+  {
+    "zh": "温哥华",
+    "en": "Vancouver",
+    "country": "US",
+    "aliases": [
+      "华盛顿州温哥华"
+    ]
+  },
+  {
+    "zh": "鲁珀特王子港",
+    "en": "Prince Rupert",
+    "country": "CA",
+    "aliases": [
+      "鲁珀特港",
+      "鲁伯特港",
+      "鲁伯特王子港"
+    ]
+  },
+  {
+    "zh": "蒙特利尔",
+    "en": "Montreal",
+    "country": "CA",
+    "aliases": [
+      "蒙特利尔港",
+      "满地可"
+    ]
+  },
+  {
+    "zh": "哈利法克斯",
+    "en": "Halifax",
+    "country": "CA",
+    "aliases": [
+      "哈利法克斯港"
+    ]
+  },
+  {
+    "zh": "多伦多",
+    "en": "Toronto",
+    "country": "CA",
+    "aliases": [
+      "多伦多港"
+    ]
+  },
+  {
+    "zh": "卡尔加里",
+    "en": "Calgary",
+    "country": "CA",
+    "aliases": []
+  },
+  {
+    "zh": "埃德蒙顿",
+    "en": "Edmonton",
+    "country": "CA",
+    "aliases": []
+  },
+  {
+    "zh": "温尼伯",
+    "en": "Winnipeg",
+    "country": "CA",
+    "aliases": []
+  },
+  {
+    "zh": "渥太华",
+    "en": "Ottawa",
+    "country": "CA",
+    "aliases": []
+  },
+  {
+    "zh": "魁北克",
+    "en": "Quebec",
+    "country": "CA",
+    "aliases": []
+  },
+  {
+    "zh": "圣约翰",
+    "en": "Saint John",
+    "country": "CA",
+    "aliases": [
+      "新不伦瑞克圣约翰"
+    ]
+  },
+  {
+    "zh": "圣约翰斯",
+    "en": "St Johns",
+    "country": "CA",
+    "aliases": [
+      "纽芬兰圣约翰斯"
+    ]
+  },
+  {
+    "zh": "洛杉矶",
+    "en": "Los Angeles",
+    "country": "US",
+    "aliases": [
+      "洛杉矶港"
+    ]
+  },
+  {
+    "zh": "长滩",
+    "en": "Long Beach",
+    "country": "US",
+    "aliases": [
+      "长滩港"
+    ]
+  },
+  {
+    "zh": "奥克兰",
+    "en": "Oakland",
+    "country": "US",
+    "aliases": [
+      "美国奥克兰"
+    ]
+  },
+  {
+    "zh": "纽约",
+    "en": "New York",
+    "country": "US",
+    "aliases": [
+      "纽约港"
+    ]
+  },
+  {
+    "zh": "纽瓦克",
+    "en": "Newark",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "西雅图",
+    "en": "Seattle",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "塔科马",
+    "en": "Tacoma",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "萨凡纳",
+    "en": "Savannah",
+    "country": "US",
+    "aliases": [
+      "沙凡那"
+    ]
+  },
+  {
+    "zh": "休斯顿",
+    "en": "Houston",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "诺福克",
+    "en": "Norfolk",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "查尔斯顿",
+    "en": "Charleston",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "迈阿密",
+    "en": "Miami",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "巴尔的摩",
+    "en": "Baltimore",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "波士顿",
+    "en": "Boston",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "费城",
+    "en": "Philadelphia",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "新奥尔良",
+    "en": "New Orleans",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "芝加哥",
+    "en": "Chicago",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "达拉斯",
+    "en": "Dallas",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "底特律",
+    "en": "Detroit",
+    "country": "US",
+    "aliases": []
+  },
+  {
+    "zh": "釜山",
+    "en": "Busan",
+    "country": "KR",
+    "aliases": [
+      "釜山港",
+      "Pusan"
+    ]
+  },
+  {
+    "zh": "仁川",
+    "en": "Incheon",
+    "country": "KR",
+    "aliases": []
+  },
+  {
+    "zh": "新加坡",
+    "en": "Singapore",
+    "country": "SG",
+    "aliases": []
+  },
+  {
+    "zh": "巴生港",
+    "en": "Port Klang",
+    "country": "MY",
+    "aliases": [
+      "巴生",
+      "Port Kelang"
+    ]
+  },
+  {
+    "zh": "丹戎帕拉帕斯",
+    "en": "Tanjung Pelepas",
+    "country": "MY",
+    "aliases": []
+  },
+  {
+    "zh": "胡志明",
+    "en": "Ho Chi Minh",
+    "country": "VN",
+    "aliases": [
+      "胡志明市"
+    ]
+  },
+  {
+    "zh": "海防",
+    "en": "Haiphong",
+    "country": "VN",
+    "aliases": [
+      "Hai Phong"
+    ]
+  },
+  {
+    "zh": "林查班",
+    "en": "Laem Chabang",
+    "country": "TH",
+    "aliases": []
+  },
+  {
+    "zh": "曼谷",
+    "en": "Bangkok",
+    "country": "TH",
+    "aliases": []
+  },
+  {
+    "zh": "雅加达",
+    "en": "Jakarta",
+    "country": "ID",
+    "aliases": []
+  },
+  {
+    "zh": "泗水",
+    "en": "Surabaya",
+    "country": "ID",
+    "aliases": []
+  },
+  {
+    "zh": "马尼拉",
+    "en": "Manila",
+    "country": "PH",
+    "aliases": []
+  },
+  {
+    "zh": "东京",
+    "en": "Tokyo",
+    "country": "JP",
+    "aliases": []
+  },
+  {
+    "zh": "横滨",
+    "en": "Yokohama",
+    "country": "JP",
+    "aliases": []
+  },
+  {
+    "zh": "名古屋",
+    "en": "Nagoya",
+    "country": "JP",
+    "aliases": []
+  },
+  {
+    "zh": "大阪",
+    "en": "Osaka",
+    "country": "JP",
+    "aliases": []
+  },
+  {
+    "zh": "神户",
+    "en": "Kobe",
+    "country": "JP",
+    "aliases": []
+  },
+  {
+    "zh": "高雄",
+    "en": "Kaohsiung",
+    "country": "TW",
+    "aliases": []
+  },
+  {
+    "zh": "基隆",
+    "en": "Keelung",
+    "country": "TW",
+    "aliases": []
+  },
+  {
+    "zh": "台中",
+    "en": "Taichung",
+    "country": "TW",
+    "aliases": []
+  },
+  {
+    "zh": "鹿特丹",
+    "en": "Rotterdam",
+    "country": "NL",
+    "aliases": []
+  },
+  {
+    "zh": "汉堡",
+    "en": "Hamburg",
+    "country": "DE",
+    "aliases": []
+  },
+  {
+    "zh": "不来梅哈芬",
+    "en": "Bremerhaven",
+    "country": "DE",
+    "aliases": []
+  },
+  {
+    "zh": "安特卫普",
+    "en": "Antwerp",
+    "country": "BE",
+    "aliases": []
+  },
+  {
+    "zh": "费利克斯托",
+    "en": "Felixstowe",
+    "country": "GB",
+    "aliases": []
+  },
+  {
+    "zh": "南安普顿",
+    "en": "Southampton",
+    "country": "GB",
+    "aliases": []
+  },
+  {
+    "zh": "勒阿弗尔",
+    "en": "Le Havre",
+    "country": "FR",
+    "aliases": []
+  },
+  {
+    "zh": "巴塞罗那",
+    "en": "Barcelona",
+    "country": "ES",
+    "aliases": []
+  },
+  {
+    "zh": "瓦伦西亚",
+    "en": "Valencia",
+    "country": "ES",
+    "aliases": []
+  },
+  {
+    "zh": "热那亚",
+    "en": "Genoa",
+    "country": "IT",
+    "aliases": []
+  },
+  {
+    "zh": "比雷埃夫斯",
+    "en": "Piraeus",
+    "country": "GR",
+    "aliases": []
+  },
+  {
+    "zh": "伊斯坦布尔",
+    "en": "Istanbul",
+    "country": "TR",
+    "aliases": []
+  },
+  {
+    "zh": "格但斯克",
+    "en": "Gdansk",
+    "country": "PL",
+    "aliases": []
+  },
+  {
+    "zh": "杰贝阿里",
+    "en": "Jebel Ali",
+    "country": "AE",
+    "aliases": []
+  },
+  {
+    "zh": "迪拜",
+    "en": "Dubai",
+    "country": "AE",
+    "aliases": []
+  },
+  {
+    "zh": "达曼",
+    "en": "Dammam",
+    "country": "SA",
+    "aliases": []
+  },
+  {
+    "zh": "吉达",
+    "en": "Jeddah",
+    "country": "SA",
+    "aliases": []
+  },
+  {
+    "zh": "苏哈尔",
+    "en": "Sohar",
+    "country": "OM",
+    "aliases": []
+  },
+  {
+    "zh": "塞拉莱",
+    "en": "Salalah",
+    "country": "OM",
+    "aliases": []
+  },
+  {
+    "zh": "卡拉奇",
+    "en": "Karachi",
+    "country": "PK",
+    "aliases": []
+  },
+  {
+    "zh": "科伦坡",
+    "en": "Colombo",
+    "country": "LK",
+    "aliases": []
+  },
+  {
+    "zh": "金奈",
+    "en": "Chennai",
+    "country": "IN",
+    "aliases": []
+  },
+  {
+    "zh": "蒙德拉",
+    "en": "Mundra",
+    "country": "IN",
+    "aliases": []
+  },
+  {
+    "zh": "那瓦舍瓦",
+    "en": "Nhava Sheva",
+    "country": "IN",
+    "aliases": [
+      "那瓦西瓦"
+    ]
+  },
+  {
+    "zh": "悉尼",
+    "en": "Sydney",
+    "country": "AU",
+    "aliases": []
+  },
+  {
+    "zh": "墨尔本",
+    "en": "Melbourne",
+    "country": "AU",
+    "aliases": []
+  },
+  {
+    "zh": "布里斯班",
+    "en": "Brisbane",
+    "country": "AU",
+    "aliases": []
+  },
+  {
+    "zh": "弗里曼特尔",
+    "en": "Fremantle",
+    "country": "AU",
+    "aliases": []
+  },
+  {
+    "zh": "阿德莱德",
+    "en": "Adelaide",
+    "country": "AU",
+    "aliases": []
+  },
+  {
+    "zh": "奥克兰",
+    "en": "Auckland",
+    "country": "NZ",
+    "aliases": [
+      "新西兰奥克兰"
+    ]
+  },
+  {
+    "zh": "陶朗加",
+    "en": "Tauranga",
+    "country": "NZ",
+    "aliases": []
+  },
+  {
+    "zh": "桑托斯",
+    "en": "Santos",
+    "country": "BR",
+    "aliases": []
+  },
+  {
+    "zh": "布宜诺斯艾利斯",
+    "en": "Buenos Aires",
+    "country": "AR",
+    "aliases": []
+  },
+  {
+    "zh": "卡亚俄",
+    "en": "Callao",
+    "country": "PE",
+    "aliases": []
+  },
+  {
+    "zh": "曼萨尼约",
+    "en": "Manzanillo",
+    "country": "MX",
+    "aliases": []
+  },
+  {
+    "zh": "韦拉克鲁斯",
+    "en": "Veracruz",
+    "country": "MX",
+    "aliases": []
+  },
+  {
+    "zh": "卡塔赫纳",
+    "en": "Cartagena",
+    "country": "CO",
+    "aliases": []
+  },
+  {
+    "zh": "德班",
+    "en": "Durban",
+    "country": "ZA",
+    "aliases": []
+  },
+  {
+    "zh": "开普敦",
+    "en": "Cape Town",
+    "country": "ZA",
+    "aliases": []
+  },
+  {
+    "zh": "蒙巴萨",
+    "en": "Mombasa",
+    "country": "KE",
+    "aliases": []
+  },
+  {
+    "zh": "达累斯萨拉姆",
+    "en": "Dar es Salaam",
+    "country": "TZ",
+    "aliases": []
+  },
+  {
+    "zh": "拉各斯",
+    "en": "Lagos",
+    "country": "NG",
+    "aliases": []
+  }
+]

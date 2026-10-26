@@ -1,4 +1,8 @@
+FROM node:22-bookworm-slim AS schedule-node
 FROM python:3.11-slim
+
+COPY --from=schedule-node /usr/local/bin/node /usr/local/bin/node
+RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 ca-certificates && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.auth import CurrentActor
+from apps.api.services.quote_admission import require_quote_scope
 from apps.api.db.models import ManualQuoteTask, SalesQuoteRecord
 from apps.api.db.repositories.ai_model_config_repository import AIModelConfigRepository
 from apps.api.db.repositories.manual_quote_task_repository import ManualQuoteTaskRepository
@@ -31,6 +32,7 @@ from apps.api.services.extraction_feedback_service import (
 )
 from packages.ai_assistant.extraction_runtime import ObservedAIClient, submit_extraction
 from packages.ai_assistant.prompts import FIELD_EXTRACTION_SYSTEM_PROMPT, CARGO_EXTRACTION_SYSTEM_PROMPT, ADDRESS_EXTRACTION_SYSTEM_PROMPT
+from packages.ai_assistant.quote_scope import MODEL_DATA_BOUNDARY
 from packages.ai_assistant.fast_extractor import try_extract_locally
 from packages.ai_assistant.model_client import OpenAICompatibleClient, config_from_record
 from packages.ai_assistant.service_requirements import SERVICE_FIELDS, mentioned_service_fields
@@ -146,6 +148,7 @@ def draft_errors(extraction: AIExtractedQuoteDraft, address: LocalAddressValidat
 
 
 def extract_for_workbench(db: Session, payload: AIExtractRequest, actor: CurrentActor | None = None) -> AIExtractResponse:
+    require_quote_scope(payload.customer_message)
     started = perf_counter()
     sources: dict[str, str] = {}
     deadline = started + payload.budget_seconds
@@ -190,9 +193,9 @@ def extract_for_workbench(db: Session, payload: AIExtractRequest, actor: Current
     search = (build_quote_search_context(db, extraction, search_config_id=payload.search_config_id)
               if payload.enable_search_context else None)
     duration_ms = round((perf_counter() - started) * 1000)
-    metadata = {"parser_version": "2026-10-13.1", "strategy": "local" if mode == "local" else payload.strategy,
+    metadata = {"parser_version": "2026-10-14.2", "strategy": "local" if mode == "local" else payload.strategy,
                 "schema_hash": digest(AIExtractedQuoteDraft.model_json_schema()),
-                "prompt_hash": digest([FIELD_EXTRACTION_SYSTEM_PROMPT, CARGO_EXTRACTION_SYSTEM_PROMPT, ADDRESS_EXTRACTION_SYSTEM_PROMPT]),
+                "prompt_hash": digest([prompt + MODEL_DATA_BOUNDARY for prompt in (FIELD_EXTRACTION_SYSTEM_PROMPT, CARGO_EXTRACTION_SYSTEM_PROMPT, ADDRESS_EXTRACTION_SYSTEM_PROMPT)]),
                 "model": model_metadata, "duration_ms": duration_ms, "budget_seconds": payload.budget_seconds,
                 "outcome": mode, **(observer.snapshot() if observer else {"model_calls": 0, "repair_calls": 0, "calls": []})}
     receipt = issue_extraction_receipt(payload.customer_message, extraction.model_dump(mode="json"), metadata, actor)

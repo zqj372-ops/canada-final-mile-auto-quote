@@ -172,6 +172,11 @@ jobs:
             --exclude='._*' \
             ./ "production:${DEPLOY_PATH}/"
 
+      - name: Preserve independently released public downloads
+        run: |
+          set -euo pipefail
+          ssh production "set -e; cd '${DEPLOY_PATH}'; python3 scripts/preserve_public_downloads.py --container canada_quote_oracle-web-1 --destination apps/web/public --manifest deploy/public-downloads.json"
+
       - name: Rebuild production services
         run: |
           set -euo pipefail
@@ -187,6 +192,7 @@ jobs:
         run: |
           set -euo pipefail
           ssh production "set -e; install -d '${DEPLOY_PATH}/.deploy-state'; printf '%s\n' '${DEPLOY_SHA}' > '${DEPLOY_PATH}/.deploy-state/current-sha'; printf '%s\n' '${DEPLOY_REF}' > '${DEPLOY_PATH}/.deploy-state/current-ref'; date -u '+%Y-%m-%dT%H:%M:%SZ' > '${DEPLOY_PATH}/.deploy-state/deployed-at'"
+          ssh production "printf '%s\n' 'No source overlays; public downloads pinned in deploy/public-downloads.json' > '${DEPLOY_PATH}/.deploy-state/current-patches'"
           {
             echo "## Production deployment succeeded"
             echo
