@@ -135,7 +135,8 @@ jobs:
             ServerAliveCountMax 3
 
           Host production
-            HostName 150.230.208.231
+            HostName 161.33.189.108
+            HostKeyAlias 150.230.208.231
             User opc
             IdentityFile ~/.ssh/deploy_target_key
             IdentitiesOnly yes
