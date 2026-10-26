@@ -82,6 +82,26 @@ git push origin main
 
 ## 报价工作台发布注意事项
 
+### 2026-10-26 现网版本归并
+
+已将现网 API 镜像中的船期、关税、个人报价授权、增量询价及报价边界处理源码归并回仓库，
+并恢复 `0026_quote_skill_grants`。这是现有线上功能的版本对齐，不是新增个人机器人、
+Freightcom 功能或 `0027` 迁移。独立企微 worker 和 M2M 服务不在本次重建范围内。
+
+城市编辑弹窗的滚动修复来自生产独立发布 `20261014T0806Z-city-scroll`；恢复源码后，
+本地构建的 21 个 Web 文件与现网逐字节一致。API Dockerfile 显式安装现网所需 Node 22，
+不再依赖镜像外手工添加的运行时。`CLEARDDP_REFERENCE_ENABLED` 从 `.env.prod` 读取；
+迁移现有生产实例时须保留其当前值，不得因默认关闭而意外停用已启用的只读查询。
+
+Web 构建前运行 `scripts/preserve_public_downloads.py`，从现有 Web 容器保存 6 个公开的
+Skill 安装/运行文件到构建 public 目录，并按 `deploy/public-downloads.json` 验证 SHA-256。
+不复制用户凭据、输出数据或未知文件；摘要不符时停止发布。新环境首次部署必须先放置经
+审查、与该清单一致的公开安装文件，不能以空文件绕过检查。
+
+CI 使用临时 PostgreSQL 运行迁移及并发测试。发布后核对数据库仍在单一 head、源码 SHA、
+Node 可用性、公开下载文件摘要、正式域名健康与未授权 API 的 401。此归并无需迁移降级，
+也不应新增 `0027`。备份及旧镜像必须保留至线上验证完成。
+
 生产库同时由独立的 `freightclaw-quote-api` 服务使用。该服务已经应用
 `0024_add_m2m_quote_records`；此迁移从其运行镜像核对恢复，内容 SHA-256 为
 `868770aadc59d886b5293d97542fd3a26573e11c414ff489bb2a3bf10d90ac8a`。

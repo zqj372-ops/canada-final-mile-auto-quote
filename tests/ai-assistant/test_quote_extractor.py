@@ -161,7 +161,7 @@ def test_extract_quote_draft_cleans_model_leaked_confirmed_block() -> None:
                 "piece_count": 2,
                 "weight_kg": Decimal("408.2"),
                 "cbm": Decimal("3.776"),
-                "dimensions": (Decimal("121.9"), Decimal("101.6"), Decimal("152.4")),
+                "dimensions": (Decimal("121.92"), Decimal("101.6"), Decimal("152.4")),
             },
         ),
         (
@@ -820,7 +820,7 @@ def test_extract_quote_draft_accepts_json_wrapped_by_think_text() -> None:
     }
     """
 
-    draft = extract_quote_draft("ignored", FakeAIClient(content))
+    draft = extract_quote_draft("205 Main Street, New Norway, AB T0B 3L0", FakeAIClient(content))
 
     assert draft.postal_code == "T0B 3L0"
     assert draft.city == "New Norway"
@@ -853,7 +853,7 @@ def test_extract_quote_draft_sanitizes_loose_model_json() -> None:
     }
     """
 
-    draft = extract_quote_draft("ignored", FakeAIClient(content))
+    draft = extract_quote_draft("205 Main Street, New Norway, AB T0B 3L0", FakeAIClient(content))
 
     assert draft.confidence == 85
     assert draft.requires_liftgate is None
@@ -889,7 +889,7 @@ def test_extract_quote_draft_ignores_non_blocking_model_missing_fields() -> None
     }
     """
 
-    draft = extract_quote_draft("ignored", FakeAIClient(content))
+    draft = extract_quote_draft("1055 Flagship Way, unit A, Pickering ON L1X 0P2", FakeAIClient(content))
 
     assert draft.missing_fields == ["requires_appointment", "requires_liftgate", "requires_pallet_jack"]
 

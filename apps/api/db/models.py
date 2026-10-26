@@ -554,3 +554,21 @@ class APIKey(Base):
         onupdate=func.now(),
     )
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class QuoteSkillGrant(Base):
+    """One device authorization; neither codes nor credentials are stored in plaintext."""
+
+    __tablename__ = "quote_skill_grants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    code_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    credential_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    credential_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    bound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -1,0 +1,634 @@
+{
+  "version": "2026-10-14.1",
+  "sources": {
+    "local_delivery": {
+      "title": "本系统尾程派送与计价规则",
+      "kind": "internal",
+      "url": null,
+      "reference": "packages/quote_engine/zone_engine.py; zone_pricing.py; apps/api/services/wecom_quote_worker.py",
+      "verified_on": "2026-10-14"
+    },
+    "fedex_glossary": {
+      "title": "FedEx：货运术语",
+      "url": "https://www.fedex.com/en-us/shipping/glossary.html",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "fedex_packing": {
+      "title": "FedEx：货运包装指南",
+      "url": "https://www.fedex.com/en-us/shipping/freight/resources/packing-guide.html",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "fedex_bol": {
+      "title": "FedEx Freight：提单与运输表单",
+      "url": "https://www.fedexfreight.com/en-us/rate-ship/shipping/forms",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "cbsa_release": {
+      "title": "CBSA：放行、申报与缴税",
+      "url": "https://www.cbsa-asfc.gc.ca/import/guide-6-eng.html",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "cbsa_tax": {
+      "title": "CBSA：归类、税费与完税价格",
+      "url": "https://www.cbsa-asfc.gc.ca/import/guide-3-eng.html",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "cbsa_origin": {
+      "title": "CBSA：原产地规则",
+      "url": "https://cbsa-asfc.gc.ca/import/origin-origine-eng.html",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "cbsa_value": {
+      "title": "CBSA：海关估价指南",
+      "url": "https://www.cbsa-asfc.gc.ca/import/valuation-valeur/customs-val-douane-eng.html",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "cbsa_sima": {
+      "title": "CBSA：SIMA现行措施",
+      "url": "https://www.cbsa-asfc.gc.ca/sima-lmsi/mif-mev/menu-eng.html",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "cbp_import": {
+      "title": "CBP：新进口商与出口商提示",
+      "url": "https://www.help.cbp.gov/s/article/Article-1894?language=en_US",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "cbp_invoice": {
+      "title": "CBP：商业发票要求",
+      "url": "https://www.help.cbp.gov/s/article/Article-1175?language=en_US",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "icc_ddp": {
+      "title": "ICC：Incoterms 2020与各国监管限制",
+      "url": "https://academy.iccwbo.org/wp-content/uploads/2025/01/2025-icc-national-regulatory-barriers-to-the-incoterms-2020-rules-v2.pdf",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "cfia_wood": {
+      "title": "CFIA：D-98-08木质包装进口要求",
+      "url": "https://inspection.canada.ca/en/plant-health/invasive-pests-and-plants/directives/forest-products/98-08",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "maersk_dnd": {
+      "title": "Maersk：滞箱与滞期条款",
+      "url": "https://terms.maersk.com/dnd",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "maersk_lcl": {
+      "title": "Maersk：LCL服务说明",
+      "url": "https://www.maersk.com/~/media_sc9/maersk/solutions/transportation-services/lcl/maersk_digital_lcl_brochure_v3.pdf",
+      "kind": "public",
+      "verified_on": "2026-10-14"
+    },
+    "cbsa_broker": {
+      "title": "CBSA：报关行与进口商责任",
+      "kind": "public",
+      "url": "https://www.cbsa-asfc.gc.ca/services/cb-cd/",
+      "verified_on": "2026-10-14"
+    },
+    "cbp_broker": {
+      "title": "CBP：是否需要报关行",
+      "kind": "public",
+      "url": "https://www.help.cbp.gov/s/article/Article-1169?language=en_US",
+      "verified_on": "2026-10-14"
+    }
+  },
+  "entries": [
+    {
+      "id": "liftgate",
+      "title": "尾板、手叉车与卸货",
+      "keywords": [
+        "尾板",
+        "升降板",
+        "liftgate",
+        "tailgate",
+        "手叉车",
+        "pallet jack",
+        "卸货平台",
+        "卸货月台",
+        "装卸平台",
+        "没有叉车",
+        "卸货设备"
+      ],
+      "answer": "先看收货现场有没有卸货平台或叉车。尾板负责把货从车厢降到地面；手叉车主要用于移动托盘货，两者不能互相替代。",
+      "details": "尾板不等于搬进屋、上楼或拆托服务。本系统默认到门口路边，其他操作需另行确认；实际是否能卸货还要看货物尺寸、重量和现场条件。",
+      "next_steps": "请确认收货点有无月台/叉车、货物是否打托、是否需要尾板或手叉车，以及道路能否让卡车进入。",
+      "example": "例如住宅收货、现场没有叉车时，可先说明“私人地址，需要尾板”；如果还需要地面移动托盘，再说明手叉车需求。",
+      "source_ids": [
+        "fedex_glossary",
+        "local_delivery"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 365,
+      "policy": false,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "residential",
+      "title": "私人地址附加费",
+      "keywords": [
+        "私人地址",
+        "私人住址",
+        "住宅地址",
+        "住宅附加",
+        "私人附加",
+        "residential",
+        "住宅收货",
+        "家里收货"
+      ],
+      "answer": "私人地址附加费和尾板费是两项服务费用。报价如果已经列明“已含私人地址附加费”，就不要再加一遍。",
+      "details": "本系统按实际地址类型和费用明细计价；是否带尾板、手叉车或预约要分别确认。具体金额以本次报价中的附加费明细为准。",
+      "next_steps": "先确认这是住宅还是商业收货点，再说明有无卸货平台/叉车及是否需要预约；若报价看起来重复收费，可提供报价编码供报价人员核对。",
+      "example": "例如“私人地址、不需要尾板”仍可能有私人地址附加费；“商业地址、需要尾板”则应分别按地址与尾板条件计价。",
+      "source_ids": [
+        "local_delivery"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 365,
+      "policy": false,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "appointment",
+      "title": "预约与派送时效",
+      "keywords": [
+        "预约",
+        "预约费",
+        "appointment",
+        "几点送",
+        "派送时间",
+        "到货时间",
+        "ETA",
+        "ETD",
+        "多久能到"
+      ],
+      "answer": "预约是协调收货时间，并不自动等于承诺某个时刻送达。预计到达时间也要与实际放行、提货和派送安排分开确认。",
+      "details": "本机器人能记录预约要求，但目前不能查询实时船期、运单位置或替承运商承诺送达时间。具体安排需拿本票资料向承运商核实。",
+      "next_steps": "请准备运单/提单号、收货联系人、电话、可收货时段和卸货条件，再由操作人员确认预约。",
+      "example": "例如“工作日只能上午收货”是需要提前确认的条件，不能只写“需要预约”就视为承运商已接受。",
+      "source_ids": [
+        "local_delivery"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 365,
+      "policy": false,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "billing",
+      "title": "件毛体与计费托数",
+      "keywords": [
+        "计费托数",
+        "折托",
+        "CBM",
+        "立方怎么算",
+        "体积怎么算",
+        "密度",
+        "体积重",
+        "最长边",
+        "超长",
+        "件毛体"
+      ],
+      "answer": "件数、实际托盘数和计费托数不一定相同。本系统会结合体积、重量、包装和最长边核对计费依据，不能只按一个数字估价。",
+      "details": "体积应按包装后的外尺寸计算，单位先统一；同规格多件再乘件数。多组货物要分别列尺寸、数量和重量，避免把每件重量当成整票总重。",
+      "next_steps": "可以直接发每组件数、长宽高及单位、每件或总重量、包装方式和是否可堆叠；已知实际托数也一并说明。",
+      "example": "例如“2箱，每箱100×100×100cm，每箱50kg”应区分为2件、总体积2CBM、总重100kg；最终计费托数仍由报价规则计算。",
+      "source_ids": [
+        "local_delivery"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 365,
+      "policy": false,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "shipping_modes",
+      "title": "整柜、拼箱与零担",
+      "keywords": [
+        "FCL",
+        "LCL",
+        "LTL",
+        "FTL",
+        "整柜",
+        "拼箱",
+        "零担",
+        "整车"
+      ],
+      "answer": "整柜FCL是使用一整柜运输，拼箱LCL是与其他货物共用柜内空间；陆运里的整车FTL和零担LTL则是在车辆层面区分。",
+      "details": "拼箱适合不需要整柜空间的货量，但选择时还要比较目的港费用、装卸环节、时效和货物特性；不能只看海运费或固定的立方数门槛。",
+      "next_steps": "先提供起运地、目的地、件毛体、包装、是否可堆叠和期望到货时间，再按同一费用范围比较方案。",
+      "example": "例如海运走LCL，到港后接LTL派送，两者描述的是不同运输环节，并不冲突。",
+      "source_ids": [
+        "maersk_lcl",
+        "fedex_glossary"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 365,
+      "policy": false,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "invoice",
+      "title": "商业发票与装箱资料",
+      "keywords": [
+        "商业发票",
+        "commercial invoice",
+        "装箱单",
+        "packing list",
+        "清关资料",
+        "报关资料",
+        "清关文件",
+        "报关文件",
+        "单证"
+      ],
+      "answer": "商业发票主要说明交易与货值，装箱资料主要说明货物如何装箱、件数和重量。两份资料应能对应到同一批实际货物。",
+      "details": "美国进口发票要按CBP要求填写具体商品描述及相关交易信息；加拿大放行也需要商品描述、货值、原产地和归类等资料，受管制商品可能还需额外许可。",
+      "next_steps": "先核对买卖双方、品名/材质/用途、数量、单价总价与币种、原产地、包装件数及毛净重，再让报关人员按目的国补齐要求。",
+      "example": "例如只写“配件”往往不足以判断归类，应写清用于什么设备、具体名称和主要材质。",
+      "source_ids": [
+        "cbp_invoice",
+        "cbsa_release"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 90,
+      "policy": true,
+      "verified_on": "2026-10-14",
+      "patterns": [
+        "(?:报关|清关).{0,12}(?:资料|单证|文件)",
+        "(?:资料|单证|文件).{0,12}(?:报关|清关)"
+      ]
+    },
+    {
+      "id": "bol",
+      "title": "提单与派送单证",
+      "keywords": [
+        "提单",
+        "BOL",
+        "bill of lading",
+        "运单",
+        "签收单",
+        "POD",
+        "签收证明"
+      ],
+      "answer": "运输单证用于明确本票货物、收发货信息和服务要求；签收证明用于核对交付记录。拿到单号不等于已经完成派送。",
+      "details": "陆运提单应准确列明货物和服务要求，例如是否需要尾板；系统报价、承运商接单和实际签收是不同状态。",
+      "next_steps": "请核对发货人/收货人、件数、重量、包装、提送地址与服务要求。发生差异时保留原始单证和现场记录，交由操作人员核对。",
+      "example": "例如报价含尾板，也要确保交给承运商的本票服务要求中写明尾板，不能只停留在聊天记录里。",
+      "source_ids": [
+        "fedex_bol",
+        "local_delivery"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 365,
+      "policy": false,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "incoterms",
+      "title": "DDP与DAP",
+      "keywords": [
+        "DDP",
+        "DAP",
+        "完税后交货",
+        "目的地交货",
+        "贸易术语",
+        "Incoterms",
+        "包税到门",
+        "双清包税"
+      ],
+      "answer": "DDP与DAP的关键区别之一是进口清关和进口税费由谁承担：DDP通常由卖方负责，DAP通常由买方负责。DDP表示税费责任的约定，并不表示货物免税。",
+      "details": "贸易术语约定双方责任，不会替代目的国的进口资格和申报要求。“包税到门”的商业说法也应落实到合同的费用范围和指定交货地点。",
+      "next_steps": "先确认采用的术语版本、指定地点、进口商主体、报关授权和费用范围；卖方无法履行当地进口手续时，应先核对是否适合使用DDP。",
+      "example": "例如卖方承诺DDP，仍要核实谁能依法办理进口清关，不能只凭报价单写了DDP就视为资格已经解决。",
+      "source_ids": [
+        "icc_ddp"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 90,
+      "policy": true,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "hs",
+      "title": "HS与各国海关编码",
+      "keywords": [
+        "HS",
+        "HTS",
+        "海关编码",
+        "税则号",
+        "归类",
+        "商品编码",
+        "关税编码"
+      ],
+      "answer": "HS前六位是国际通用的商品分类基础，各国后续编码用于本国税则和统计，完整编码不能直接跨国照搬。",
+      "details": "归类要结合商品本身的材质、用途、结构和相关税则规则；仅凭商品俗称或别人的相似产品编码，不能确认本票应使用的编码。",
+      "next_steps": "请准备商品名称、主要材质、用途、结构/规格、图片或说明书；已有编码时注明它属于中国、加拿大还是美国。需要本票候选查询可发送“查关税”。",
+      "example": "例如中国出口申报使用的完整编码，不能直接当作加拿大或美国进口申报编码使用。",
+      "source_ids": [
+        "cbsa_tax",
+        "cbp_import"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 90,
+      "policy": true,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "origin",
+      "title": "原产地与发货地",
+      "keywords": [
+        "原产地",
+        "原产国",
+        "发货地",
+        "转口",
+        "转运",
+        "产地证明",
+        "原产地证",
+        "country of origin",
+        "COO",
+        "产地",
+        "制造地",
+        "生产地"
+      ],
+      "answer": "发货地说明货物从哪里运出，原产地要依据商品生产情况和适用的原产地规则判断，两者可能不同。",
+      "details": "加拿大适用何种关税待遇需要核对原产地规则；申请协定优惠通常还需要相应原产地证明。单纯转运或更换发票，不能据此认定取得了新的原产地。",
+      "next_steps": "先确认制造商、生产地点、生产工序和原材料情况，再由报关人员按适用规则核对；不要把“从某国发货”直接填成原产国。",
+      "example": "例如中国生产的商品经第三国仓库转运，不能只凭第三国发货记录就认定该国是原产地。",
+      "source_ids": [
+        "cbsa_origin"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 90,
+      "policy": true,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "carm",
+      "title": "CARM与RPP",
+      "keywords": [
+        "CARM",
+        "RPP",
+        "先放后税",
+        "放行后缴税",
+        "税金担保",
+        "保证金",
+        "进口账号",
+        "加拿大进口账户"
+      ],
+      "answer": "CARM用于加拿大商业进口的税费管理；RPP是其中先放行后缴税的安排。注册CARM并不自动意味着已取得RPP资格。",
+      "details": "按CBSA说明，使用RPP需要在CARM中加入该项目并提供要求的财务担保，随后按期限申报和付款。不能把注册、担保、放行和结清税费当成同一件事。",
+      "next_steps": "请先核对进口商账户、RPP加入状态和担保状态，再与报关人员确认本票采用的放行及付款方式。不要在聊天中发送登录密码或验证码。",
+      "example": "例如账户能登录，但RPP尚未满足条件时，不能据此认定货物一定可以先放行后缴税。",
+      "source_ids": [
+        "cbsa_release"
+      ],
+      "jurisdiction": "CA",
+      "review_after_days": 90,
+      "policy": true,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "ca_import",
+      "title": "加拿大进口准备与放行",
+      "keywords": [
+        "加拿大进口",
+        "加拿大清关",
+        "加拿大报关",
+        "CBSA",
+        "清关流程",
+        "海关放行",
+        "查验",
+        "扣关",
+        "查货",
+        "放行"
+      ],
+      "answer": "清关通常需要先核实商品是否准入，再准备归类、原产地、货值和单证，完成相应放行、申报与缴税环节。",
+      "details": "海关放行、码头可提货和末端可派送应分别确认。出现查验或扣留时，本机器人不能查到本票实际状态，也不能保证放行时间。",
+      "next_steps": "可先整理海关/报关行通知、运单或提单号、商品资料及缺失文件，由报关人员核对具体阻塞原因，并让操作人员另行确认提货安排。",
+      "example": "例如收到“已放行”通知后，仍应确认是否有其他提货条件未完成，再安排车辆。",
+      "source_ids": [
+        "cbsa_release",
+        "local_delivery"
+      ],
+      "jurisdiction": "CA",
+      "review_after_days": 90,
+      "policy": true,
+      "verified_on": "2026-10-14",
+      "patterns": [
+        "加拿大.{0,25}(?:清关|报关|进口)",
+        "(?:清关|报关|进口).{0,25}加拿大"
+      ]
+    },
+    {
+      "id": "us_import",
+      "title": "美国进口资料与核查",
+      "keywords": [
+        "美国进口",
+        "美国清关",
+        "美国报关",
+        "CBP"
+      ],
+      "answer": "美国进口的商品要求需要按具体产品核查。向报关人员咨询时，商品描述越完整，越能判断归类及相关进口条件。",
+      "details": "CBP建议准备原产地和制造商、商品组成、用途及交易价格信息。对归类有疑问，可考虑向CBP申请书面裁定；本机器人不能代替裁定或确认某票必定放行。",
+      "next_steps": "先确定目的国，再准备制造商、原产地、材质、用途、货值和交易单证，让报关人员核对适用归类及进口要求。",
+      "example": "例如“金属配件”需要进一步说明材质、用途和使用设备，才能进行有依据的归类核查。",
+      "source_ids": [
+        "cbp_import"
+      ],
+      "jurisdiction": "US",
+      "review_after_days": 90,
+      "policy": true,
+      "verified_on": "2026-10-14",
+      "patterns": [
+        "美国.{0,25}(?:清关|报关|进口)",
+        "(?:清关|报关|进口).{0,25}美国"
+      ]
+    },
+    {
+      "id": "valuation",
+      "title": "申报货值与完税价格",
+      "keywords": [
+        "申报货值",
+        "完税价格",
+        "低报",
+        "少报",
+        "货值",
+        "免费样品",
+        "赠品",
+        "成交价格"
+      ],
+      "answer": "加拿大进口的完税价格应按适用估价规则确定，不能随意填写一个较低金额；免费赠送也不等于没有需要申报的价值。",
+      "details": "海关估价与商业交易信息相关，是否需要调整要结合实际交易。缺少销售价格或交易条件特殊时，应按适用估价方法核对。",
+      "next_steps": "请保留真实合同、发票、付款及费用资料；若已申报的信息有误，应让报关人员核对更正要求。",
+      "example": "例如免费样品仍需核定申报价值，不能因为发票上写“免费”就直接申报为零。",
+      "source_ids": [
+        "cbsa_value"
+      ],
+      "jurisdiction": "CA",
+      "review_after_days": 90,
+      "policy": true,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "sima",
+      "title": "反倾销与反补贴核查",
+      "keywords": [
+        "SIMA",
+        "反倾销",
+        "反补贴",
+        "ADD",
+        "CVD",
+        "贸易救济"
+      ],
+      "answer": "加拿大SIMA措施是否适用，要核对具体商品范围及有效裁定，不能只看到普通税则税率就认定全部税费已经确定。",
+      "details": "CBSA的现行措施清单提供核查入口；如清单说明与裁定/命令不一致，以裁定或命令为准。本知识库不保存实时措施清单或替本票判定适用税率。",
+      "next_steps": "准备商品详细规格、原产地、生产商/出口商和进口时间，再由报关人员核对对应措施及适用范围。美国ADD/CVD需另查美国适用措施。",
+      "example": "例如普通关税显示较低，也不能据此排除反倾销或反补贴税费。",
+      "source_ids": [
+        "cbsa_sima"
+      ],
+      "jurisdiction": "CA",
+      "review_after_days": 90,
+      "policy": true,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "wood",
+      "title": "木质包装与ISPM15",
+      "keywords": [
+        "木质包装",
+        "木托",
+        "木箱熏蒸",
+        "熏蒸",
+        "ISPM",
+        "IPPC",
+        "实木",
+        "胶合板",
+        "免熏蒸"
+      ],
+      "answer": "进口加拿大前，要区分实木包装和完全由加工木材制成的包装。符合豁免条件的加工木包装，与实木托盘/垫木的要求不同。",
+      "details": "CFIA对受监管木包装规定处理及标识要求；即使箱板是胶合板，也要检查是否含实木底座、垫块或支撑。是否符合要求需按实际结构和来源核对。",
+      "next_steps": "请提供包装各部位材质、包装来源和清晰标识照片，让发货人及报关人员核查D-98-08要求。",
+      "example": "例如“胶合板箱＋实木托盘”不能只看箱板材质，就认定整套包装都可豁免。",
+      "source_ids": [
+        "cfia_wood"
+      ],
+      "jurisdiction": "CA",
+      "review_after_days": 90,
+      "policy": true,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "demurrage",
+      "title": "滞箱、滞期与免费期",
+      "keywords": [
+        "滞箱",
+        "滞期",
+        "堆存",
+        "免箱期",
+        "免堆期",
+        "免费期",
+        "Demurrage",
+        "Detention",
+        "free time"
+      ],
+      "answer": "按Maersk条款，Demurrage涉及箱子在码头/堆场内超过约定免费期，Detention涉及箱子在场外超过免费期；有些安排会合并计算。",
+      "details": "堆存费还可能单独收取。具体起止点、免费天数和费率要看本票合同、当地条款与实际进出场记录，不能直接套用其他航线的标准。",
+      "next_steps": "先核对船公司、目的港、柜号、免费期确认、卸船/提柜/还空时间及账单，再找出争议发生在哪个时间段。",
+      "example": "例如柜子已提走但尚未还空，仍可能继续产生场外用箱费用；“离开码头”不等于所有费用都停止。",
+      "source_ids": [
+        "maersk_dnd"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 365,
+      "policy": false,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "packing",
+      "title": "打托、堆叠与包装",
+      "keywords": [
+        "打托",
+        "托盘包装",
+        "包装要求",
+        "堆叠",
+        "不可堆叠",
+        "缠膜",
+        "打包",
+        "加固"
+      ],
+      "answer": "货运包装要让货物在装卸和运输中保持稳定，并便于叉车或手叉车操作；能放在托盘上，不代表已经适合运输。",
+      "details": "询价时应注明包装后的外尺寸、总重及是否可堆叠。特殊形状、易损或不可堆叠货物，应让承运商确认承接条件。",
+      "next_steps": "请检查货物与托盘的固定、底座可操作性，并准备外包装照片和尺寸重量；不要把未包装尺寸直接当作出货尺寸。",
+      "example": "例如多个纸箱打成一托后，应提供整托外尺寸和含包装总重，同时保留箱数信息。",
+      "source_ids": [
+        "fedex_packing"
+      ],
+      "jurisdiction": "general",
+      "review_after_days": 365,
+      "policy": false,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "importer_role",
+      "title": "进口商与报关行责任",
+      "keywords": [
+        "进口商",
+        "报关行",
+        "IOR",
+        "customs broker",
+        "importer"
+      ],
+      "answer": "报关行可以协助办理手续，但委托报关并不等于进口商无需核对资料和税费。加拿大和美国官方指引都要求进口商对相关申报与合规承担责任。",
+      "details": "应明确谁是进口商、报关行获得了哪些授权、谁提供归类/原产地/货值依据，以及谁核对缴税和后续更正。责任不能只凭一句“全部交给报关行”就视为解决。",
+      "next_steps": "先确认目的国和进口商主体，再核对报关授权、商品资料、交易单证、税费账单及记录交接方式。",
+      "example": "例如已经委托报关行，也应核对申报的品名、原产地和货值是否符合实际，而不是只看货物是否放行。",
+      "source_ids": [
+        "cbsa_broker",
+        "cbp_broker"
+      ],
+      "jurisdiction": "general",
+      "policy": true,
+      "review_after_days": 90,
+      "verified_on": "2026-10-14"
+    },
+    {
+      "id": "duty_tax",
+      "title": "关税、GST与附加税",
+      "keywords": [
+        "GST",
+        "关税和税",
+        "税费构成",
+        "关税怎么算",
+        "GST怎么算",
+        "附加税",
+        "Surtax",
+        "免税是不是",
+        "关税为零"
+      ],
+      "answer": "加拿大进口的关税与GST是不同税项。普通关税为零，也不能据此认定所有进口税费都为零。",
+      "details": "适用税费取决于商品归类、原产地、完税价格和具体措施；还需核对是否存在附加税或贸易救济措施。知识库不替本票确定税率或金额。",
+      "next_steps": "准备商品材质用途、原产地、货值和进口日期后，再进行具体查询；本票候选参考可发送“查关税”。",
+      "example": "例如某商品普通关税为零，仍需单独核对GST及其他可能适用的税费，不能直接向客户承诺“完全免税”。",
+      "source_ids": [
+        "cbsa_tax"
+      ],
+      "jurisdiction": "CA",
+      "policy": true,
+      "review_after_days": 90,
+      "verified_on": "2026-10-14"
+    }
+  ]
+}

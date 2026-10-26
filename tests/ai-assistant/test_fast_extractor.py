@@ -29,7 +29,7 @@ def test_complete_labelled_shipment_preserves_total_not_per_piece_weight():
 def test_imperial_dimensions_and_weight_are_converted():
     result = try_extract_locally(SAMPLE.replace("120x100x150 cm", "48x40x60 in").replace("800 kg", "1000 lb"))
     assert result is not None
-    assert result.cargo_items[0].length_cm == Decimal("121.9")
+    assert result.cargo_items[0].length_cm == Decimal("121.92")
     assert result.weight_kg == Decimal("453.6")
 
 

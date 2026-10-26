@@ -229,6 +229,7 @@ def record_zone_quote_side_effects(
     source: str = "zone_quote",
     manual_email_config_id: int | None = None,
     manual_wecom_bot_id: int | None = None,
+    notify_manual: bool = True,
 ) -> None:
     try:
         QuoteAuditRepository(db).create_for_zone_quote(payload, result)
@@ -253,6 +254,9 @@ def record_zone_quote_side_effects(
     except Exception:
         logger.exception("Failed to create manual quote task.", extra={"quote_id": result.quote_id})
         db.rollback()
+
+    if not notify_manual:
+        return
 
     try_notification(
         "manual_required",

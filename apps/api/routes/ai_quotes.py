@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from apps.api.auth import AI_QUOTE_WRITE_ROLES, QUOTE_WRITE_ROLES, CurrentActor, require_roles
 from apps.api.db.session import get_db
+from apps.api.services.quote_admission import require_quote_scope, reserve_api_quote
 from apps.api.services.ai_quote_service import AIAutoQuoteRequest, AIAutoQuoteResponse, calculate_ai_auto_quote
 from apps.api.services.quote_workbench_service import (
     AIExtractRequest, AIExtractResponse, ConfirmedCalculateRequest, ConfirmedCalculateResponse,
@@ -19,6 +20,8 @@ def extract_quote_route(
     db: Session = Depends(get_db),
     actor: CurrentActor = Depends(require_roles(*AI_QUOTE_WRITE_ROLES)),
 ) -> AIExtractResponse:
+    require_quote_scope(payload.customer_message)
+    reserve_api_quote(actor)
     return extract_for_workbench(db, payload, actor)
 
 
@@ -40,4 +43,6 @@ def calculate_ai_auto_quote_route(
     db: Session = Depends(get_db),
     actor: CurrentActor = Depends(require_roles(*AI_QUOTE_WRITE_ROLES)),
 ) -> AIAutoQuoteResponse:
+    require_quote_scope(payload.customer_message)
+    reserve_api_quote(actor)
     return calculate_ai_auto_quote(db, payload, actor=actor)
